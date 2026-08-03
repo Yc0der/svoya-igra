@@ -35,6 +35,9 @@ Thumbs.db
 # Local git worktrees — scratch checkouts, not repo content
 .claude/worktrees/
 
+# Subagent-driven-development scratch workspace — ledgers, briefs, review packages
+.superpowers/
+
 # Local game state — SQLite (planned, see docs/ideas.md "Память и обучение генератора")
 *.db
 *.db-journal
