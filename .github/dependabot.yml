@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Keeps the SHA pins in .github/workflows/ from rotting. Without this, pinning to a
+  # commit SHA means staying on that exact version forever — including past any security
+  # patch. Dependabot opens a PR when a newer release exists and rewrites the pin to the
+  # new SHA, so updates go through review instead of happening silently.
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    commit-message:
+      prefix: 'ci'
+
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    commit-message:
+      prefix: 'chore'
+    open-pull-requests-limit: 5
