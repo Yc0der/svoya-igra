@@ -1,7 +1,7 @@
 import { networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Room } from './room.js';
+import { Room, type RoomState } from './room.js';
 import { readSnapshot, writeSnapshot } from './snapshot.js';
 import { listLanCandidates, pickLanAddress } from './network.js';
 import { createServer } from './server.js';
@@ -14,7 +14,22 @@ const CLIENT_DIST_PATH = join(
 );
 
 async function main(): Promise<void> {
-  const initial = await readSnapshot(SNAPSHOT_PATH);
+  // Битый снапшот не должен мешать серверу подняться. `readSnapshot`
+  // пробрасывает всё, кроме ENOENT, а `deserializeSnapshot` бросает голый
+  // TypeError на невалидном JSON или отсутствующем `participants` — а получить
+  // обрезанный файл проще простого: `writeSnapshot` пишет одним `writeFile`
+  // без temp+rename, и Ctrl+C посреди записи (ровно то, что делает живая
+  // проверка перезапуска в задаче 10) оставляет половину файла. Пустая комната
+  // — куда лучший исход, чем сервер, который вообще отказывается стартовать.
+  let initial: RoomState | null = null;
+  try {
+    initial = await readSnapshot(SNAPSHOT_PATH);
+  } catch (err) {
+    console.error(
+      `Снапшот ${SNAPSHOT_PATH} повреждён, стартуем с пустой комнатой:`,
+      err,
+    );
+  }
   const room = new Room(initial ?? undefined);
 
   // Записи снапшота сериализуются в очередь, чтобы более медленная запись
@@ -60,9 +75,26 @@ async function main(): Promise<void> {
     lanUrl,
   });
 
+  // Без этого обработчика занятый порт (например, процесс, оставшийся от
+  // предыдущего прогона живой проверки) выпадает необработанной ошибкой
+  // сокета и печатает сырой стек вместо внятного объяснения.
+  httpServer.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `Порт ${PORT} уже занят — вероятно, сервер уже запущен. Остановите его и попробуйте снова.`,
+      );
+    } else {
+      console.error('Ошибка HTTP-сервера:', err);
+    }
+    process.exitCode = 1;
+  });
+
   httpServer.listen(PORT, () => {
     console.log(`Своя игра слушает на ${lanUrl}`);
   });
 }
 
-void main();
+main().catch((err: unknown) => {
+  console.error('Не удалось запустить сервер:', err);
+  process.exitCode = 1;
+});

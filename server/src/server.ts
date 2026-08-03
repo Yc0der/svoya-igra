@@ -86,6 +86,16 @@ export function createServer(options: CreateServerOptions): GameServer {
 
   room.onChange(broadcastState);
 
+  // `ws`, будучи прицепленным к готовому httpServer, переподписывает его
+  // 'error' на себя. Без слушателя здесь EventEmitter на 'error' бросает
+  // исключение — то есть даже обработанная ошибка httpServer (тот же
+  // EADDRINUSE) всё равно ронял бы процесс сырым стеком, уже через wss.
+  // Осмысленное сообщение печатает владелец порта (index.ts), тут только
+  // не даём событию превратиться в исключение и оставляем след для диагностики.
+  wss.on('error', (err) => {
+    console.error('Ошибка WebSocket-сервера:', err);
+  });
+
   wss.on('connection', (ws) => {
     send(ws, { type: 'hello', lanUrl });
     send(ws, {

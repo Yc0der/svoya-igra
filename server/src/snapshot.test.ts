@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -63,5 +63,20 @@ describe('writeSnapshot / readSnapshot', () => {
         { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
       ],
     });
+  });
+
+  // Документирует ровно тот отказ, ради которого в `index.ts` появился
+  // try/catch вокруг загрузки снапшота: битый файл — не ENOENT, поэтому
+  // `readSnapshot` пробрасывает исключение, а не возвращает null. Получить
+  // такой файл легко: `writeSnapshot` пишет одним `writeFile`, и Ctrl+C
+  // посреди записи обрезает JSON на середине.
+  it('throws on a truncated file instead of silently returning null', async () => {
+    await writeFile(path, '{"participants":[{"id":"1","na', 'utf8');
+    await expect(readSnapshot(path)).rejects.toThrow();
+  });
+
+  it('throws on well-formed JSON that is not a room state', async () => {
+    await writeFile(path, '{"not-participants":[]}', 'utf8');
+    await expect(readSnapshot(path)).rejects.toThrow(TypeError);
   });
 });

@@ -53,6 +53,7 @@ function waitForOpen(ws: WebSocket): Promise<void> {
 describe('createServer', () => {
   let server: GameServer;
   let url: string;
+  let port: number;
   let dir: string;
 
   beforeEach(async () => {
@@ -64,7 +65,7 @@ describe('createServer', () => {
       lanUrl: 'http://192.168.1.1:8080/',
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
-    const { port } = server.httpServer.address() as AddressInfo;
+    ({ port } = server.httpServer.address() as AddressInfo);
     url = `ws://127.0.0.1:${port}/ws`;
   });
 
@@ -200,6 +201,33 @@ describe('createServer', () => {
 
     board.close();
     reconnected.close();
+  });
+
+  it('reports a busy port through httpServer error instead of throwing from ws', async () => {
+    // `ws` переподписывает 'error' httpServer'а на сам WebSocketServer. Пока у
+    // wss нет собственного слушателя, EventEmitter превращает это событие в
+    // выброшенное исключение — то есть даже с обработчиком на httpServer
+    // занятый порт ронял бы процесс сырым стеком. Здесь занимаем порт, уже
+    // слушаемый сервером из beforeEach: без слушателя на wss этот тест падает
+    // не ассертом, а необработанным исключением.
+    const other = createServer({
+      room: new Room(),
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+
+    const err = await new Promise<NodeJS.ErrnoException>((resolve) => {
+      other.httpServer.once('error', resolve);
+      other.httpServer.listen(port);
+    });
+
+    expect(err.code).toBe('EADDRINUSE');
+    // Этот httpServer так и не перешёл в состояние listening, поэтому его
+    // `close()` отвечает ERR_SERVER_NOT_RUNNING — закрывать тут нечего,
+    // а wss закрывается тем же вызовом до отказа.
+    await other.close().catch((closeErr: NodeJS.ErrnoException) => {
+      if (closeErr.code !== 'ERR_SERVER_NOT_RUNNING') throw closeErr;
+    });
   });
 
   it('ignores a malformed join/reconnect message instead of crashing the connection', async () => {
