@@ -22,6 +22,19 @@ export interface GameServer {
   close(): Promise<void>;
 }
 
+/**
+ * Как часто сервер пингует клиентов. Умерший сокет обнаруживается на втором
+ * тике, то есть в худшем случае через два интервала.
+ *
+ * Зачем вообще: когда на телефоне падает Wi-Fi, радио просто перестаёт
+ * отвечать — ни FIN, ни RST до сервера не доходит. Клиент видит `close`
+ * мгновенно и начинает переподключаться, а сервер без пингов узнал бы о смерти
+ * сокета только по таймауту TCP-ретрансмиссии, а это минуты. Всё это время
+ * участник висел бы на табло как подключённый, и обещанное дизайном
+ * «(отключён)» не появлялось бы вовсе.
+ */
+export const HEARTBEAT_INTERVAL_MS = 5000;
+
 function send(ws: WebSocket, message: ServerMessage): void {
   ws.send(JSON.stringify(message));
 }
@@ -96,7 +109,14 @@ export function createServer(options: CreateServerOptions): GameServer {
     console.error('Ошибка WebSocket-сервера:', err);
   });
 
+  // Сокеты, ответившие на последний пинг (или только что подключившиеся).
+  // WeakSet, чтобы закрытые сокеты не удерживались в памяти.
+  const alive = new WeakSet<WebSocket>();
+
   wss.on('connection', (ws) => {
+    alive.add(ws);
+    ws.on('pong', () => alive.add(ws));
+
     send(ws, { type: 'hello', lanUrl });
     send(ws, {
       type: 'state',
@@ -158,10 +178,27 @@ export function createServer(options: CreateServerOptions): GameServer {
     });
   });
 
+  // Стандартный для `ws` хартбит: на каждом тике добиваем тех, кто не ответил
+  // на пинг предыдущего тика, остальных помечаем «не ответившими» и пингуем.
+  // `terminate()` рвёт сокет и вызывает штатный обработчик 'close' — то есть
+  // участник помечается отключённым тем же путём (через защиту `owners`),
+  // что и при обычном закрытии вкладки.
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (!alive.has(ws)) {
+        ws.terminate();
+        continue;
+      }
+      alive.delete(ws);
+      ws.ping();
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
   return {
     httpServer,
     close: () =>
       new Promise((resolve, reject) => {
+        clearInterval(heartbeat);
         wss.close();
         httpServer.close((err) => (err ? reject(err) : resolve()));
       }),

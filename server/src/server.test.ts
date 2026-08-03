@@ -2,10 +2,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { Room } from './room.js';
-import { createServer, type GameServer } from './server.js';
+import {
+  createServer,
+  HEARTBEAT_INTERVAL_MS,
+  type GameServer,
+} from './server.js';
 import type { ServerMessage } from './protocol.js';
 
 // Attaches a persistent 'message' listener synchronously at socket creation
@@ -368,5 +372,79 @@ describe('createServer', () => {
     board.close();
     reconnected.close();
     bystander.close();
+  });
+});
+
+// Отдельный describe, а не тест внутри предыдущего: интервал хартбита ставится
+// внутри `createServer`, поэтому фейковые таймеры должны быть включены ДО его
+// вызова — иначе интервал получится настоящий и тест ждал бы пять секунд по
+// стенным часам. Держать фейковые таймеры включёнными для всего файла не
+// хочется: остальные тесты полагаются на настоящий сетевой ввод-вывод.
+describe('createServer heartbeat', () => {
+  let server: GameServer;
+  let url: string;
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-heartbeat-'));
+    // shouldAdvanceTime: фейковые часы продолжают идти сами, поэтому реальный
+    // ввод-вывод `ws` не голодает, но интервал хартбита при этом можно
+    // прокручивать вручную.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    server = createServer({
+      room: new Room(),
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    url = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('terminates a client that stopped answering pings and marks them disconnected', async () => {
+    const board = new WebSocket(url);
+    const nextBoardMessage = collectMessages(board);
+    await waitForOpen(board);
+    await nextBoardMessage(); // hello
+    await nextBoardMessage(); // state
+
+    const player = new WebSocket(url);
+    const nextPlayerMessage = collectMessages(player);
+    await waitForOpen(player);
+    await nextPlayerMessage(); // hello
+    await nextPlayerMessage(); // state
+    player.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
+    const joined = (await nextPlayerMessage()) as { participantId: string };
+    await nextBoardMessage(); // state с подключённым участником
+
+    // Телефон, у которого умерло Wi-Fi-радио: TCP-соединение формально живо
+    // (ни FIN, ни RST сервер не получил), но клиент ничего не читает и, значит,
+    // не отвечает на ping автоматическим pong'ом. `pause()` даёт ровно это —
+    // в отличие от `_socket.destroy()`, который прислал бы серверу RST и
+    // сработал бы обычный обработчик 'close', минуя хартбит.
+    player.pause();
+
+    // Первый тик: сокет ещё числится живым — его помечают и пингуют.
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+    // Второй тик: pong'а не было, сокет добивают terminate().
+    await vi.advanceTimersByTimeAsync(HEARTBEAT_INTERVAL_MS);
+
+    const afterHeartbeat = await nextBoardMessage();
+    expect(afterHeartbeat).toEqual({
+      type: 'state',
+      participants: [
+        { id: joined.participantId, name: 'Ваня', connected: false },
+      ],
+    });
+
+    board.close();
+    player.resume();
+    player.terminate();
   });
 });
