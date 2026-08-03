@@ -261,4 +261,84 @@ describe('createServer', () => {
 
     other.close();
   });
+
+  it("doesn't disconnect a participant when a stale socket closes after they've reconnected elsewhere", async () => {
+    const player = new WebSocket(url);
+    const nextPlayerMessage = collectMessages(player);
+    await waitForOpen(player);
+    await nextPlayerMessage();
+    await nextPlayerMessage();
+    player.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
+    const joined = (await nextPlayerMessage()) as {
+      token: string;
+      participantId: string;
+    };
+
+    const board = new WebSocket(url);
+    const nextBoardMessage = collectMessages(board);
+    await waitForOpen(board);
+    await nextBoardMessage();
+    await nextBoardMessage();
+
+    // Reconnect on a NEW socket WITHOUT closing the original ("stale") one —
+    // simulating a phone that dropped Wi-Fi and reconnected before the
+    // server noticed the old TCP connection was dead.
+    const reconnected = new WebSocket(url);
+    const nextReconnectedMessage = collectMessages(reconnected);
+    await waitForOpen(reconnected);
+    await nextReconnectedMessage();
+    await nextReconnectedMessage();
+    reconnected.send(
+      JSON.stringify({ type: 'reconnect', token: joined.token }),
+    );
+    const reconnectedJoined = await nextReconnectedMessage();
+    expect(reconnectedJoined).toEqual({
+      type: 'joined',
+      participantId: joined.participantId,
+      token: joined.token,
+      name: 'Ваня',
+    });
+
+    const afterReconnectBroadcast = await nextBoardMessage();
+    expect(afterReconnectBroadcast).toEqual({
+      type: 'state',
+      participants: [
+        { id: joined.participantId, name: 'Ваня', connected: true },
+      ],
+    });
+
+    // The original socket is still stale (never closed) at this point.
+    // Close it now, simulating its underlying TCP connection finally timing
+    // out after the participant already reconnected elsewhere.
+    const staleClosed = new Promise<void>((resolve) =>
+      player.once('close', () => resolve()),
+    );
+    player.close();
+    await staleClosed;
+
+    // If the stale socket's close incorrectly disconnected the participant,
+    // the next broadcast would show them as connected: false. Trigger one
+    // via an unrelated join and confirm the reconnected participant is
+    // still shown as connected.
+    const bystander = new WebSocket(url);
+    const nextBystanderMessage = collectMessages(bystander);
+    await waitForOpen(bystander);
+    await nextBystanderMessage();
+    await nextBystanderMessage();
+    bystander.send(JSON.stringify({ type: 'join', name: 'Оля' }));
+    await nextBystanderMessage(); // joined
+
+    const finalBoardState = await nextBoardMessage();
+    expect(finalBoardState).toEqual({
+      type: 'state',
+      participants: [
+        { id: joined.participantId, name: 'Ваня', connected: true },
+        { id: expect.any(String), name: 'Оля', connected: true },
+      ],
+    });
+
+    board.close();
+    reconnected.close();
+    bystander.close();
+  });
 });

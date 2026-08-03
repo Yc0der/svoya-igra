@@ -47,6 +47,10 @@ export function createServer(options: CreateServerOptions): GameServer {
 
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
   const connections = new Map<WebSocket, string>();
+  // Tracks which socket currently "owns" each participant, so a stale
+  // socket's 'close' event can't disconnect a participant who has already
+  // reconnected on a different socket in the meantime.
+  const owners = new Map<string, WebSocket>();
 
   const broadcastState = (): void => {
     const message: ServerMessage = {
@@ -104,6 +108,7 @@ export function createServer(options: CreateServerOptions): GameServer {
           return;
         }
         connections.set(ws, result.participant.id);
+        owners.set(result.participant.id, ws);
         send(ws, {
           type: 'joined',
           participantId: result.participant.id,
@@ -119,6 +124,7 @@ export function createServer(options: CreateServerOptions): GameServer {
           return;
         }
         connections.set(ws, result.participant.id);
+        owners.set(result.participant.id, ws);
         send(ws, {
           type: 'joined',
           participantId: result.participant.id,
@@ -134,8 +140,9 @@ export function createServer(options: CreateServerOptions): GameServer {
 
     ws.on('close', () => {
       const participantId = connections.get(ws);
-      if (participantId) {
-        connections.delete(ws);
+      connections.delete(ws);
+      if (participantId && owners.get(participantId) === ws) {
+        owners.delete(participantId);
         room.disconnect(participantId);
       }
     });
