@@ -46,7 +46,7 @@ export class Room {
     };
     this.participants.push(participant);
     this.notify();
-    return { participant };
+    return { participant: { ...participant } };
   }
 
   reconnect(token: string): ReconnectResult {
@@ -56,7 +56,7 @@ export class Room {
     }
     participant.connected = true;
     this.notify();
-    return { participant };
+    return { participant: { ...participant } };
   }
 
   disconnect(participantId: string): void {
