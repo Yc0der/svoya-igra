@@ -97,7 +97,7 @@ export function createServer(options: CreateServerOptions): GameServer {
         return;
       }
 
-      if (message.type === 'join') {
+      if (message.type === 'join' && typeof message.name === 'string') {
         const result = room.join(message.name);
         if ('error' in result) {
           send(ws, { type: 'name-taken' });
@@ -112,7 +112,7 @@ export function createServer(options: CreateServerOptions): GameServer {
         });
       }
 
-      if (message.type === 'reconnect') {
+      if (message.type === 'reconnect' && typeof message.token === 'string') {
         const result = room.reconnect(message.token);
         if ('error' in result) {
           send(ws, { type: 'invalid-token' });

@@ -201,4 +201,29 @@ describe('createServer', () => {
     board.close();
     reconnected.close();
   });
+
+  it('ignores a malformed join/reconnect message instead of crashing the connection', async () => {
+    const ws = new WebSocket(url);
+    const nextMessage = collectMessages(ws);
+    await waitForOpen(ws);
+    await nextMessage(); // hello
+    await nextMessage(); // state
+
+    // Missing `name` — an unchecked `room.join(message.name)` would call
+    // `.trim()` on `undefined` and throw inside the 'message' handler.
+    ws.send(JSON.stringify({ type: 'join' }));
+    // Missing `token` — same hazard for `room.reconnect`.
+    ws.send(JSON.stringify({ type: 'reconnect' }));
+
+    // Both malformed messages should have been silently ignored (no
+    // response sent for either). Prove the connection — and the server
+    // process itself — is still alive and responsive by completing a normal,
+    // well-formed join on the same socket afterward.
+    ws.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
+    const joined = await nextMessage();
+    expect(joined).toMatchObject({ type: 'joined', name: 'Ваня' });
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+
+    ws.close();
+  });
 });
