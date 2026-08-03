@@ -15,6 +15,12 @@ coverage/
 *.tsbuildinfo
 .eslintcache
 
+# Playwright e2e output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Logs
 *.log
 npm-debug.log*
@@ -41,3 +47,6 @@ Thumbs.db
 # Local game state — SQLite (planned, see docs/ideas.md "Память и обучение генератора")
 *.db
 *.db-journal
+
+# Room state snapshot written by server/src/index.ts at runtime
+room-snapshot.json
