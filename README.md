@@ -21,3 +21,5 @@ pnpm --filter client dev
 Дальше — [CONTRIBUTING.md](CONTRIBUTING.md) для процесса и `/docs` для деталей.
 
 CI и защита ветки проверены живьём при первичной настройке.
+
+auto-delete + squash-only проверены живьём.
