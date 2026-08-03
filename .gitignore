@@ -29,6 +29,9 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 
+# Per-machine Claude Code permissions — not shared repo config
+.claude/settings.local.json
+
 # Local game state — SQLite (planned, see docs/ideas.md "Память и обучение генератора")
 *.db
 *.db-journal
