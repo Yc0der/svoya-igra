@@ -1,4 +1,14 @@
 import '@testing-library/jest-dom/vitest';
+import { cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
+
+// vitest's `globals` option is left off (tests import describe/it/expect
+// explicitly), so @testing-library/react's automatic afterEach(cleanup)
+// detection never finds a global `afterEach` to hook into. Register it
+// manually so the DOM is unmounted between tests in the same file.
+afterEach(() => {
+  cleanup();
+});
 
 // Node's built-in Web Storage API (stable since Node 22, active by default in
 // this environment's Node runtime) registers a global `localStorage` getter
