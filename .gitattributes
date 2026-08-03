@@ -1,0 +1,21 @@
+# Normalize line endings to LF in the repository.
+#
+# This matters most when the developer is on Windows and CI runs on Linux: a husky hook
+# or shell script committed with CRLF endings fails on a Linux runner with an opaque
+# "bad interpreter" error, because the shebang line ends up as "#!/bin/sh\r".
+* text=auto eol=lf
+
+# Shell scripts and git hooks must be LF regardless of platform.
+*.sh text eol=lf
+.husky/* text eol=lf
+
+# Binary files — never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary

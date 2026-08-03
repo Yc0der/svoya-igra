@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/ib1te/.claude/**)",
+      "Read(//c/Users/ib1te/.claude/plugins/**)",
+      "WebSearch",
+      "Bash(python -c \"import json; json.load\\(open\\('C:/Users/ib1te/.claude/skills/web-app-git-setup/evals/evals.json', encoding='utf-8'\\)\\); print\\('valid json'\\)\")",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('C:/Users/ib1te/.claude/skills/web-app-git-setup/evals/evals.json','utf8'\\)\\); console.log\\('valid json'\\)\")",
+      "mcp__plugin_github_github__get_me",
+      "Bash(gh --version)",
+      "Bash(gh auth *)",
+      "mcp__plugin_github_github__create_repository",
+      "mcp__plugin_github_github__create_pull_request",
+      "mcp__plugin_github_github__pull_request_read",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('C:/Users/ib1te/.claude/skills/web-app-git-setup/evals/evals.json','utf8'\\)\\); console.log\\('evals.json valid'\\)\")",
+      "WebFetch(domain:docs.github.com)",
+      "Bash(pnpm --version)",
+      "Bash(pnpm create *)",
+      "Bash(git init *)",
+      "Bash(pnpm run *)",
+      "Bash(pnpm add *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git reset *)"
+    ]
+  }
+}

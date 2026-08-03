@@ -1,0 +1,21 @@
+{
+  "name": "svoya-igra",
+  "private": true,
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "test": "pnpm -r run test",
+    "build": "pnpm -r run build",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
+    "eslint": "^9.39.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
+    "oxlint": "^1.76.0",
+    "prettier": "^3.9.6"
+  }
+}
