@@ -51,6 +51,7 @@ describe('useRoomConnection', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   function factory(url: string): WebSocket {
@@ -146,5 +147,35 @@ describe('useRoomConnection', () => {
     act(() => vi.advanceTimersByTime(2000));
 
     expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('does not reconnect on internal state updates when using the default factory', () => {
+    // No explicit factory here: this exercises useRoomConnection()'s default
+    // parameter, the exact call shape production code (Tasks 7/8) uses.
+    // Regression test for: an inline arrow-function default parameter is a
+    // new function object on every call that omits the argument, so every
+    // re-render (triggered by the hook's own setState calls) would give the
+    // effect a new `wsFactory` dependency identity, tearing down and
+    // reopening the socket in a loop. Stubbing the global WebSocket
+    // constructor lets the default factory run for real while still using
+    // the fake.
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+
+    renderHook(() => useRoomConnection());
+    expect(FakeWebSocket.instances).toHaveLength(1);
+
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+    act(() =>
+      socket.emitMessage({
+        type: 'state',
+        participants: [{ id: 'p1', name: 'Ваня', connected: true }],
+      }),
+    );
+
+    // The state update above causes a re-render (and, pre-fix, a fresh
+    // default `wsFactory` identity). A stable default must not tear down
+    // and reopen the socket as a result.
+    expect(FakeWebSocket.instances).toHaveLength(1);
   });
 });

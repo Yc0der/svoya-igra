@@ -32,8 +32,10 @@ const RECONNECT_DELAY_MS = 2000;
 
 type WebSocketFactory = (url: string) => WebSocket;
 
+const defaultWsFactory: WebSocketFactory = (url) => new WebSocket(url);
+
 export function useRoomConnection(
-  wsFactory: WebSocketFactory = (url) => new WebSocket(url),
+  wsFactory: WebSocketFactory = defaultWsFactory,
 ): RoomConnection {
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
