@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Room } from './room.js';
 import { readSnapshot, writeSnapshot } from './snapshot.js';
-import { pickLanAddress } from './network.js';
+import { listLanCandidates, pickLanAddress } from './network.js';
 import { createServer } from './server.js';
 
 const PORT = 8080;
@@ -28,7 +28,28 @@ async function main(): Promise<void> {
     );
   });
 
-  const lanAddress = pickLanAddress(networkInterfaces());
+  // Автовыбор адреса — эвристика «первый non-internal IPv4», и она вполне
+  // может указать на виртуальный адаптер (VirtualBox/WSL/Hyper-V), недостижимый
+  // с телефона. Сервер при этом слушает все интерфейсы и работает, а вот QR на
+  // табло ведёт в никуда — отказ молчаливый. Поэтому печатаем всех кандидатов,
+  // чтобы человек увидел, что выбрано и что ещё было, и даём переопределить.
+  const interfaces = networkInterfaces();
+  const candidates = listLanCandidates(interfaces);
+  console.log(
+    candidates.length > 0
+      ? `Найденные сетевые адреса: ${candidates
+          .map(({ address, interfaceName }) => `${address} (${interfaceName})`)
+          .join(', ')}`
+      : 'Найденные сетевые адреса: нет',
+  );
+
+  const lanAddress = process.env.LAN_HOST ?? pickLanAddress(interfaces);
+  console.log(
+    `Используется: ${lanAddress ?? 'localhost'}${
+      process.env.LAN_HOST ? ' (из LAN_HOST)' : ''
+    }. Если адрес не тот, задайте LAN_HOST=<ваш IP>.`,
+  );
+
   const lanUrl = lanAddress
     ? `http://${lanAddress}:${PORT}/`
     : `http://localhost:${PORT}/`;
