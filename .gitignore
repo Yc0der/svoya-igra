@@ -32,6 +32,9 @@ Thumbs.db
 # Per-machine Claude Code permissions — not shared repo config
 .claude/settings.local.json
 
+# Local git worktrees — scratch checkouts, not repo content
+.claude/worktrees/
+
 # Local game state — SQLite (planned, see docs/ideas.md "Память и обучение генератора")
 *.db
 *.db-journal
