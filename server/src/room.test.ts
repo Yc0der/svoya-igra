@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Room } from './room.js';
+import { deserializeSnapshot, serializeSnapshot } from './snapshot.js';
 
 describe('Room.join', () => {
   it('adds a new participant', () => {
@@ -63,6 +64,28 @@ describe('Room.reconnect', () => {
     const room = new Room();
     const result = room.reconnect('not-a-real-token');
     expect(result).toEqual({ error: 'invalid-token' });
+  });
+});
+
+describe('Room restored from a snapshot', () => {
+  // Вторая ключевая гарантия вехи («сервер переживает перезапуск») целиком:
+  // снапшот на диске -> new Room(initial) -> reconnect по токену, выданному
+  // ДО перезапуска -> тот же участник, тот же id и имя. По частям это уже
+  // покрыто (room.test.ts и snapshot.test.ts), но сама цепочка целиком —
+  // единственное, что задача 10 проверяет живьём — не была покрыта ничем.
+  it('restores a participant from a snapshot and lets them reconnect by token', () => {
+    const first = new Room();
+    const joined = first.join('Ваня');
+    if (!('participant' in joined)) throw new Error('expected join to succeed');
+
+    const restored = new Room(
+      deserializeSnapshot(serializeSnapshot(first.getState())),
+    );
+
+    expect(restored.getState().participants[0].connected).toBe(false);
+    expect(restored.reconnect(joined.participant.token)).toEqual({
+      participant: { ...joined.participant, connected: true },
+    });
   });
 });
 
