@@ -14,6 +14,13 @@ import type { ServerMessage } from './protocol.js';
 // underlying TCP read as the handshake response. Returns a function that
 // resolves with the next message, queueing messages that arrive before
 // they're asked for.
+//
+// Why a queue and not artificial delays (setTimeout/setImmediate) on the
+// server side: delays only mask the race by giving the OS time to deliver the
+// handshake and first frame as separate reads — they don't fix the actual
+// problem (a listener attached after the event already fired) and add
+// arbitrary latency to the real server for no protocol reason. Attaching the
+// listener before any await is the only fix that works regardless of timing.
 function collectMessages(ws: WebSocket): () => Promise<ServerMessage> {
   const queue: ServerMessage[] = [];
   const waiters: ((msg: ServerMessage) => void)[] = [];

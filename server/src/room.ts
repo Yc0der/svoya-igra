@@ -46,6 +46,11 @@ export class Room {
     };
     this.participants.push(participant);
     this.notify();
+    // Defensive copy, matching getState()'s convention below — a caller holding
+    // the returned participant must not be able to mutate this.participants
+    // directly. Object.freeze() was the other option; a shallow copy was chosen
+    // to keep exactly one invariant-enforcing pattern in this class rather than
+    // two different mechanisms doing the same job.
     return { participant: { ...participant } };
   }
 
@@ -56,6 +61,7 @@ export class Room {
     }
     participant.connected = true;
     this.notify();
+    // See the comment in join() above — same defensive-copy reasoning.
     return { participant: { ...participant } };
   }
 

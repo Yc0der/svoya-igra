@@ -60,8 +60,17 @@ export function createServer(options: CreateServerOptions): GameServer {
     // handler) is written to that client's socket before this broadcast
     // reaches it. room.join()/room.reconnect() call this synchronously as
     // part of their own execution, before the handler gets a chance to send
-    // its direct reply; without the defer, the client would see its own
-    // broadcasted 'state' before its 'joined' confirmation.
+    // its direct reply; without the defer, the client would deterministically
+    // see its own broadcasted 'state' before its 'joined' confirmation, since
+    // both are written to the same TCP stream in that order.
+    //
+    // Why here and not elsewhere: reordering the handler to send 'joined'
+    // before calling room.join() is impossible — the confirmation needs the
+    // data join() produces. Deferring inside Room itself was rejected to keep
+    // Room synchronous and free of transport-timing concerns (it doesn't know
+    // about sockets or delivery order, and shouldn't have to). This defers
+    // only the broadcast side, at the one place two writes to the same socket
+    // actually interleave.
     queueMicrotask(() => {
       for (const ws of wss.clients) {
         if (ws.readyState === WebSocket.OPEN) {
