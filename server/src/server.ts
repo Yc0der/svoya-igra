@@ -128,6 +128,10 @@ export function createServer(options: CreateServerOptions): GameServer {
       }
     });
 
+    ws.on('error', (err) => {
+      console.error('Ошибка WebSocket-соединения:', err);
+    });
+
     ws.on('close', () => {
       const participantId = connections.get(ws);
       if (participantId) {

@@ -226,4 +226,39 @@ describe('createServer', () => {
 
     ws.close();
   });
+
+  it("doesn't crash the server when a client sends an invalid WebSocket frame", async () => {
+    const attacker = new WebSocket(url);
+    const nextAttackerMessage = collectMessages(attacker);
+    await waitForOpen(attacker);
+    await nextAttackerMessage(); // hello
+    await nextAttackerMessage(); // state
+
+    // Write a raw frame with an invalid (reserved) opcode directly to the
+    // underlying TCP socket, bypassing ws's own frame encoder (which never
+    // produces invalid frames itself). ws's Receiver reports this via the
+    // per-connection WebSocket's 'error' event — exactly the case an
+    // unguarded socket has no listener for.
+    const closed = new Promise<void>((resolve) =>
+      attacker.once('close', () => resolve()),
+    );
+    const rawSocket = (
+      attacker as unknown as { _socket: { write(data: Buffer): void } }
+    )._socket;
+    rawSocket.write(Buffer.from([0x83, 0x80, 0x00, 0x00, 0x00, 0x00]));
+    await closed;
+
+    // Prove the server process itself is still alive and responsive: a
+    // brand new, unrelated connection should still work normally.
+    const other = new WebSocket(url);
+    const nextOtherMessage = collectMessages(other);
+    await waitForOpen(other);
+    const hello = await nextOtherMessage();
+    expect(hello).toEqual({
+      type: 'hello',
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+
+    other.close();
+  });
 });
