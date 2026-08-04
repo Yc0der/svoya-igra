@@ -2305,18 +2305,24 @@ git commit -m "feat: dispatch game messages over WS and load the pack at startup
 - [ ] **Step 1: Написать падающие тесты**
 
 ```ts
-// добавить в client/src/useRoomConnection.test.ts
-it('exposes game state from a state message and clears it back to null before any game starts', async () => {
-  const { hook, server } = renderConnection();
-  await server.connected;
-  server.send(JSON.stringify({ type: 'hello', lanUrl: 'http://x/' }));
-  server.send(JSON.stringify({ type: 'state', participants: [], game: null }));
-  await waitFor(() => expect(hook.result.current.game).toBeNull());
+// добавить в client/src/useRoomConnection.test.ts, внутри существующего
+// describe('useRoomConnection', ...) — использует уже существующие в файле
+// FakeWebSocket и factory(), не mock-socket и не отдельный renderConnection().
+it('exposes game state from a state message and stays null before any game starts', () => {
+  const { result } = renderHook(() => useRoomConnection(factory));
+  const socket = FakeWebSocket.instances[0];
+
+  act(() => socket.emitOpen());
+  act(() =>
+    socket.emitMessage({ type: 'state', participants: [], game: null }),
+  );
+
+  expect(result.current.game).toBeNull();
 });
 
-it('updates game state on every state broadcast', async () => {
-  const { hook, server } = renderConnection();
-  await server.connected;
+it('updates game state on every state broadcast', () => {
+  const { result } = renderHook(() => useRoomConnection(factory));
+  const socket = FakeWebSocket.instances[0];
   const gameView = {
     phase: 'selecting',
     roundIndex: 0,
@@ -2328,21 +2334,25 @@ it('updates game state on every state broadcast', async () => {
     timerDeadline: null,
     scores: [],
   };
-  server.send(
-    JSON.stringify({ type: 'state', participants: [], game: gameView }),
+
+  act(() => socket.emitOpen());
+  act(() =>
+    socket.emitMessage({ type: 'state', participants: [], game: gameView }),
   );
-  await waitFor(() => expect(hook.result.current.game).toEqual(gameView));
+
+  expect(result.current.game).toEqual(gameView);
 });
 
-it('sends start-game/select-question/buzz/said-answer/vote as the matching client messages', async () => {
-  const { hook, server } = renderConnection();
-  await server.connected;
+it('sends start-game/select-question/buzz/said-answer/vote as the matching client messages', () => {
+  const { result } = renderHook(() => useRoomConnection(factory));
+  const socket = FakeWebSocket.instances[0];
+  act(() => socket.emitOpen());
 
-  hook.result.current.startGame();
-  await expect(server).toReceiveMessage(JSON.stringify({ type: 'start-game' }));
+  act(() => result.current.startGame());
+  expect(socket.sent).toContainEqual(JSON.stringify({ type: 'start-game' }));
 
-  hook.result.current.selectQuestion(1, 'q2');
-  await expect(server).toReceiveMessage(
+  act(() => result.current.selectQuestion(1, 'q2'));
+  expect(socket.sent).toContainEqual(
     JSON.stringify({
       type: 'select-question',
       themeIndex: 1,
@@ -2350,37 +2360,33 @@ it('sends start-game/select-question/buzz/said-answer/vote as the matching clien
     }),
   );
 
-  hook.result.current.buzz();
-  await expect(server).toReceiveMessage(JSON.stringify({ type: 'buzz' }));
+  act(() => result.current.buzz());
+  expect(socket.sent).toContainEqual(JSON.stringify({ type: 'buzz' }));
 
-  hook.result.current.saidAnswer();
-  await expect(server).toReceiveMessage(
-    JSON.stringify({ type: 'said-answer' }),
-  );
+  act(() => result.current.saidAnswer());
+  expect(socket.sent).toContainEqual(JSON.stringify({ type: 'said-answer' }));
 
-  hook.result.current.vote(true);
-  await expect(server).toReceiveMessage(
+  act(() => result.current.vote(true));
+  expect(socket.sent).toContainEqual(
     JSON.stringify({ type: 'vote', correct: true }),
   );
 });
 
-it('sets falsestart on a falsestart message and clears it again after 2 seconds', async () => {
+it('sets falsestart on a falsestart message and clears it again after 2 seconds', () => {
   vi.useFakeTimers();
-  try {
-    const { hook, server } = renderConnection();
-    await server.connected;
-    server.send(JSON.stringify({ type: 'falsestart' }));
-    await vi.waitFor(() => expect(hook.result.current.falsestart).toBe(true));
+  const { result } = renderHook(() => useRoomConnection(factory));
+  const socket = FakeWebSocket.instances[0];
 
-    vi.advanceTimersByTime(2000);
-    await vi.waitFor(() => expect(hook.result.current.falsestart).toBe(false));
-  } finally {
-    vi.useRealTimers();
-  }
+  act(() => socket.emitOpen());
+  act(() => socket.emitMessage({ type: 'falsestart' }));
+  expect(result.current.falsestart).toBe(true);
+
+  act(() => vi.advanceTimersByTime(2000));
+  expect(result.current.falsestart).toBe(false);
 });
 ```
 
-Эти тесты опираются на уже существующий в файле хелпер `renderConnection()` и мок-сервер (`renderHook`/`mock-socket`) — посмотреть на существующие тесты в начале `useRoomConnection.test.ts` для точной сигнатуры хелпера и используемых импортов (`waitFor`, `vi`), не изобретать новую обвязку.
+`vi.useRealTimers()` для последнего теста уже вызывается в файле общим `afterEach` — отдельный `finally` не нужен.
 
 - [ ] **Step 2: Убедиться, что тесты падают**
 
@@ -3250,3 +3256,5 @@ git commit -m "test: add e2e scenario for a full two-question round"
 **Task 5, баг в собственном коде плана, найден реализатором (2026-08-04):** исходный текст плана менял каст `deserializeSnapshot`'а с `as RoomState` на `as Partial<RoomState>` и заодно (лишнее, не требовалось задачей) добавил `parsed.participants ?? []` — то есть отсутствие `participants` в JSON стало бы тихо превращаться в пустой массив вместо броска. Это ломает уже существующий, специально написанный ещё во время скелета тест «throws on well-formed JSON that is not a room state», который полагается именно на то, что `.map` на `undefined` бросает `TypeError` — так комната отличает порчу данных от нормального случая. `game`, в отличие от `participants`, дефолтить обязательно нужно — старые снапшоты, записанные до этой вехи, никогда его не содержали, и это не порча, а более старая версия формата; `participants` же был обязателен всегда, и его отсутствие — это именно порча. Реализатор сам поймал несостыковку до всякого ревью (при прогоне существующего теста), оставил `parsed.participants!.map(...)` без дефолта и продефолтил только `game`. Код плана (раздел Task 5) обновлён на исправленную версию с комментарием, объясняющим асимметрию.
 
 **Task 6, неполнота примера в плане, найдена реализатором (2026-08-04):** блок кода Task 6 показывал только обновление `broadcastState` (добавление `game` в рассылаемое состояние), но в `server.ts` есть второе место, отправляющее `ServerMessage` с типом `'state'` — начальный `send(ws, {type:'state', ...})` сразу после `hello` при подключении нового сокета. Это место в код плана не попало вообще, не только с ошибкой — план просто не показал его. Реализатор обнаружил это по ошибке typecheck (поле `game` стало обязательным в Task 3) и добавил `game: room.toGameStateView()` туда же. Не отклонение от явного решения плана, а восполнение пробела в примере кода — план для этой задачи не был исчерпывающим.
+
+**Task 7, неверный тестовый фреймворк в плане, найдено до диспетчеризации (2026-08-04):** исходный текст плана для Task 7 писал новые тесты под API библиотеки `mock-socket` (`renderConnection()`, `server.connected`, `server.send`, `expect(server).toReceiveMessage(...)`) — но в реальном `client/src/useRoomConnection.test.ts` такой библиотеки и такого хелпера нет вообще. Файл с самого начала (со времён скелета) использует рукописный класс `FakeWebSocket` (методы `emitOpen()`/`emitMessage()`, поле `sent`) и передаёт его как `wsFactory` напрямую в `useRoomConnection(factory)`, без всякого мок-сервера с отдельным сетевым уровнем. Тесты в исходном тексте плана просто не собрались бы и не заработали бы против этого файла — это не опечатка в деталях, а целиком выдуманный, никогда не существовавший в проекте API. Поймано при чтении реального файла перед диспетчеризацией задачи, до того как реализатор успел на это наткнуться. Код плана (раздел Task 7, Step 1) переписан на реальный паттерн `FakeWebSocket`/`renderHook`/`act`, один в один с уже существующими тестами того же файла.
