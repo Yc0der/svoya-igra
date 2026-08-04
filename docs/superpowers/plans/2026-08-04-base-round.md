@@ -2704,15 +2704,16 @@ it('shows the question grid when it is my turn to select', () => {
   expect(screen.getByRole('button', { name: /100/ })).toBeInTheDocument();
 });
 
-it("shows whose turn it is when it isn't mine", () => {
+it("shows whose turn it is by name when it isn't mine", () => {
   mockedUseRoomConnection.mockReturnValue(
     connection({
       selfId: 'me',
+      participants: [{ id: 'other', name: 'Катя', connected: true }],
       game: baseGame({ turnParticipantId: 'other' }),
     }),
   );
   render(<Player />);
-  expect(screen.getByText(/сейчас выбирает/i)).toBeInTheDocument();
+  expect(screen.getByText(/сейчас выбирает Катя/i)).toBeInTheDocument();
 });
 
 it('calls selectQuestion with the right ids when a grid cell is clicked', async () => {
@@ -2771,6 +2772,18 @@ it('prompts the buzzed player to say the answer aloud and confirm', async () => 
   expect(saidAnswer).toHaveBeenCalledOnce();
 });
 
+it('shows the answering opponent by name to everyone else', () => {
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      selfId: 'me',
+      participants: [{ id: 'other', name: 'Катя', connected: true }],
+      game: baseGame({ phase: 'buzzed', buzzedParticipantId: 'other' }),
+    }),
+  );
+  render(<Player />);
+  expect(screen.getByText(/Катя отвечает/i)).toBeInTheDocument();
+});
+
 it('shows judging buttons for everyone except the answerer', async () => {
   const vote = vi.fn();
   mockedUseRoomConnection.mockReturnValue(
@@ -2789,7 +2802,7 @@ it('shows judging buttons for everyone except the answerer', async () => {
   expect(vote).toHaveBeenCalledWith(false);
 });
 
-it('does not show judging buttons to the answerer themselves', () => {
+it('does not show judging buttons to the answerer themselves, showing a waiting message instead', () => {
   mockedUseRoomConnection.mockReturnValue(
     connection({
       selfId: 'me',
@@ -2800,11 +2813,13 @@ it('does not show judging buttons to the answerer themselves', () => {
   expect(
     screen.queryByRole('button', { name: /^зачёт$/i }),
   ).not.toBeInTheDocument();
+  expect(screen.getByText(/ждём решения/i)).toBeInTheDocument();
 });
 
-it('shows the reveal result and updated scores', () => {
+it('shows the reveal result, comment, and updated scores by name', () => {
   mockedUseRoomConnection.mockReturnValue(
     connection({
+      participants: [{ id: 'me', name: 'Ваня', connected: true }],
       game: baseGame({
         phase: 'reveal',
         correctAnswer: { text: 'Ответ', comment: 'Комментарий' },
@@ -2814,9 +2829,26 @@ it('shows the reveal result and updated scores', () => {
   );
   render(<Player />);
   expect(screen.getByText('Ответ')).toBeInTheDocument();
+  expect(screen.getByText('Комментарий')).toBeInTheDocument();
+  expect(screen.getByText(/Ваня: 100/)).toBeInTheDocument();
 });
 
-it('shows the final standings at game-end', () => {
+it('shows the intermediate score by name at round-end', () => {
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      participants: [{ id: 'me', name: 'Ваня', connected: true }],
+      game: baseGame({
+        phase: 'round-end',
+        scores: [{ participantId: 'me', score: 100 }],
+      }),
+    }),
+  );
+  render(<Player />);
+  expect(screen.getByText(/следующий раунд/i)).toBeInTheDocument();
+  expect(screen.getByText(/Ваня: 100/)).toBeInTheDocument();
+});
+
+it('shows the final standings at game-end by name, not raw id', () => {
   mockedUseRoomConnection.mockReturnValue(
     connection({
       game: baseGame({
@@ -2834,6 +2866,9 @@ it('shows the final standings at game-end', () => {
   );
   render(<Player />);
   expect(screen.getByText(/итог/i)).toBeInTheDocument();
+  expect(screen.getByText(/Я: 300/)).toBeInTheDocument();
+  expect(screen.getByText(/Другой: 100/)).toBeInTheDocument();
+  expect(screen.queryByText('me')).not.toBeInTheDocument();
 });
 ```
 
@@ -2849,7 +2884,7 @@ Expected: FAIL — `Player.tsx` пока ничего не знает о фаз�
 ```tsx
 // client/src/Player.tsx
 import { useState, type FormEvent } from 'react';
-import { useRoomConnection } from './useRoomConnection';
+import { useRoomConnection, type GameStateView } from './useRoomConnection';
 
 export function Player() {
   const {
@@ -2857,6 +2892,7 @@ export function Player() {
     join,
     game,
     selfId,
+    participants,
     falsestart,
     startGame,
     selectQuestion,
@@ -2865,6 +2901,27 @@ export function Player() {
     vote,
   } = useRoomConnection();
   const [name, setName] = useState('');
+
+  function nameOf(participantId: string | null): string {
+    if (!participantId) return '';
+    return (
+      participants.find((p) => p.id === participantId)?.name ?? participantId
+    );
+  }
+
+  function scoreboard(scores: GameStateView['scores']) {
+    return (
+      <ul>
+        {[...scores]
+          .sort((a, b) => b.score - a.score)
+          .map((s) => (
+            <li key={s.participantId}>
+              {nameOf(s.participantId)}: {s.score}
+            </li>
+          ))}
+      </ul>
+    );
+  }
 
   function handleSubmit(event: FormEvent): void {
     event.preventDefault();
@@ -2908,7 +2965,7 @@ export function Player() {
   switch (game.phase) {
     case 'selecting':
       if (!isMyTurn) {
-        return <p>Сейчас выбирает другой игрок</p>;
+        return <p>Сейчас выбирает {nameOf(game.turnParticipantId)}</p>;
       }
       return (
         <div>
@@ -2945,7 +3002,7 @@ export function Player() {
           </div>
         );
       }
-      return <p>Соперник отвечает</p>;
+      return <p>{nameOf(game.buzzedParticipantId)} отвечает</p>;
 
     case 'judging':
       if (isBuzzedByMe) {
@@ -2963,25 +3020,23 @@ export function Player() {
         <div>
           <p>{game.correctAnswer?.text}</p>
           {game.correctAnswer?.comment && <p>{game.correctAnswer.comment}</p>}
+          {scoreboard(game.scores)}
         </div>
       );
 
     case 'round-end':
-      return <p>Раунд окончен, следующий раунд начинается</p>;
+      return (
+        <div>
+          <p>Раунд окончен, следующий раунд начинается</p>
+          {scoreboard(game.scores)}
+        </div>
+      );
 
     case 'game-end':
       return (
         <div>
           <h2>Итог</h2>
-          <ul>
-            {[...game.scores]
-              .sort((a, b) => b.score - a.score)
-              .map((s) => (
-                <li key={s.participantId}>
-                  {s.participantId}: {s.score}
-                </li>
-              ))}
-          </ul>
+          {scoreboard(game.scores)}
         </div>
       );
   }
@@ -3395,3 +3450,11 @@ git commit -m "test: add e2e scenario for a full two-question round"
 2. `Player.tsx`: `theme.questions.map((q, questionIndexInTheme) => (...))` — второй параметр `questionIndexInTheme` объявлялся, но нигде не использовался (индекс темы вычислялся отдельно через `game.grid.indexOf(theme)`), что валит строгий `tsc -b` клиента (`noUnusedParameters`). Исправлено удалением неиспользуемого параметра.
 
 Оба — механические недосмотры при написании плана, не осознанные решения; реализатор поймал оба сам при прогоне тестов/тайпчека до всякого ревью. Код плана (Task 8, Step 1 и Step 3) обновлён на исправленные версии.
+
+**Task 8, пропущенные требования из дизайн-документа, найдены ревью (2026-08-04):** код `Player.tsx` в исходном тексте плана не выполнял таблицу фаз из `docs/superpowers/specs/2026-08-04-base-round-design.md` («Клиенты») полностью:
+
+1. Фазы `reveal` и `round-end` в таблице явно требуют «обновлённый счёт» / «промежуточный счёт», а код плана их не показывал вообще.
+2. `game-end` показывал сырой `participantId` вместо имени, хотя `participants` (с именами) уже доступен через хук.
+3. Строки таблицы для «не мой ход» (`selecting`) и «не я отвечаю» (`buzzed`) используют «Х» как явный плейсхолдер для имени конкретного игрока — код плана вместо этого подставлял общую фразу («другой игрок», «Соперник»), не показывая, о ком конкретно речь.
+
+Это не баг в смысле опечатки — задача была не полностью специфицирована в исходном коде плана относительно уже принятого дизайна, и тесты плана тоже не проверяли эти требования (тест «shows the reveal result and updated scores» проверял только текст ответа, не сам счёт — прошёл бы одинаково, даже если счёт вообще убрать из разметки). Реализатор реализовал код плана как есть, не мог обнаружить это сам без сверки с дизайн-документом построчно — ревью поймало прямым сопоставлением таблицы с кодом. Исправлено: в `Player.tsx` добавлены `nameOf()` и `scoreboard()`, используются во всех перечисленных местах; тесты плана (Task 8, Step 1) переписаны так, чтобы реально проверять имена и счёт, а не только наличие текста, который остался бы неизменным при удалении этой функциональности.
