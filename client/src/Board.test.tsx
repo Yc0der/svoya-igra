@@ -162,7 +162,7 @@ describe('Board', () => {
     expect(screen.getByText(/Ваня/)).toBeInTheDocument();
   });
 
-  it('shows the correct answer and score on reveal', () => {
+  it('shows the correct answer and updated score by name on reveal', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         game: baseGame({
@@ -171,6 +171,24 @@ describe('Board', () => {
           scores: [{ participantId: '1', score: 100 }],
         }),
         participants: [{ id: '1', name: 'Ваня', connected: true }],
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText('Париж')).toBeInTheDocument();
+    expect(screen.getByText(/Ваня: 100/)).toBeInTheDocument();
+  });
+
+  it('shows the correct answer during judging too, not only reveal', () => {
+    // Room.toGameStateView() задаёт correctAnswer и на judging, и на reveal
+    // (server/src/room.ts, showAnswer = phase === 'judging' || phase ===
+    // 'reveal') — табло не должно завязывать показ ответа именно на фазу
+    // 'reveal', только на наличие самого correctAnswer.
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'judging',
+          correctAnswer: { text: 'Париж' },
+        }),
       }),
     );
     render(<Board />);
