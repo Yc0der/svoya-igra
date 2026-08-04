@@ -7,11 +7,14 @@
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
     "build": "pnpm -r run build",
+    "start": "node server/dist/index.js",
+    "test:e2e": "playwright test",
     "prepare": "husky"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.1",
     "@commitlint/config-conventional": "^21.2.0",
+    "@playwright/test": "^1.62.1",
     "eslint": "^9.39.5",
     "husky": "^9.1.7",
     "lint-staged": "^17.3.0",
