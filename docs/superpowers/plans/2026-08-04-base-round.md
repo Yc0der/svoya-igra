@@ -1829,12 +1829,19 @@ export class Room {
   }
 
   private applyEffects(effects: Effect[]): void {
+    // Сброс — один раз перед циклом, а не внутри него. При пустом effects[]
+    // (например, 'reveal' → 'selecting' или 'round-end' → 'selecting', обе
+    // фазы без своего таймера) тело цикла вообще не выполняется — если бы
+    // сброс жил внутри for, устаревший dealine остался бы висеть в
+    // gameTimerDeadline/gameTimeoutHandle и уходил бы в toGameStateView() как
+    // ложный, уже прошедший дедлайн, вплоть до следующего эффекта, который
+    // его перезапишет (для 'game-end' — уже никогда).
+    if (this.gameTimeoutHandle) {
+      clearTimeout(this.gameTimeoutHandle);
+      this.gameTimeoutHandle = null;
+      this.gameTimerDeadline = null;
+    }
     for (const effect of effects) {
-      if (this.gameTimeoutHandle) {
-        clearTimeout(this.gameTimeoutHandle);
-        this.gameTimeoutHandle = null;
-        this.gameTimerDeadline = null;
-      }
       if (effect.type === 'start-timer') {
         this.gameTimerDeadline = Date.now() + effect.ms;
         this.gameTimeoutHandle = setTimeout(() => {
@@ -3231,3 +3238,5 @@ git commit -m "test: add e2e scenario for a full two-question round"
 2. **`server/src/snapshot.ts` и `snapshot.test.ts` тоже перестают собираться по типам** после этой задачи — та же природа, что уже нормализована для `server.ts`/`index.ts` в Task 3 (упоминалось только для них, `snapshot.ts` по ошибке не назвали явно). Остаётся так до Task 5, которая как раз и чинит `snapshot.ts` под новое поле. Отклонения от плана в этом нет — это чистая недосказанность в тексте дозвона к реализатору, не в самом плане: план с самого начала предполагал, что `snapshot.ts` меняется в Task 5, а Task 4 намеренно её не трогает.
 
 Рассмотренная и отклонённая альтернатива: сделать `game` опциональным полем (`game?: EngineState | null`) вместо обязательного, чтобы старые литералы без него продолжали собираться без правок. Отклонено — это создало бы два конкурирующих способа выразить «игры ещё нет» (`undefined` и `null`) вместо одного, ровно та путаница, которой `deserializeSnapshot`'s `parsed.game ?? null` в Task 5 и так предназначена избежать на границе с диском; лучше поправить одну устаревшую assertion, чем размывать инвариант поля на весь остаток плана.
+
+**Task 4, баг в собственном коде плана, найден ревью (2026-08-04):** `applyEffects` в исходном тексте плана сбрасывала `gameTimeoutHandle`/`gameTimerDeadline` внутри `for (const effect of effects)` — при пустом `effects[]` (переходы `'reveal'`/`'round-end'` → `'selecting'`, `'reveal'` → `'game-end'`, все три — фазы без своего таймера) тело цикла не выполняется вообще, и устаревший дедлайн от только что сработавшего таймера остаётся висеть в `toGameStateView().timerDeadline` — для `'game-end'` навсегда, для `'selecting'` до следующего `start-timer`. Не осознанное решение, а недосмотр при написании плана — реализатор Task 4 скопировал код дословно, ревьюер поймал и воспроизвёл. Исправлено переносом сброса на уровень выше цикла, выполняется один раз безусловно; код плана (раздел Task 4, метод `applyEffects`) обновлён на исправленную версию.
