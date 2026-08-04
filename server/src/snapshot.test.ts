@@ -9,6 +9,26 @@ import {
   writeSnapshot,
 } from './snapshot.js';
 import type { RoomState } from './room.js';
+import { createInitialState } from './engine.js';
+import type { Pack } from './pack.js';
+
+const TEST_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            { id: 'q1', price: 100, text: 'В?', answer: 'О', type: 'обычный' },
+          ],
+        },
+      ],
+    },
+  ],
+};
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
@@ -22,6 +42,7 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
         { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
         { id: '2', name: 'Катя', token: 'tok-2', connected: false },
       ],
+      game: null,
     };
 
     const restored = deserializeSnapshot(serializeSnapshot(state));
@@ -31,6 +52,7 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
         { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
         { id: '2', name: 'Катя', token: 'tok-2', connected: false },
       ],
+      game: null,
     });
   });
 });
@@ -58,6 +80,7 @@ describe('writeSnapshot / readSnapshot', () => {
       participants: [
         { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
       ],
+      game: null,
     };
 
     await writeSnapshot(path, state);
@@ -67,6 +90,7 @@ describe('writeSnapshot / readSnapshot', () => {
       participants: [
         { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
       ],
+      game: null,
     });
   });
 
@@ -96,6 +120,7 @@ describe('writeSnapshot / readSnapshot', () => {
       participants: [
         { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
       ],
+      game: null,
     };
     await writeSnapshot(path, initial);
 
@@ -112,6 +137,7 @@ describe('writeSnapshot / readSnapshot', () => {
       participants: [
         { id: '2', name: 'Катя', token: 'tok-2', connected: true },
       ],
+      game: null,
     };
     await expect(writeSnapshot(path, next)).rejects.toThrow(
       'simulated crash mid-write',
@@ -122,6 +148,48 @@ describe('writeSnapshot / readSnapshot', () => {
       participants: [
         { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
       ],
+      game: null,
     });
+  });
+});
+
+describe('serializeSnapshot / deserializeSnapshot with game state', () => {
+  it('round-trips a null game unchanged', () => {
+    const state: RoomState = {
+      participants: [
+        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+      ],
+      game: null,
+    };
+    expect(deserializeSnapshot(serializeSnapshot(state))).toEqual({
+      participants: [
+        { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
+      ],
+      game: null,
+    });
+  });
+
+  it('round-trips an in-progress game exactly', () => {
+    const game = createInitialState(TEST_PACK, ['1', '2']);
+    const state: RoomState = {
+      participants: [
+        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+        { id: '2', name: 'Катя', token: 'tok-2', connected: true },
+      ],
+      game,
+    };
+    const restored = deserializeSnapshot(serializeSnapshot(state));
+    expect(restored.game).toEqual(game);
+  });
+
+  it('treats a snapshot written before this feature (no game field) as lobby-only', () => {
+    const restored = deserializeSnapshot(
+      JSON.stringify({
+        participants: [
+          { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+        ],
+      }),
+    );
+    expect(restored.game).toBeNull();
   });
 });
