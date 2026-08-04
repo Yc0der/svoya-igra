@@ -1,4 +1,21 @@
+// server/src/room.ts
 import { randomUUID } from 'node:crypto';
+import {
+  createInitialState,
+  reduce,
+  QUESTION_TIMER_MS,
+  SAID_ANSWER_TIMER_MS,
+  VOTE_TIMER_MS,
+  REVEAL_TIMER_MS,
+  ROUND_END_TIMER_MS,
+  type EngineState,
+  type EngineEvent,
+  type Effect,
+  type Phase,
+  type TimerName,
+} from './engine.js';
+import type { Pack } from './pack.js';
+import type { GameStateView } from './protocol.js';
 
 export interface Participant {
   id: string;
@@ -9,24 +26,53 @@ export interface Participant {
 
 export interface RoomState {
   participants: Participant[];
+  game: EngineState | null;
 }
 
 export type JoinResult = { participant: Participant } | { error: 'name-taken' };
 export type ReconnectResult =
   { participant: Participant } | { error: 'invalid-token' };
+export type StartGameResult =
+  { ok: true } | { error: 'not-enough-players' | 'no-pack' };
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
 
+// При восстановлении из снапшота настоящий setTimeout процесса, который
+// раньше двигал игру дальше, потерян вместе со старым процессом — движок сам
+// об этом не знает, потому что он не знает о часах вообще. Комната обязана
+// перезавести таймер, соответствующий восстановленной фазе, иначе игра
+// зависнет в этой фазе навсегда. `selecting` — единственная фаза без
+// таймера (спека не ограничивает время на выбор вопроса).
+const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
+  'question-open': { timer: 'question', ms: QUESTION_TIMER_MS },
+  buzzed: { timer: 'said-answer', ms: SAID_ANSWER_TIMER_MS },
+  judging: { timer: 'vote', ms: VOTE_TIMER_MS },
+  reveal: { timer: 'reveal', ms: REVEAL_TIMER_MS },
+  'round-end': { timer: 'round-end', ms: ROUND_END_TIMER_MS },
+};
+
 export class Room {
   private participants: Participant[];
+  private pack: Pack | undefined;
+  private game: EngineState | null;
+  private gameTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  private gameTimerDeadline: number | null = null;
   private listeners = new Set<(state: RoomState) => void>();
 
-  constructor(initial?: RoomState) {
+  constructor(initial?: RoomState, pack?: Pack) {
     this.participants = initial
       ? initial.participants.map((p) => ({ ...p }))
       : [];
+    this.pack = pack;
+    this.game = initial?.game ? { ...initial.game } : null;
+    if (this.game) {
+      const restart = PHASE_TIMER[this.game.phase];
+      if (restart) {
+        this.applyEffects([{ type: 'start-timer', ...restart }]);
+      }
+    }
   }
 
   join(name: string): JoinResult {
@@ -46,11 +92,6 @@ export class Room {
     };
     this.participants.push(participant);
     this.notify();
-    // Defensive copy, matching getState()'s convention below — a caller holding
-    // the returned participant must not be able to mutate this.participants
-    // directly. Object.freeze() was the other option; a shallow copy was chosen
-    // to keep exactly one invariant-enforcing pattern in this class rather than
-    // two different mechanisms doing the same job.
     return { participant: { ...participant } };
   }
 
@@ -61,7 +102,6 @@ export class Room {
     }
     participant.connected = true;
     this.notify();
-    // See the comment in join() above — same defensive-copy reasoning.
     return { participant: { ...participant } };
   }
 
@@ -74,13 +114,128 @@ export class Room {
     this.notify();
   }
 
+  startGame(): StartGameResult {
+    if (!this.pack) {
+      return { error: 'no-pack' };
+    }
+    if (this.participants.length < 2) {
+      return { error: 'not-enough-players' };
+    }
+    const counterIds = this.participants.map((p) => p.id);
+    this.game = createInitialState(this.pack, counterIds);
+    this.notify();
+    return { ok: true };
+  }
+
+  selectQuestion(
+    participantId: string,
+    themeIndex: number,
+    questionId: string,
+  ): void {
+    this.dispatch({
+      type: 'select-question',
+      counterId: participantId,
+      themeIndex,
+      questionId,
+    });
+  }
+
+  // Возвращает 'falsestart', когда нажатие пришло вне фазы «вопрос открыт» —
+  // движок о таких нажатиях никогда не узнаёт (design.md, «Комната»),
+  // потому что здесь для них нет смысла ни в каком состоянии.
+  buzz(participantId: string): 'ok' | 'falsestart' {
+    if (!this.game || this.game.phase !== 'question-open') {
+      return 'falsestart';
+    }
+    this.dispatch({ type: 'buzz', counterId: participantId });
+    return 'ok';
+  }
+
+  saidAnswer(participantId: string): void {
+    this.dispatch({ type: 'said-answer', counterId: participantId });
+  }
+
+  vote(participantId: string, correct: boolean): void {
+    this.dispatch({ type: 'vote', counterId: participantId, correct });
+  }
+
   getState(): RoomState {
-    return { participants: this.participants.map((p) => ({ ...p })) };
+    return {
+      participants: this.participants.map((p) => ({ ...p })),
+      game: this.game ? { ...this.game } : null,
+    };
+  }
+
+  toGameStateView(): GameStateView | null {
+    if (!this.game) return null;
+    const game = this.game;
+    const round = game.pack.rounds[game.roundIndex];
+    const currentQuestionData = game.currentQuestion
+      ? round.themes[game.currentQuestion.themeIndex].questions.find(
+          (q) => q.id === game.currentQuestion!.questionId,
+        )
+      : undefined;
+
+    const showAnswer = game.phase === 'judging' || game.phase === 'reveal';
+
+    return {
+      phase: game.phase,
+      roundIndex: game.roundIndex,
+      grid: round.themes.map((theme) => ({
+        themeName: theme.name,
+        questions: theme.questions.map((q) => ({
+          id: q.id,
+          price: q.price,
+          answered: game.answeredQuestionIds.includes(q.id),
+        })),
+      })),
+      turnParticipantId: game.turnCounterId,
+      currentQuestion: currentQuestionData
+        ? { text: currentQuestionData.text, price: currentQuestionData.price }
+        : null,
+      buzzedParticipantId: game.buzzedCounterId,
+      correctAnswer:
+        showAnswer && currentQuestionData
+          ? {
+              text: currentQuestionData.answer,
+              comment: currentQuestionData.comment,
+            }
+          : null,
+      timerDeadline: this.gameTimerDeadline,
+      scores: Object.entries(game.scores).map(([participantId, score]) => ({
+        participantId,
+        score,
+      })),
+    };
   }
 
   onChange(listener: (state: RoomState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  private dispatch(event: EngineEvent): void {
+    if (!this.game) return;
+    const { state, effects } = reduce(this.game, event);
+    this.game = state;
+    this.applyEffects(effects);
+    this.notify();
+  }
+
+  private applyEffects(effects: Effect[]): void {
+    for (const effect of effects) {
+      if (this.gameTimeoutHandle) {
+        clearTimeout(this.gameTimeoutHandle);
+        this.gameTimeoutHandle = null;
+        this.gameTimerDeadline = null;
+      }
+      if (effect.type === 'start-timer') {
+        this.gameTimerDeadline = Date.now() + effect.ms;
+        this.gameTimeoutHandle = setTimeout(() => {
+          this.dispatch({ type: 'timer-expired', timer: effect.timer });
+        }, effect.ms);
+      }
+    }
   }
 
   private notify(): void {

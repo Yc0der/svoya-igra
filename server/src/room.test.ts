@@ -33,6 +33,7 @@ describe('Room.join', () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledWith({
       participants: [expect.objectContaining({ name: 'Ваня' })],
+      game: null,
     });
   });
 
@@ -108,5 +109,159 @@ describe('Room.disconnect', () => {
     room.onChange(listener);
     room.disconnect('unknown-id');
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+import type { Pack } from './pack.js';
+
+const TEST_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'q1',
+              price: 100,
+              text: 'Вопрос 1?',
+              answer: 'ответ 1',
+              type: 'обычный',
+            },
+            {
+              id: 'q2',
+              price: 200,
+              text: 'Вопрос 2?',
+              answer: 'ответ 2',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+function joinedId(room: Room, name: string): string {
+  const result = room.join(name);
+  if (!('participant' in result)) throw new Error('expected join to succeed');
+  return result.participant.id;
+}
+
+describe('Room.startGame', () => {
+  it('fails with not-enough-players when fewer than two have joined', () => {
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    expect(room.startGame()).toEqual({ error: 'not-enough-players' });
+  });
+
+  it('fails with no-pack when the room was built without one', () => {
+    const room = new Room();
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    expect(room.startGame()).toEqual({ error: 'no-pack' });
+  });
+
+  it('starts the game and exposes a game state view once two have joined', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+
+    expect(room.startGame()).toEqual({ ok: true });
+
+    const view = room.toGameStateView();
+    expect(view).not.toBeNull();
+    expect(view?.phase).toBe('selecting');
+    expect(view?.grid).toEqual([
+      {
+        themeName: 'Тема',
+        questions: [
+          { id: 'q1', price: 100, answered: false },
+          { id: 'q2', price: 200, answered: false },
+        ],
+      },
+    ]);
+    expect([vanya, katya]).toContain(view?.turnParticipantId);
+    expect(view?.scores).toEqual(
+      expect.arrayContaining([
+        { participantId: vanya, score: 0 },
+        { participantId: katya, score: 0 },
+      ]),
+    );
+  });
+
+  it('notifies listeners on a successful start', () => {
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    const listener = vi.fn();
+    room.onChange(listener);
+    room.startGame();
+    expect(listener).toHaveBeenCalledOnce();
+  });
+});
+
+function startedRoom(): { room: Room; picker: string; other: string } {
+  const room = new Room(undefined, TEST_PACK);
+  const vanya = joinedId(room, 'Ваня');
+  const katya = joinedId(room, 'Катя');
+  room.startGame();
+  const view = room.toGameStateView()!;
+  const picker = view.turnParticipantId;
+  const other = picker === vanya ? katya : vanya;
+  return { room, picker, other };
+}
+
+describe('Room game flow', () => {
+  it('walks a question from selection through a correct answer', () => {
+    const { room, picker, other } = startedRoom();
+
+    room.selectQuestion(picker, 0, 'q1');
+    expect(room.toGameStateView()?.phase).toBe('question-open');
+    expect(room.toGameStateView()?.currentQuestion).toEqual({
+      text: 'Вопрос 1?',
+      price: 100,
+    });
+
+    expect(room.buzz(picker)).toBe('ok');
+    expect(room.toGameStateView()?.phase).toBe('buzzed');
+    expect(room.toGameStateView()?.buzzedParticipantId).toBe(picker);
+
+    room.saidAnswer(picker);
+    expect(room.toGameStateView()?.phase).toBe('judging');
+
+    room.vote(other, true);
+    // Голосование разрешается только по таймеру (Task 2) — до него фаза не
+    // меняется, даже когда все имеющие право уже проголосовали.
+    expect(room.toGameStateView()?.phase).toBe('judging');
+  });
+
+  it('rejects a buzz outside question-open as a falsestart, without touching game state', () => {
+    const { room, picker } = startedRoom();
+    const before = room.toGameStateView();
+
+    expect(room.buzz(picker)).toBe('falsestart');
+
+    expect(room.toGameStateView()).toEqual(before);
+  });
+
+  it('advances the round automatically once the question timer fires', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, picker } = startedRoom();
+      room.selectQuestion(picker, 0, 'q1');
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+
+      vi.advanceTimersByTime(25_000);
+      expect(room.toGameStateView()?.phase).toBe('reveal');
+
+      vi.advanceTimersByTime(4_000);
+      expect(room.toGameStateView()?.phase).toBe('selecting');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
