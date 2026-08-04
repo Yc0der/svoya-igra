@@ -15,6 +15,12 @@ coverage/
 *.tsbuildinfo
 .eslintcache
 
+# Playwright e2e output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Logs
 *.log
 npm-debug.log*
@@ -32,6 +38,17 @@ Thumbs.db
 # Per-machine Claude Code permissions — not shared repo config
 .claude/settings.local.json
 
+# Local git worktrees — scratch checkouts, not repo content
+.claude/worktrees/
+
+# Subagent-driven-development scratch workspace — ledgers, briefs, review packages
+.superpowers/
+
 # Local game state — SQLite (planned, see docs/ideas.md "Память и обучение генератора")
 *.db
 *.db-journal
+
+# Room state snapshot written by server/src/index.ts at runtime, plus the
+# temp file writeSnapshot() writes-then-renames for atomicity
+room-snapshot.json
+room-snapshot.json.tmp
