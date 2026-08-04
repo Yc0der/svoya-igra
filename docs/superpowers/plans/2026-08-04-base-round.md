@@ -2625,85 +2625,146 @@ git commit -m "feat: expose game state and actions from useRoomConnection"
 - [ ] **Step 1: Написать падающие тесты**
 
 ```ts
-// добавить в client/src/Player.test.tsx — использовать существующий в файле
-// способ мокать useRoomConnection (vi.mock('./useRoomConnection'), посмотреть
-// на текущие тесты для точной формы мока) и расширить возвращаемое им
-// значение полями game/falsestart/действиями.
+// добавить в client/src/Player.test.tsx. Файл уже использует
+// vi.mock('./useRoomConnection', () => ({ useRoomConnection: vi.fn() })) и
+// mockedUseRoomConnection.mockReturnValue({...полный объект...}) — каждый
+// вызов задаёт ВЕСЬ RoomConnection целиком, не частично. Раньше в файле было
+// всего 5 полей; теперь (после Task 7) их 12, и вручную перечислять все в
+// каждом тесте — сплошное дублирование, поэтому здесь заводятся два
+// локальных хелпера-фабрики (baseGame/connection), сохраняющие тот же
+// mockReturnValue-паттерн, просто с разумными дефолтами.
+
+import type { GameStateView, RoomConnection } from './useRoomConnection';
+
+function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
+  return {
+    phase: 'selecting',
+    roundIndex: 0,
+    grid: [],
+    turnParticipantId: '',
+    currentQuestion: null,
+    buzzedParticipantId: null,
+    correctAnswer: null,
+    timerDeadline: null,
+    scores: [],
+    ...overrides,
+  };
+}
+
+function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
+  return {
+    status: 'joined',
+    participants: [],
+    selfId: null,
+    lanUrl: null,
+    game: null,
+    falsestart: false,
+    join: vi.fn(),
+    startGame: vi.fn(),
+    selectQuestion: vi.fn(),
+    buzz: vi.fn(),
+    saidAnswer: vi.fn(),
+    vote: vi.fn(),
+    ...overrides,
+  };
+}
+
 it('shows a start-game button in the lobby once joined, before any game exists', () => {
-  mockUseRoomConnection({ status: 'joined', game: null });
+  mockedUseRoomConnection.mockReturnValue(connection({ game: null }));
   render(<Player />);
-  expect(screen.getByRole('button', { name: /начать игру/i })).toBeInTheDocument();
+  expect(
+    screen.getByRole('button', { name: /начать игру/i }),
+  ).toBeInTheDocument();
 });
 
 it('calls startGame when the lobby button is clicked', async () => {
   const startGame = vi.fn();
-  mockUseRoomConnection({ status: 'joined', game: null, startGame });
+  mockedUseRoomConnection.mockReturnValue(connection({ game: null, startGame }));
   render(<Player />);
   await userEvent.click(screen.getByRole('button', { name: /начать игру/i }));
   expect(startGame).toHaveBeenCalledOnce();
 });
 
 it('shows the question grid when it is my turn to select', () => {
-  mockUseRoomConnection({
-    status: 'joined',
-    selfId: 'me',
-    game: {
-      phase: 'selecting',
-      turnParticipantId: 'me',
-      grid: [{ themeName: 'Тема', questions: [{ id: 'q1', price: 100, answered: false }] }],
-    },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      selfId: 'me',
+      game: baseGame({
+        turnParticipantId: 'me',
+        grid: [
+          {
+            themeName: 'Тема',
+            questions: [{ id: 'q1', price: 100, answered: false }],
+          },
+        ],
+      }),
+    }),
+  );
   render(<Player />);
   expect(screen.getByRole('button', { name: /100/ })).toBeInTheDocument();
 });
 
 it("shows whose turn it is when it isn't mine", () => {
-  mockUseRoomConnection({
-    status: 'joined',
-    selfId: 'me',
-    game: { phase: 'selecting', turnParticipantId: 'other', grid: [] },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      selfId: 'me',
+      game: baseGame({ turnParticipantId: 'other' }),
+    }),
+  );
   render(<Player />);
   expect(screen.getByText(/сейчас выбирает/i)).toBeInTheDocument();
 });
 
 it('calls selectQuestion with the right ids when a grid cell is clicked', async () => {
   const selectQuestion = vi.fn();
-  mockUseRoomConnection({
-    status: 'joined',
-    selfId: 'me',
-    selectQuestion,
-    game: {
-      phase: 'selecting',
-      turnParticipantId: 'me',
-      grid: [{ themeName: 'Тема', questions: [{ id: 'q1', price: 100, answered: false }] }],
-    },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      selfId: 'me',
+      selectQuestion,
+      game: baseGame({
+        turnParticipantId: 'me',
+        grid: [
+          {
+            themeName: 'Тема',
+            questions: [{ id: 'q1', price: 100, answered: false }],
+          },
+        ],
+      }),
+    }),
+  );
   render(<Player />);
   await userEvent.click(screen.getByRole('button', { name: /100/ }));
   expect(selectQuestion).toHaveBeenCalledWith(0, 'q1');
 });
 
 it('shows the buzz button while the question is open', () => {
-  mockUseRoomConnection({ status: 'joined', game: { phase: 'question-open' } });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({ game: baseGame({ phase: 'question-open' }) }),
+  );
   render(<Player />);
   expect(screen.getByRole('button', { name: /жать/i })).toBeInTheDocument();
 });
 
 it('disables the buzz button for 2 seconds after a falsestart', () => {
-  mockUseRoomConnection({ status: 'joined', game: { phase: 'question-open' }, falsestart: true });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      game: baseGame({ phase: 'question-open' }),
+      falsestart: true,
+    }),
+  );
   render(<Player />);
   expect(screen.getByRole('button', { name: /жать/i })).toBeDisabled();
 });
 
 it('prompts the buzzed player to say the answer aloud and confirm', async () => {
   const saidAnswer = vi.fn();
-  mockUseRoomConnection({
-    status: 'joined',
-    selfId: 'me',
-    saidAnswer,
-    game: { phase: 'buzzed', buzzedParticipantId: 'me' },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      selfId: 'me',
+      saidAnswer,
+      game: baseGame({ phase: 'buzzed', buzzedParticipantId: 'me' }),
+    }),
+  );
   render(<Player />);
   expect(screen.getByText(/скажи ответ вслух/i)).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: /я ответил/i }));
@@ -2712,12 +2773,13 @@ it('prompts the buzzed player to say the answer aloud and confirm', async () => 
 
 it('shows judging buttons for everyone except the answerer', async () => {
   const vote = vi.fn();
-  mockUseRoomConnection({
-    status: 'joined',
-    selfId: 'me',
-    vote,
-    game: { phase: 'judging', buzzedParticipantId: 'other' },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      selfId: 'me',
+      vote,
+      game: baseGame({ phase: 'judging', buzzedParticipantId: 'other' }),
+    }),
+  );
   render(<Player />);
   await userEvent.click(screen.getByRole('button', { name: /зачёт/i }));
   expect(vote).toHaveBeenCalledWith(true);
@@ -2726,43 +2788,52 @@ it('shows judging buttons for everyone except the answerer', async () => {
 });
 
 it('does not show judging buttons to the answerer themselves', () => {
-  mockUseRoomConnection({
-    status: 'joined',
-    selfId: 'me',
-    game: { phase: 'judging', buzzedParticipantId: 'me' },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      selfId: 'me',
+      game: baseGame({ phase: 'judging', buzzedParticipantId: 'me' }),
+    }),
+  );
   render(<Player />);
   expect(screen.queryByRole('button', { name: /зачёт/i })).not.toBeInTheDocument();
 });
 
 it('shows the reveal result and updated scores', () => {
-  mockUseRoomConnection({
-    status: 'joined',
-    game: {
-      phase: 'reveal',
-      correctAnswer: { text: 'Ответ', comment: 'Комментарий' },
-      scores: [{ participantId: 'me', score: 100 }],
-    },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      game: baseGame({
+        phase: 'reveal',
+        correctAnswer: { text: 'Ответ', comment: 'Комментарий' },
+        scores: [{ participantId: 'me', score: 100 }],
+      }),
+    }),
+  );
   render(<Player />);
   expect(screen.getByText('Ответ')).toBeInTheDocument();
 });
 
 it('shows the final standings at game-end', () => {
-  mockUseRoomConnection({
-    status: 'joined',
-    game: {
-      phase: 'game-end',
-      scores: [{ participantId: 'me', score: 300 }, { participantId: 'other', score: 100 }],
-    },
-    participants: [{ id: 'me', name: 'Я', connected: true }, { id: 'other', name: 'Другой', connected: true }],
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      game: baseGame({
+        phase: 'game-end',
+        scores: [
+          { participantId: 'me', score: 300 },
+          { participantId: 'other', score: 100 },
+        ],
+      }),
+      participants: [
+        { id: 'me', name: 'Я', connected: true },
+        { id: 'other', name: 'Другой', connected: true },
+      ],
+    }),
+  );
   render(<Player />);
   expect(screen.getByText(/итог/i)).toBeInTheDocument();
 });
 ```
 
-Использовать существующий в файле паттерн мокания `useRoomConnection` (`vi.mock('./useRoomConnection', () => ({ useRoomConnection: () => mockReturn }))` или аналогичный, посмотреть на текущий `Player.test.tsx` для точной формы) — здесь `mockUseRoomConnection(partial)` обозначает эту существующую обвязку, расширенную новыми полями; переиспользовать её, а не создавать новую систему мокания.
+Три существующих теста в файле (`calls join with the entered name on submit`, `shows a message once joined instead of the form`, `shows an error when the name is taken`) сейчас строят `RoomConnection` литералом из 5 полей напрямую в `mockedUseRoomConnection.mockReturnValue({...})` — без `game`/`falsestart`/новых методов они перестанут собираться по типам после Task 7. Переписать все три на `connection({ ...тот же набор полей, что и был... })`, ничего не меняя по существу — то же поведение, тот же мок, просто через новый хелпер вместо голого литерала.
 
 - [ ] **Step 2: Убедиться, что тесты падают**
 
@@ -2941,90 +3012,143 @@ git commit -m "feat: drive the player screen from the round phase"
 - [ ] **Step 1: Написать падающие тесты**
 
 ```ts
-// добавить в client/src/Board.test.tsx, тем же способом мокания
-// useRoomConnection, что уже используется в файле.
-it('shows the lobby (QR + participants) when no game exists yet', () => {
-  mockUseRoomConnection({
-    lanUrl: 'http://x/',
-    participants: [{ id: '1', name: 'Ваня', connected: true }],
+// добавить в client/src/Board.test.tsx. Тот же паттерн и те же причины, что
+// в Task 8: файл использует vi.mock + mockedUseRoomConnection.mockReturnValue
+// с ПОЛНЫМ RoomConnection, поэтому здесь тоже заводятся baseGame/connection
+// — идентичные хелперам из Player.test.tsx (сознательное дублирование
+// между двумя тестовыми файлами; выносить в общий модуль не требуется ради
+// такого маленького совпадения).
+
+import type { GameStateView, RoomConnection } from './useRoomConnection';
+
+function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
+  return {
+    phase: 'selecting',
+    roundIndex: 0,
+    grid: [],
+    turnParticipantId: '',
+    currentQuestion: null,
+    buzzedParticipantId: null,
+    correctAnswer: null,
+    timerDeadline: null,
+    scores: [],
+    ...overrides,
+  };
+}
+
+function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
+  return {
+    status: 'joined',
+    participants: [],
+    selfId: null,
+    lanUrl: null,
     game: null,
-  });
+    falsestart: false,
+    join: vi.fn(),
+    startGame: vi.fn(),
+    selectQuestion: vi.fn(),
+    buzz: vi.fn(),
+    saidAnswer: vi.fn(),
+    vote: vi.fn(),
+    ...overrides,
+  };
+}
+
+it('shows the lobby (QR + participants) when no game exists yet', () => {
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      lanUrl: 'http://x/',
+      participants: [{ id: '1', name: 'Ваня', connected: true }],
+      game: null,
+    }),
+  );
   render(<Board />);
   expect(screen.getByText('Ваня')).toBeInTheDocument();
 });
 
 it('shows the grid with answered cells greyed out once the game has started', () => {
-  mockUseRoomConnection({
-    game: {
-      phase: 'selecting',
-      grid: [
-        {
-          themeName: 'Тема',
-          questions: [
-            { id: 'q1', price: 100, answered: true },
-            { id: 'q2', price: 200, answered: false },
-          ],
-        },
-      ],
-      scores: [],
-    },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      game: baseGame({
+        grid: [
+          {
+            themeName: 'Тема',
+            questions: [
+              { id: 'q1', price: 100, answered: true },
+              { id: 'q2', price: 200, answered: false },
+            ],
+          },
+        ],
+      }),
+    }),
+  );
   render(<Board />);
   expect(screen.getByText('200')).toBeInTheDocument();
   expect(screen.queryByText('100')).not.toBeInTheDocument();
 });
 
 it('shows the open question text', () => {
-  mockUseRoomConnection({
-    game: { phase: 'question-open', currentQuestion: { text: 'Столица Франции?', price: 100 }, grid: [], scores: [] },
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      game: baseGame({
+        phase: 'question-open',
+        currentQuestion: { text: 'Столица Франции?', price: 100 },
+      }),
+    }),
+  );
   render(<Board />);
   expect(screen.getByText('Столица Франции?')).toBeInTheDocument();
 });
 
 it('shows who buzzed', () => {
-  mockUseRoomConnection({
-    game: { phase: 'buzzed', buzzedParticipantId: '1', grid: [], scores: [] },
-    participants: [{ id: '1', name: 'Ваня', connected: true }],
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      game: baseGame({ phase: 'buzzed', buzzedParticipantId: '1' }),
+      participants: [{ id: '1', name: 'Ваня', connected: true }],
+    }),
+  );
   render(<Board />);
   expect(screen.getByText(/Ваня/)).toBeInTheDocument();
 });
 
 it('shows the correct answer and score on reveal', () => {
-  mockUseRoomConnection({
-    game: {
-      phase: 'reveal',
-      correctAnswer: { text: 'Париж' },
-      grid: [],
-      scores: [{ participantId: '1', score: 100 }],
-    },
-    participants: [{ id: '1', name: 'Ваня', connected: true }],
-  });
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      game: baseGame({
+        phase: 'reveal',
+        correctAnswer: { text: 'Париж' },
+        scores: [{ participantId: '1', score: 100 }],
+      }),
+      participants: [{ id: '1', name: 'Ваня', connected: true }],
+    }),
+  );
   render(<Board />);
   expect(screen.getByText('Париж')).toBeInTheDocument();
 });
 
 it('shows final standings at game-end', () => {
-  mockUseRoomConnection({
-    game: {
-      phase: 'game-end',
-      grid: [],
-      scores: [
-        { participantId: '1', score: 300 },
-        { participantId: '2', score: 100 },
+  mockedUseRoomConnection.mockReturnValue(
+    connection({
+      game: baseGame({
+        phase: 'game-end',
+        scores: [
+          { participantId: '1', score: 300 },
+          { participantId: '2', score: 100 },
+        ],
+      }),
+      participants: [
+        { id: '1', name: 'Ваня', connected: true },
+        { id: '2', name: 'Катя', connected: true },
       ],
-    },
-    participants: [
-      { id: '1', name: 'Ваня', connected: true },
-      { id: '2', name: 'Катя', connected: true },
-    ],
-  });
+    }),
+  );
   render(<Board />);
   const items = screen.getAllByRole('listitem');
   expect(items[0]).toHaveTextContent('Ваня');
 });
 ```
+
+Три существующих теста в файле (`lists connected and disconnected participants`, `shows the LAN url as text and a QR code once known`, `renders neither URL nor QR code before the LAN url is known`) сейчас строят `RoomConnection` литералом из 5 полей напрямую — без `game`/`falsestart`/новых методов они перестанут собираться по типам после Task 7. Переписать все три на `connection({ ...тот же набор полей, что и был... })`, ничего не меняя по существу.
 
 - [ ] **Step 2: Убедиться, что тесты падают**
 
@@ -3258,3 +3382,5 @@ git commit -m "test: add e2e scenario for a full two-question round"
 **Task 6, неполнота примера в плане, найдена реализатором (2026-08-04):** блок кода Task 6 показывал только обновление `broadcastState` (добавление `game` в рассылаемое состояние), но в `server.ts` есть второе место, отправляющее `ServerMessage` с типом `'state'` — начальный `send(ws, {type:'state', ...})` сразу после `hello` при подключении нового сокета. Это место в код плана не попало вообще, не только с ошибкой — план просто не показал его. Реализатор обнаружил это по ошибке typecheck (поле `game` стало обязательным в Task 3) и добавил `game: room.toGameStateView()` туда же. Не отклонение от явного решения плана, а восполнение пробела в примере кода — план для этой задачи не был исчерпывающим.
 
 **Task 7, неверный тестовый фреймворк в плане, найдено до диспетчеризации (2026-08-04):** исходный текст плана для Task 7 писал новые тесты под API библиотеки `mock-socket` (`renderConnection()`, `server.connected`, `server.send`, `expect(server).toReceiveMessage(...)`) — но в реальном `client/src/useRoomConnection.test.ts` такой библиотеки и такого хелпера нет вообще. Файл с самого начала (со времён скелета) использует рукописный класс `FakeWebSocket` (методы `emitOpen()`/`emitMessage()`, поле `sent`) и передаёт его как `wsFactory` напрямую в `useRoomConnection(factory)`, без всякого мок-сервера с отдельным сетевым уровнем. Тесты в исходном тексте плана просто не собрались бы и не заработали бы против этого файла — это не опечатка в деталях, а целиком выдуманный, никогда не существовавший в проекте API. Поймано при чтении реального файла перед диспетчеризацией задачи, до того как реализатор успел на это наткнуться. Код плана (раздел Task 7, Step 1) переписан на реальный паттерн `FakeWebSocket`/`renderHook`/`act`, один в один с уже существующими тестами того же файла.
+
+**Tasks 8 и 9, тот же класс несоответствия, найдено до диспетчеризации (2026-08-04):** по тому же поводу, что и Task 7 — исходный текст плана для `Player.test.tsx`/`Board.test.tsx` предполагал несуществующий хелпер `mockUseRoomConnection(partial)`, принимающий частичный объект. Реальный файл использует `vi.mock('./useRoomConnection', () => ({ useRoomConnection: vi.fn() }))` и `mockedUseRoomConnection.mockReturnValue({...ПОЛНЫЙ объект...})` — каждый вызов задаёт весь `RoomConnection` целиком, без слияния с дефолтами. С 12 полями в `RoomConnection` после Task 7 (было 5) писать это вручную в каждом из ~18 тестов было бы избыточным дублированием, поэтому код плана для обеих задач переписан на два локальных хелпера-фабрики (`baseGame`/`connection`) с разумными дефолтами и `...overrides` — то же самое `mockReturnValue`, просто без повторения всех полей каждый раз. Заодно учтено: три теста, уже существующих в каждом файле до этой вехи, тоже перестанут собираться без `game`/`falsestart`/новых методов — их нужно завернуть в `connection({...})` с тем же набором полей, что и раньше, без изменения сути.
