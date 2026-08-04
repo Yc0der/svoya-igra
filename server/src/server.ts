@@ -69,6 +69,7 @@ export function createServer(options: CreateServerOptions): GameServer {
     const message: ServerMessage = {
       type: 'state',
       participants: toParticipantView(room.getState()),
+      game: room.toGameStateView(),
     };
     const payload = JSON.stringify(message);
     // Deferred to a microtask so that a direct, synchronous reply to the
@@ -121,6 +122,7 @@ export function createServer(options: CreateServerOptions): GameServer {
     send(ws, {
       type: 'state',
       participants: toParticipantView(room.getState()),
+      game: room.toGameStateView(),
     });
 
     ws.on('message', (data) => {
@@ -161,6 +163,46 @@ export function createServer(options: CreateServerOptions): GameServer {
           token: result.participant.token,
           name: result.participant.name,
         });
+      }
+
+      if (message.type === 'start-game') {
+        room.startGame();
+      }
+
+      if (message.type === 'select-question') {
+        const participantId = connections.get(ws);
+        if (
+          participantId &&
+          typeof message.themeIndex === 'number' &&
+          typeof message.questionId === 'string'
+        ) {
+          room.selectQuestion(
+            participantId,
+            message.themeIndex,
+            message.questionId,
+          );
+        }
+      }
+
+      if (message.type === 'buzz') {
+        const participantId = connections.get(ws);
+        if (participantId && room.buzz(participantId) === 'falsestart') {
+          send(ws, { type: 'falsestart' });
+        }
+      }
+
+      if (message.type === 'said-answer') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.saidAnswer(participantId);
+        }
+      }
+
+      if (message.type === 'vote') {
+        const participantId = connections.get(ws);
+        if (participantId && typeof message.correct === 'boolean') {
+          room.vote(participantId, message.correct);
+        }
       }
     });
 

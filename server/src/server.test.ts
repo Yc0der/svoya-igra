@@ -11,6 +11,7 @@ import {
   type GameServer,
 } from './server.js';
 import type { ServerMessage } from './protocol.js';
+import type { Pack } from './pack.js';
 
 // Attaches a persistent 'message' listener synchronously at socket creation
 // (before any await), so no frame can ever arrive unheard even if the server
@@ -90,7 +91,7 @@ describe('createServer', () => {
     });
 
     const state = await nextMessage();
-    expect(state).toEqual({ type: 'state', participants: [] });
+    expect(state).toEqual({ type: 'state', participants: [], game: null });
 
     ws.close();
   });
@@ -123,6 +124,7 @@ describe('createServer', () => {
           connected: true,
         },
       ],
+      game: null,
     });
 
     board.close();
@@ -177,6 +179,7 @@ describe('createServer', () => {
       participants: [
         { id: joined.participantId, name: 'Ваня', connected: false },
       ],
+      game: null,
     });
 
     const reconnected = new WebSocket(url);
@@ -201,6 +204,7 @@ describe('createServer', () => {
       participants: [
         { id: joined.participantId, name: 'Ваня', connected: true },
       ],
+      game: null,
     });
 
     board.close();
@@ -337,6 +341,7 @@ describe('createServer', () => {
       participants: [
         { id: joined.participantId, name: 'Ваня', connected: true },
       ],
+      game: null,
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -367,6 +372,7 @@ describe('createServer', () => {
         { id: joined.participantId, name: 'Ваня', connected: true },
         { id: expect.any(String), name: 'Оля', connected: true },
       ],
+      game: null,
     });
 
     board.close();
@@ -441,10 +447,154 @@ describe('createServer heartbeat', () => {
       participants: [
         { id: joined.participantId, name: 'Ваня', connected: false },
       ],
+      game: null,
     });
 
     board.close();
     player.resume();
     player.terminate();
+  });
+});
+
+const TEST_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'q1',
+              price: 100,
+              text: 'Вопрос?',
+              answer: 'Ответ',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+async function joinPlayer(baseUrl: string, name: string) {
+  const ws = new WebSocket(baseUrl);
+  const nextMessage = collectMessages(ws);
+  await waitForOpen(ws);
+  await nextMessage(); // hello
+  await nextMessage(); // state
+  ws.send(JSON.stringify({ type: 'join', name }));
+  const joined = (await nextMessage()) as {
+    participantId: string;
+    token: string;
+  };
+  await nextMessage(); // сборос состояния лобби после join, которое видит сам подключившийся
+  return { ws, nextMessage, participantId: joined.participantId };
+}
+
+type Player = Awaited<ReturnType<typeof joinPlayer>>;
+
+// Каждая рассылка состояния уходит на ОБА сокета сразу, поэтому любое
+// действие, которое меняет состояние комнаты, оставляет по одному новому
+// сообщению в очереди каждого игрока — даже если тест интересует состояние
+// только одного из них. Не вычитывать вторую очередь означает, что она будет
+// отдана следующему вызову nextMessage() у ТОГО игрока в следующий раз, когда
+// тест решит его использовать. `settle` вычитывает сразу обе и возвращает ту
+// сторону, которая нужна тесту.
+async function settle(
+  a: Player,
+  b: Player,
+  interested: Player,
+): Promise<unknown> {
+  const [aMsg, bMsg] = await Promise.all([a.nextMessage(), b.nextMessage()]);
+  return interested === a ? aMsg : bMsg;
+}
+
+describe('createServer game flow', () => {
+  it('plays a question from start-game through a correct answer', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-game-'));
+    const room = new Room(undefined, TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    // Присоединение b уже транслировало обновлённый состав лобби всем — эту
+    // трансляцию joinPlayer(b) вычитал только из очереди b, не из очереди a.
+    await a.nextMessage();
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const aState = (await settle(a, b, a)) as {
+      game: { phase: string; turnParticipantId: string };
+    };
+    expect(aState.game.phase).toBe('selecting');
+
+    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'q1',
+      }),
+    );
+    const afterSelect = (await settle(a, b, picker)) as {
+      game: { phase: string };
+    };
+    expect(afterSelect.game.phase).toBe('question-open');
+
+    picker.ws.send(JSON.stringify({ type: 'buzz' }));
+    const afterBuzz = (await settle(a, b, picker)) as {
+      game: { phase: string; buzzedParticipantId: string };
+    };
+    expect(afterBuzz.game.phase).toBe('buzzed');
+    expect(afterBuzz.game.buzzedParticipantId).toBe(picker.participantId);
+
+    a.ws.close();
+    b.ws.close();
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('replies falsestart to the offending socket alone, without broadcasting a state change', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-falsestart-'));
+    const room = new Room(undefined, TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage(); // трансляция состава лобби после join b, см. комментарий выше
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    await settle(a, b, a);
+
+    // Сейчас фаза 'selecting' — жать рано. falsestart уходит только b, без
+    // широковещательной рассылки — a ничего не получает и его очередь
+    // трогать не нужно.
+    b.ws.send(JSON.stringify({ type: 'buzz' }));
+    const reply = await b.nextMessage();
+    expect(reply).toEqual({ type: 'falsestart' });
+
+    a.ws.close();
+    b.ws.close();
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
   });
 });
