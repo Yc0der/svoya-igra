@@ -2781,9 +2781,11 @@ it('shows judging buttons for everyone except the answerer', async () => {
     }),
   );
   render(<Player />);
-  await userEvent.click(screen.getByRole('button', { name: /зачёт/i }));
+  // Якорный regex — /зачёт/i без ^$ ловит и «Зачёт», и «Незачёт» разом,
+  // потому что вторая строка содержит первую как подстроку.
+  await userEvent.click(screen.getByRole('button', { name: /^зачёт$/i }));
   expect(vote).toHaveBeenCalledWith(true);
-  await userEvent.click(screen.getByRole('button', { name: /незачёт/i }));
+  await userEvent.click(screen.getByRole('button', { name: /^незачёт$/i }));
   expect(vote).toHaveBeenCalledWith(false);
 });
 
@@ -2795,7 +2797,9 @@ it('does not show judging buttons to the answerer themselves', () => {
     }),
   );
   render(<Player />);
-  expect(screen.queryByRole('button', { name: /зачёт/i })).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole('button', { name: /^зачёт$/i }),
+  ).not.toBeInTheDocument();
 });
 
 it('shows the reveal result and updated scores', () => {
@@ -2911,7 +2915,7 @@ export function Player() {
           {game.grid.map((theme) => (
             <div key={theme.themeName}>
               <h2>{theme.themeName}</h2>
-              {theme.questions.map((q, questionIndexInTheme) => (
+              {theme.questions.map((q) => (
                 <button
                   key={q.id}
                   disabled={q.answered}
@@ -3384,3 +3388,10 @@ git commit -m "test: add e2e scenario for a full two-question round"
 **Task 7, неверный тестовый фреймворк в плане, найдено до диспетчеризации (2026-08-04):** исходный текст плана для Task 7 писал новые тесты под API библиотеки `mock-socket` (`renderConnection()`, `server.connected`, `server.send`, `expect(server).toReceiveMessage(...)`) — но в реальном `client/src/useRoomConnection.test.ts` такой библиотеки и такого хелпера нет вообще. Файл с самого начала (со времён скелета) использует рукописный класс `FakeWebSocket` (методы `emitOpen()`/`emitMessage()`, поле `sent`) и передаёт его как `wsFactory` напрямую в `useRoomConnection(factory)`, без всякого мок-сервера с отдельным сетевым уровнем. Тесты в исходном тексте плана просто не собрались бы и не заработали бы против этого файла — это не опечатка в деталях, а целиком выдуманный, никогда не существовавший в проекте API. Поймано при чтении реального файла перед диспетчеризацией задачи, до того как реализатор успел на это наткнуться. Код плана (раздел Task 7, Step 1) переписан на реальный паттерн `FakeWebSocket`/`renderHook`/`act`, один в один с уже существующими тестами того же файла.
 
 **Tasks 8 и 9, тот же класс несоответствия, найдено до диспетчеризации (2026-08-04):** по тому же поводу, что и Task 7 — исходный текст плана для `Player.test.tsx`/`Board.test.tsx` предполагал несуществующий хелпер `mockUseRoomConnection(partial)`, принимающий частичный объект. Реальный файл использует `vi.mock('./useRoomConnection', () => ({ useRoomConnection: vi.fn() }))` и `mockedUseRoomConnection.mockReturnValue({...ПОЛНЫЙ объект...})` — каждый вызов задаёт весь `RoomConnection` целиком, без слияния с дефолтами. С 12 полями в `RoomConnection` после Task 7 (было 5) писать это вручную в каждом из ~18 тестов было бы избыточным дублированием, поэтому код плана для обеих задач переписан на два локальных хелпера-фабрики (`baseGame`/`connection`) с разумными дефолтами и `...overrides` — то же самое `mockReturnValue`, просто без повторения всех полей каждый раз. Заодно учтено: три теста, уже существующих в каждом файле до этой вехи, тоже перестанут собираться без `game`/`falsestart`/новых методов — их нужно завернуть в `connection({...})` с тем же набором полей, что и раньше, без изменения сути.
+
+**Task 8, два бага в собственном коде плана, найдены реализатором (2026-08-04):**
+
+1. Тест «shows judging buttons for everyone except the answerer» использовал `screen.getByRole('button', { name: /зачёт/i })` без якорей `^$` — эта регулярка ловит и «Зачёт», и «Незачёт» разом, потому что вторая строка содержит первую как подстроку, а `getByRole` с неоднозначным совпадением падает с ошибкой «multiple elements found». То же самое во втором тесте («does not show judging buttons to the answerer themselves»), где `queryByRole` с той же регуляркой возвращал бы не тот элемент. Исправлено на `/^зачёт$/i`/`/^незачёт$/i`.
+2. `Player.tsx`: `theme.questions.map((q, questionIndexInTheme) => (...))` — второй параметр `questionIndexInTheme` объявлялся, но нигде не использовался (индекс темы вычислялся отдельно через `game.grid.indexOf(theme)`), что валит строгий `tsc -b` клиента (`noUnusedParameters`). Исправлено удалением неиспользуемого параметра.
+
+Оба — механические недосмотры при написании плана, не осознанные решения; реализатор поймал оба сам при прогоне тестов/тайпчека до всякого ревью. Код плана (Task 8, Step 1 и Step 3) обновлён на исправленные версии.
