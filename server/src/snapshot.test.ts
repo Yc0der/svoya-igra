@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   deserializeSnapshot,
   readSnapshot,
@@ -9,6 +9,11 @@ import {
   writeSnapshot,
 } from './snapshot.js';
 import type { RoomState } from './room.js';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, writeFile: vi.fn(actual.writeFile) };
+});
 
 describe('serializeSnapshot / deserializeSnapshot', () => {
   it('round-trips a room state, forcing all participants to disconnected', () => {
@@ -78,5 +83,45 @@ describe('writeSnapshot / readSnapshot', () => {
   it('throws on well-formed JSON that is not a room state', async () => {
     await writeFile(path, '{"not-participants":[]}', 'utf8');
     await expect(readSnapshot(path)).rejects.toThrow(TypeError);
+  });
+
+  // Регрессия: `writeSnapshot` раньше писала одним `writeFile` прямо в
+  // целевой путь, так что обрыв записи (Ctrl+C, падение процесса) обрезал
+  // сам снапшот на диске. Мок `writeFile` здесь имитирует именно обрыв —
+  // на диск попадает не весь JSON, а затем бросается исключение, — и
+  // проверяет, что в итоге на целевом пути остался старый, полностью
+  // валидный снапшот, а не обрезанный мусор.
+  it('does not truncate the existing snapshot when the write is interrupted', async () => {
+    const initial: RoomState = {
+      participants: [
+        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+      ],
+    };
+    await writeSnapshot(path, initial);
+
+    const { writeFile: actualWriteFile } =
+      await vi.importActual<typeof import('node:fs/promises')>(
+        'node:fs/promises',
+      );
+    vi.mocked(writeFile).mockImplementationOnce(async (target, data) => {
+      await actualWriteFile(target as string, String(data).slice(0, 5), 'utf8');
+      throw new Error('simulated crash mid-write');
+    });
+
+    const next: RoomState = {
+      participants: [
+        { id: '2', name: 'Катя', token: 'tok-2', connected: true },
+      ],
+    };
+    await expect(writeSnapshot(path, next)).rejects.toThrow(
+      'simulated crash mid-write',
+    );
+
+    const result = await readSnapshot(path);
+    expect(result).toEqual({
+      participants: [
+        { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
+      ],
+    });
   });
 });
