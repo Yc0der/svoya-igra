@@ -48,5 +48,7 @@ Thumbs.db
 *.db
 *.db-journal
 
-# Room state snapshot written by server/src/index.ts at runtime
+# Room state snapshot written by server/src/index.ts at runtime, plus the
+# temp file writeSnapshot() writes-then-renames for atomicity
 room-snapshot.json
+room-snapshot.json.tmp
