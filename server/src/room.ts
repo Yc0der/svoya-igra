@@ -218,18 +218,36 @@ export class Room {
     if (!this.game) return;
     const { state, effects } = reduce(this.game, event);
     this.game = state;
-    this.applyEffects(effects);
+    this.applyEffects(effects, event.type === 'timer-expired');
     this.notify();
   }
 
-  private applyEffects(effects: Effect[]): void {
-    // Сброс — один раз перед циклом, а не внутри него. При пустом effects[]
-    // (например, 'reveal' → 'selecting' или 'round-end' → 'selecting', обе
-    // фазы без своего таймера) тело цикла вообще не выполняется — если бы
-    // сброс жил внутри for, устаревший дедлайн остался бы висеть в
-    // gameTimerDeadline/gameTimeoutHandle и уходил бы в toGameStateView() как
-    // ложный, уже прошедший дедлайн, вплоть до следующего эффекта, который
-    // его перезапишет (для 'game-end' — уже никогда).
+  private applyEffects(effects: Effect[], timerJustFired = false): void {
+    // Пустой effects[] означает две РАЗНЫЕ вещи в зависимости от того, что
+    // за событие его породило, и их нельзя путать:
+    //
+    // 1. Событие НЕ timer-expired (например, 'vote' во время судейства —
+    //    голос просто копится в state.votes, разрешение приходит только по
+    //    таймеру) — пустой effects[] означает «про таймер ничего не
+    //    меняется», а не «таймера больше нет». Уже тикающий таймер (взведённый
+    //    более ранним диспатчем — скажем, входом в 'judging') должен
+    //    продолжать тикать как ни в чём не бывало. Сбросить его здесь значит
+    //    убить единственный механизм, который вообще разрешает судейство —
+    //    ни один будущий 'vote' его не переустановит, потому что handleVote
+    //    в движке сам никогда не эмитит start-timer. Судейство подвисло бы
+    //    навсегда после первого же голоса.
+    // 2. Событие timer-expired — это значит, что ИМЕННО ТЕКУЩИЙ таймер только
+    //    что сработал сам. Даже если новых эффектов нет (после РАСКРЫТИЯ фаза
+    //    может стать 'selecting'/'game-end', у которых таймера вообще нет),
+    //    бухгалтерию (gameTimeoutHandle/gameTimerDeadline) всё равно нужно
+    //    обнулить — иначе toGameStateView() будет показывать устаревший, уже
+    //    прошедший дедлайн (для 'game-end' — уже навсегда).
+    //
+    // Отсюда: трогаем bookkeeping только когда либо пришли новые эффекты,
+    // либо только что сработал именно текущий таймер.
+    if (effects.length === 0 && !timerJustFired) {
+      return;
+    }
     if (this.gameTimeoutHandle) {
       clearTimeout(this.gameTimeoutHandle);
       this.gameTimeoutHandle = null;

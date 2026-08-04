@@ -337,4 +337,30 @@ describe('Room game flow', () => {
       vi.useRealTimers();
     }
   });
+
+  it('does not clear the vote timer when a vote is cast — judging still resolves via the timeout', () => {
+    // Регрессия: 'vote' — не timer-expired событие, и у него всегда пустой
+    // effects[] (движок просто копит голос, решение приходит по таймеру).
+    // Если applyEffects трогает bookkeeping на КАЖДЫЙ пустой effects[], а не
+    // только когда истёк именно текущий таймер, любой голос убивает уже
+    // тикающий таймер судейства, и партия зависает навсегда после первого
+    // же голоса — ни один будущий 'vote' его не переустановит.
+    vi.useFakeTimers();
+    try {
+      const { room, picker, other } = startedRoom();
+      room.selectQuestion(picker, 0, 'q1');
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      expect(room.toGameStateView()?.phase).toBe('judging');
+      const deadlineBeforeVote = room.toGameStateView()?.timerDeadline;
+
+      room.vote(other, true);
+      expect(room.toGameStateView()?.timerDeadline).toBe(deadlineBeforeVote);
+
+      vi.advanceTimersByTime(10_000);
+      expect(room.toGameStateView()?.phase).toBe('reveal');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
