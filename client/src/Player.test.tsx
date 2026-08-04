@@ -125,15 +125,16 @@ describe('Player', () => {
     expect(screen.getByRole('button', { name: /100/ })).toBeInTheDocument();
   });
 
-  it("shows whose turn it is when it isn't mine", () => {
+  it("shows whose turn it is by name when it isn't mine", () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'me',
+        participants: [{ id: 'other', name: 'Катя', connected: true }],
         game: baseGame({ turnParticipantId: 'other' }),
       }),
     );
     render(<Player />);
-    expect(screen.getByText(/сейчас выбирает/i)).toBeInTheDocument();
+    expect(screen.getByText(/сейчас выбирает Катя/i)).toBeInTheDocument();
   });
 
   it('calls selectQuestion with the right ids when a grid cell is clicked', async () => {
@@ -192,6 +193,18 @@ describe('Player', () => {
     expect(saidAnswer).toHaveBeenCalledOnce();
   });
 
+  it('shows the answering opponent by name to everyone else', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [{ id: 'other', name: 'Катя', connected: true }],
+        game: baseGame({ phase: 'buzzed', buzzedParticipantId: 'other' }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/Катя отвечает/i)).toBeInTheDocument();
+  });
+
   it('shows judging buttons for everyone except the answerer', async () => {
     const vote = vi.fn();
     mockedUseRoomConnection.mockReturnValue(
@@ -204,11 +217,11 @@ describe('Player', () => {
     render(<Player />);
     await userEvent.click(screen.getByRole('button', { name: /^зачёт$/i }));
     expect(vote).toHaveBeenCalledWith(true);
-    await userEvent.click(screen.getByRole('button', { name: /незачёт/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^незачёт$/i }));
     expect(vote).toHaveBeenCalledWith(false);
   });
 
-  it('does not show judging buttons to the answerer themselves', () => {
+  it('does not show judging buttons to the answerer themselves, showing a waiting message instead', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'me',
@@ -217,13 +230,15 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(
-      screen.queryByRole('button', { name: /зачёт/i }),
+      screen.queryByRole('button', { name: /^зачёт$/i }),
     ).not.toBeInTheDocument();
+    expect(screen.getByText(/ждём решения/i)).toBeInTheDocument();
   });
 
-  it('shows the reveal result and updated scores', () => {
+  it('shows the reveal result, comment, and updated scores by name', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
+        participants: [{ id: 'me', name: 'Ваня', connected: true }],
         game: baseGame({
           phase: 'reveal',
           correctAnswer: { text: 'Ответ', comment: 'Комментарий' },
@@ -233,9 +248,26 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByText('Ответ')).toBeInTheDocument();
+    expect(screen.getByText('Комментарий')).toBeInTheDocument();
+    expect(screen.getByText(/Ваня: 100/)).toBeInTheDocument();
   });
 
-  it('shows the final standings at game-end', () => {
+  it('shows the intermediate score by name at round-end', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        participants: [{ id: 'me', name: 'Ваня', connected: true }],
+        game: baseGame({
+          phase: 'round-end',
+          scores: [{ participantId: 'me', score: 100 }],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/следующий раунд/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ваня: 100/)).toBeInTheDocument();
+  });
+
+  it('shows the final standings at game-end by name, not raw id', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         game: baseGame({
@@ -253,5 +285,8 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByText(/итог/i)).toBeInTheDocument();
+    expect(screen.getByText(/Я: 300/)).toBeInTheDocument();
+    expect(screen.getByText(/Другой: 100/)).toBeInTheDocument();
+    expect(screen.queryByText('me')).not.toBeInTheDocument();
   });
 });

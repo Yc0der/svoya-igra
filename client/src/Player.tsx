@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useRoomConnection } from './useRoomConnection';
+import { useRoomConnection, type GameStateView } from './useRoomConnection';
 
 export function Player() {
   const {
@@ -7,6 +7,7 @@ export function Player() {
     join,
     game,
     selfId,
+    participants,
     falsestart,
     startGame,
     selectQuestion,
@@ -15,6 +16,27 @@ export function Player() {
     vote,
   } = useRoomConnection();
   const [name, setName] = useState('');
+
+  function nameOf(participantId: string | null): string {
+    if (!participantId) return '';
+    return (
+      participants.find((p) => p.id === participantId)?.name ?? participantId
+    );
+  }
+
+  function scoreboard(scores: GameStateView['scores']) {
+    return (
+      <ul>
+        {[...scores]
+          .sort((a, b) => b.score - a.score)
+          .map((s) => (
+            <li key={s.participantId}>
+              {nameOf(s.participantId)}: {s.score}
+            </li>
+          ))}
+      </ul>
+    );
+  }
 
   function handleSubmit(event: FormEvent): void {
     event.preventDefault();
@@ -58,7 +80,7 @@ export function Player() {
   switch (game.phase) {
     case 'selecting':
       if (!isMyTurn) {
-        return <p>Сейчас выбирает другой игрок</p>;
+        return <p>Сейчас выбирает {nameOf(game.turnParticipantId)}</p>;
       }
       return (
         <div>
@@ -95,7 +117,7 @@ export function Player() {
           </div>
         );
       }
-      return <p>Соперник отвечает</p>;
+      return <p>{nameOf(game.buzzedParticipantId)} отвечает</p>;
 
     case 'judging':
       if (isBuzzedByMe) {
@@ -113,25 +135,23 @@ export function Player() {
         <div>
           <p>{game.correctAnswer?.text}</p>
           {game.correctAnswer?.comment && <p>{game.correctAnswer.comment}</p>}
+          {scoreboard(game.scores)}
         </div>
       );
 
     case 'round-end':
-      return <p>Раунд окончен, следующий раунд начинается</p>;
+      return (
+        <div>
+          <p>Раунд окончен, следующий раунд начинается</p>
+          {scoreboard(game.scores)}
+        </div>
+      );
 
     case 'game-end':
       return (
         <div>
           <h2>Итог</h2>
-          <ul>
-            {[...game.scores]
-              .sort((a, b) => b.score - a.score)
-              .map((s) => (
-                <li key={s.participantId}>
-                  {s.participantId}: {s.score}
-                </li>
-              ))}
-          </ul>
+          {scoreboard(game.scores)}
         </div>
       );
   }
