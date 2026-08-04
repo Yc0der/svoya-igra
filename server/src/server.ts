@@ -193,6 +193,17 @@ export function createServer(options: CreateServerOptions): GameServer {
       ws.ping();
     }
   }, HEARTBEAT_INTERVAL_MS);
+  // Unref'd so this interval alone can't keep the event loop alive. On a
+  // successful start the listening httpServer (and any open WS connections)
+  // already hold their own refs, so the process still stays up normally.
+  // The reason this matters: when httpServer.listen() fails (e.g. EADDRINUSE
+  // in index.ts), createServer() has already run and this interval is
+  // ticking, but close() — the only thing that clearInterval()s it — never
+  // gets called, because the caller never got a server to close. A ref'd
+  // timer in that state keeps the process running forever despite
+  // process.exitCode being set, which is exactly the busy-port hang this
+  // fixes.
+  heartbeat.unref();
 
   return {
     httpServer,
