@@ -145,6 +145,33 @@ const TEST_PACK: Pack = {
   ],
 };
 
+// Пакет из одного вопроса: единственный раунд, единственная тема — раскрытие
+// этого вопроса завершает и раунд, и партию сразу (regression-тест на
+// timerDeadline в фазе 'game-end').
+const ONE_QUESTION_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'q1',
+              price: 100,
+              text: 'Вопрос 1?',
+              answer: 'ответ 1',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 function joinedId(room: Room, name: string): string {
   const result = room.join(name);
   if (!('participant' in result)) throw new Error('expected join to succeed');
@@ -260,6 +287,52 @@ describe('Room game flow', () => {
 
       vi.advanceTimersByTime(4_000);
       expect(room.toGameStateView()?.phase).toBe('selecting');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Regression: applyEffects раньше сбрасывал gameTimeoutHandle/
+  // gameTimerDeadline внутри `for (const effect of effects)`, поэтому при
+  // пустом effects[] (обе фазы ниже — 'selecting' и 'game-end' — не заводят
+  // свой таймер) сброс не происходил вообще, и toGameStateView().timerDeadline
+  // продолжал показывать устаревший, уже прошедший дедлайн от таймера, который
+  // только что сработал.
+  it('clears timerDeadline once the reveal timer returns the round to selecting', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, picker } = startedRoom();
+      room.selectQuestion(picker, 0, 'q1');
+
+      vi.advanceTimersByTime(25_000); // question timer expires -> reveal
+      expect(room.toGameStateView()?.phase).toBe('reveal');
+      expect(room.toGameStateView()?.timerDeadline).not.toBeNull();
+
+      vi.advanceTimersByTime(4_000); // reveal timer expires -> selecting, effects: []
+      expect(room.toGameStateView()?.phase).toBe('selecting');
+      expect(room.toGameStateView()?.timerDeadline).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears timerDeadline once the reveal timer ends the game', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, ONE_QUESTION_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame();
+      const picker = room.toGameStateView()!.turnParticipantId;
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(25_000); // question timer expires -> reveal
+      expect(room.toGameStateView()?.phase).toBe('reveal');
+      expect(room.toGameStateView()?.timerDeadline).not.toBeNull();
+
+      vi.advanceTimersByTime(4_000); // reveal timer expires -> round complete, last round -> game-end, effects: []
+      expect(room.toGameStateView()?.phase).toBe('game-end');
+      expect(room.toGameStateView()?.timerDeadline).toBeNull();
     } finally {
       vi.useRealTimers();
     }

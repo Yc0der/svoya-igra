@@ -223,12 +223,19 @@ export class Room {
   }
 
   private applyEffects(effects: Effect[]): void {
+    // Сброс — один раз перед циклом, а не внутри него. При пустом effects[]
+    // (например, 'reveal' → 'selecting' или 'round-end' → 'selecting', обе
+    // фазы без своего таймера) тело цикла вообще не выполняется — если бы
+    // сброс жил внутри for, устаревший dealine остался бы висеть в
+    // gameTimerDeadline/gameTimeoutHandle и уходил бы в toGameStateView() как
+    // ложный, уже прошедший дедлайн, вплоть до следующего эффекта, который
+    // его перезапишет (для 'game-end' — уже никогда).
+    if (this.gameTimeoutHandle) {
+      clearTimeout(this.gameTimeoutHandle);
+      this.gameTimeoutHandle = null;
+      this.gameTimerDeadline = null;
+    }
     for (const effect of effects) {
-      if (this.gameTimeoutHandle) {
-        clearTimeout(this.gameTimeoutHandle);
-        this.gameTimeoutHandle = null;
-        this.gameTimerDeadline = null;
-      }
       if (effect.type === 'start-timer') {
         this.gameTimerDeadline = Date.now() + effect.ms;
         this.gameTimeoutHandle = setTimeout(() => {
