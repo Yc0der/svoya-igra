@@ -20,6 +20,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     currentQuestion: null,
     buzzedParticipantId: null,
     correctAnswer: null,
+    graceExcludedParticipantId: null,
     timerDeadline: null,
     scores: [],
     ...overrides,
@@ -34,8 +35,12 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     lanUrl: null,
     game: null,
     falsestart: false,
+    hostParticipantId: null,
+    isHost: false,
+    startGameError: null,
     join: vi.fn(),
     startGame: vi.fn(),
+    toggleHost: vi.fn(),
     selectQuestion: vi.fn(),
     buzz: vi.fn(),
     saidAnswer: vi.fn(),
@@ -106,6 +111,39 @@ describe('Player', () => {
     expect(startGame).toHaveBeenCalledOnce();
   });
 
+  it('calls toggleHost when the lobby host button is clicked', async () => {
+    const toggleHost = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ game: null, toggleHost }),
+    );
+    render(<Player />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /стать ведущим/i }),
+    );
+    expect(toggleHost).toHaveBeenCalledOnce();
+  });
+
+  it('shows who is currently host to everyone else, and marks it for the host themselves', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: null,
+        selfId: 'me',
+        participants: [{ id: 'host-id', name: 'Петя', connected: true }],
+        hostParticipantId: 'host-id',
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/ведущий: Петя/i)).toBeInTheDocument();
+  });
+
+  it("shows a translated error and doesn't crash when start-game fails", () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ game: null, startGameError: 'host-required' }),
+    );
+    render(<Player />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/нужен ведущий/i);
+  });
+
   it('shows the question grid when it is my turn to select', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
@@ -165,6 +203,49 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByRole('button', { name: /жать/i })).toBeInTheDocument();
+  });
+
+  it('shows a countdown while the question is open', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
+  it('disables the buzz button and explains why for the just-excluded answerer during reopen grace', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'question-open',
+          graceExcludedParticipantId: 'me',
+          timerDeadline: Date.now() + 7000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByRole('button', { name: /жать/i })).toBeDisabled();
+    expect(screen.getByText(/уже пробовал/i)).toBeInTheDocument();
+  });
+
+  it('keeps the buzz button enabled for everyone else during another player’s reopen grace', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'question-open',
+          graceExcludedParticipantId: 'other',
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByRole('button', { name: /жать/i })).toBeEnabled();
   });
 
   it('disables the buzz button for 2 seconds after a falsestart', () => {
@@ -235,6 +316,62 @@ describe('Player', () => {
     expect(screen.getByText(/ждём решения/i)).toBeInTheDocument();
   });
 
+  it('marks the clicked vote with a visible confirmation, in open-mode judging', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({ phase: 'judging', buzzedParticipantId: 'other' }),
+      }),
+    );
+    render(<Player />);
+    const yesButton = screen.getByRole('button', { name: /^зачёт/i });
+    expect(yesButton).not.toHaveTextContent('✓');
+    await userEvent.click(yesButton);
+    expect(yesButton).toHaveTextContent('✓');
+    expect(screen.getByText(/голос принят/i)).toBeInTheDocument();
+  });
+
+  it('shows the answer and judging buttons only to the host during host-mode judging', async () => {
+    const vote = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        vote,
+        game: baseGame({
+          phase: 'judging',
+          buzzedParticipantId: 'other',
+          correctAnswer: { text: 'Ответ' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText('Ответ')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^зачёт$/i }));
+    expect(vote).toHaveBeenCalledWith(true);
+  });
+
+  it('shows a waiting-for-host message, without the answer, to non-host players during host-mode judging', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        isHost: false,
+        hostParticipantId: 'host-id',
+        game: baseGame({
+          phase: 'judging',
+          buzzedParticipantId: 'other',
+          correctAnswer: null,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/ждём решения ведущего/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /зачёт/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows the reveal result, comment, and updated scores by name', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
@@ -249,7 +386,8 @@ describe('Player', () => {
     render(<Player />);
     expect(screen.getByText('Ответ')).toBeInTheDocument();
     expect(screen.getByText('Комментарий')).toBeInTheDocument();
-    expect(screen.getByText(/Ваня: 100/)).toBeInTheDocument();
+    expect(screen.getByText('Ваня')).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
   });
 
   it('shows the intermediate score by name at round-end', () => {
@@ -264,7 +402,8 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByText(/следующий раунд/i)).toBeInTheDocument();
-    expect(screen.getByText(/Ваня: 100/)).toBeInTheDocument();
+    expect(screen.getByText('Ваня')).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
   });
 
   it('shows the final standings at game-end by name, not raw id', () => {
@@ -285,8 +424,10 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByText(/итог/i)).toBeInTheDocument();
-    expect(screen.getByText(/Я: 300/)).toBeInTheDocument();
-    expect(screen.getByText(/Другой: 100/)).toBeInTheDocument();
+    expect(screen.getByText('Я')).toBeInTheDocument();
+    expect(screen.getByText('300')).toBeInTheDocument();
+    expect(screen.getByText('Другой')).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
     expect(screen.queryByText('me')).not.toBeInTheDocument();
   });
 });

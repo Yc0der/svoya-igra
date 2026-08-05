@@ -1,5 +1,18 @@
-import { useState, type FormEvent } from 'react';
-import { useRoomConnection, type GameStateView } from './useRoomConnection';
+import { Fragment, useEffect, useState, type FormEvent } from 'react';
+import {
+  useRoomConnection,
+  type GameStateView,
+  type StartGameErrorReason,
+} from './useRoomConnection';
+import { useCountdown } from './useCountdown';
+
+const START_GAME_ERROR_TEXT: Record<StartGameErrorReason, string> = {
+  'not-enough-players': 'Нужно минимум два игрока.',
+  'no-pack': 'На сервере нет пакета вопросов.',
+  'game-in-progress': 'Партия уже идёт.',
+  'host-required':
+    'Нужен ведущий, чтобы играть втроём и больше — кто-то должен нажать «Стать ведущим».',
+};
 
 export function Player() {
   const {
@@ -9,13 +22,23 @@ export function Player() {
     selfId,
     participants,
     falsestart,
+    hostParticipantId,
+    isHost,
+    startGameError,
     startGame,
+    toggleHost,
     selectQuestion,
     buzz,
     saidAnswer,
     vote,
   } = useRoomConnection();
   const [name, setName] = useState('');
+  const [myVote, setMyVote] = useState<boolean | null>(null);
+  const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
+
+  useEffect(() => {
+    if (game?.phase !== 'judging') setMyVote(null);
+  }, [game?.phase]);
 
   function nameOf(participantId: string | null): string {
     if (!participantId) return '';
@@ -26,12 +49,13 @@ export function Player() {
 
   function scoreboard(scores: GameStateView['scores']) {
     return (
-      <ul>
+      <ul className="scoreboard">
         {[...scores]
           .sort((a, b) => b.score - a.score)
           .map((s) => (
             <li key={s.participantId}>
-              {nameOf(s.participantId)}: {s.score}
+              <span className="scoreboard-name">{nameOf(s.participantId)}</span>
+              <span className="scoreboard-value">{s.score}</span>
             </li>
           ))}
       </ul>
@@ -47,7 +71,8 @@ export function Player() {
 
   if (status !== 'joined') {
     return (
-      <form onSubmit={handleSubmit}>
+      <form className="player player--join" onSubmit={handleSubmit}>
+        <h1>Своя игра</h1>
         <label htmlFor="name">Имя</label>
         <input
           id="name"
@@ -55,21 +80,44 @@ export function Player() {
           onChange={(e) => setName(e.target.value)}
           autoFocus
         />
-        <button type="submit" disabled={status === 'joining'}>
+        <button
+          className="button button--primary"
+          type="submit"
+          disabled={status === 'joining'}
+        >
           Войти
         </button>
         {status === 'name-taken' && (
-          <p role="alert">Это имя уже занято, выбери другое</p>
+          <p className="player-alert" role="alert">
+            Это имя уже занято, выбери другое
+          </p>
         )}
       </form>
     );
   }
 
   if (!game) {
+    const hostName = hostParticipantId ? nameOf(hostParticipantId) : null;
     return (
-      <div>
+      <div className="player">
         <p>Ты в игре. Жди начала.</p>
-        <button onClick={startGame}>Начать игру</button>
+        {hostName && (
+          <p>
+            Ведущий: {hostName}
+            {isHost && ' (ты)'}
+          </p>
+        )}
+        <button className="button" onClick={toggleHost}>
+          {isHost ? 'Перестать быть ведущим' : 'Стать ведущим'}
+        </button>
+        {startGameError && (
+          <p className="player-alert" role="alert">
+            {START_GAME_ERROR_TEXT[startGameError]}
+          </p>
+        )}
+        <button className="button button--primary" onClick={startGame}>
+          Начать игру
+        </button>
       </div>
     );
   }
@@ -80,68 +128,167 @@ export function Player() {
   switch (game.phase) {
     case 'selecting':
       if (!isMyTurn) {
-        return <p>Сейчас выбирает {nameOf(game.turnParticipantId)}</p>;
+        return (
+          <div className="player">
+            <p>Сейчас выбирает {nameOf(game.turnParticipantId)}</p>
+          </div>
+        );
       }
       return (
-        <div>
-          {game.grid.map((theme) => (
-            <div key={theme.themeName}>
-              <h2>{theme.themeName}</h2>
-              {theme.questions.map((q) => (
-                <button
-                  key={q.id}
-                  disabled={q.answered}
-                  onClick={() => selectQuestion(game.grid.indexOf(theme), q.id)}
-                >
-                  {q.price}
-                </button>
-              ))}
-            </div>
-          ))}
+        <div className="player">
+          <div className="player-grid">
+            {game.grid.map((theme) => (
+              <Fragment key={theme.themeName}>
+                <h2 className="theme-name">{theme.themeName}</h2>
+                {theme.questions.map((q) => (
+                  <button
+                    key={q.id}
+                    className="price-button"
+                    disabled={q.answered}
+                    onClick={() =>
+                      selectQuestion(game.grid.indexOf(theme), q.id)
+                    }
+                  >
+                    {q.price}
+                  </button>
+                ))}
+              </Fragment>
+            ))}
+          </div>
         </div>
       );
 
-    case 'question-open':
+    case 'question-open': {
+      const iAmExcluded =
+        selfId !== null && game.graceExcludedParticipantId === selfId;
       return (
-        <button onClick={buzz} disabled={falsestart}>
-          Жать!
-        </button>
+        <div className="player player--center">
+          <button
+            className="button button--buzz"
+            onClick={buzz}
+            disabled={falsestart || iAmExcluded}
+          >
+            Жать!
+          </button>
+          {iAmExcluded ? (
+            <p className="player-timer">
+              Ты уже пробовал(а) — жди
+              {remainingSeconds !== null && ` ${remainingSeconds}с`}
+            </p>
+          ) : (
+            remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )
+          )}
+        </div>
       );
+    }
 
     case 'buzzed':
       if (isBuzzedByMe) {
         return (
-          <div>
+          <div className="player player--center">
             <p>Скажи ответ вслух</p>
-            <button onClick={saidAnswer}>Я ответил</button>
+            <button className="button button--primary" onClick={saidAnswer}>
+              Я ответил
+            </button>
           </div>
         );
       }
-      return <p>{nameOf(game.buzzedParticipantId)} отвечает</p>;
+      return (
+        <div className="player player--center">
+          <p>{nameOf(game.buzzedParticipantId)} отвечает</p>
+        </div>
+      );
 
     case 'judging':
+      if (hostParticipantId !== null) {
+        if (isHost) {
+          return (
+            <div className="player player--center">
+              <p className="player-answer">{game.correctAnswer?.text}</p>
+              {game.correctAnswer?.comment && (
+                <p className="player-comment">{game.correctAnswer.comment}</p>
+              )}
+              <div className="player-vote">
+                <button
+                  className="button button--yes"
+                  onClick={() => vote(true)}
+                >
+                  Зачёт
+                </button>
+                <button
+                  className="button button--no"
+                  onClick={() => vote(false)}
+                >
+                  Незачёт
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="player player--center">
+            <p>Ждём решения ведущего</p>
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
+          </div>
+        );
+      }
       if (isBuzzedByMe) {
-        return <p>Ждём решения соперников</p>;
+        return (
+          <div className="player player--center">
+            <p>Ждём решения соперников</p>
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
+          </div>
+        );
       }
       return (
-        <div>
-          <button onClick={() => vote(true)}>Зачёт</button>
-          <button onClick={() => vote(false)}>Незачёт</button>
+        <div className="player player--center player-vote">
+          <button
+            className={`button button--yes${myVote === true ? ' is-selected' : ''}`}
+            onClick={() => {
+              setMyVote(true);
+              vote(true);
+            }}
+          >
+            Зачёт{myVote === true && ' ✓'}
+          </button>
+          <button
+            className={`button button--no${myVote === false ? ' is-selected' : ''}`}
+            onClick={() => {
+              setMyVote(false);
+              vote(false);
+            }}
+          >
+            Незачёт{myVote === false && ' ✓'}
+          </button>
+          {myVote !== null && (
+            <p className="player-vote-hint">Голос принят, ждём остальных</p>
+          )}
+          {remainingSeconds !== null && (
+            <p className="player-timer">{remainingSeconds}с</p>
+          )}
         </div>
       );
 
     case 'reveal':
       return (
-        <div>
-          <p>{game.correctAnswer?.text}</p>
-          {game.correctAnswer?.comment && <p>{game.correctAnswer.comment}</p>}
+        <div className="player">
+          <p className="player-answer">{game.correctAnswer?.text}</p>
+          {game.correctAnswer?.comment && (
+            <p className="player-comment">{game.correctAnswer.comment}</p>
+          )}
           {scoreboard(game.scores)}
         </div>
       );
 
     case 'round-end':
       return (
-        <div>
+        <div className="player">
           <p>Раунд окончен, следующий раунд начинается</p>
           {scoreboard(game.scores)}
         </div>
@@ -149,7 +296,7 @@ export function Player() {
 
     case 'game-end':
       return (
-        <div>
+        <div className="player">
           <h2>Итог</h2>
           {scoreboard(game.scores)}
         </div>

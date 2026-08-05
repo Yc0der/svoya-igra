@@ -10,13 +10,14 @@ export type Phase =
   | 'game-end';
 
 export type TimerName =
-  'question' | 'said-answer' | 'vote' | 'reveal' | 'round-end';
+  'question' | 'said-answer' | 'vote' | 'reveal' | 'round-end' | 'reopen-grace';
 
 export const QUESTION_TIMER_MS = 25_000;
 export const SAID_ANSWER_TIMER_MS = 10_000;
 export const VOTE_TIMER_MS = 10_000;
 export const REVEAL_TIMER_MS = 4_000;
 export const ROUND_END_TIMER_MS = 5_000;
+export const REOPEN_GRACE_MS = 10_000;
 
 // Плоские массивы/объекты, а не Set/Map — EngineState целиком проходит через
 // JSON.stringify в снапшоте комнаты (Task 4), а Map/Set сериализуются в '{}'.
@@ -28,10 +29,19 @@ export interface EngineState {
   turnCounterId: string;
   currentQuestion: { themeIndex: number; questionId: string } | null;
   buzzedCounterId: string | null;
-  triedCounterIds: string[];
+  // Кто временно (10с, REOPEN_GRACE_MS) не может жать «Жать!» — только
+  // последний ответивший неверно в режиме с ведущим. В любой момент исключён
+  // максимум один человек, поэтому список не нужен (design.md, «СУДЕЙСТВО»,
+  // 2026-08-05). В открытом режиме (hostId === null) переоткрытия не бывает
+  // вообще, поле остаётся пустым.
+  graceExcludedCounterId: string | null;
   votes: Record<string, boolean>;
   scores: Record<string, number>;
   lastCorrectCounterId: string | null;
+  // Не counterId — ведущий не в scores, не выбирает и не жмёт. null означает
+  // двоих и открытое судейство голосованием; иначе — судит только этот
+  // счётчик... то есть на самом деле не счётчик вовсе (design.md, «Ведущий»).
+  hostId: string | null;
 }
 
 export type EngineEvent =
@@ -55,6 +65,7 @@ type Result = { state: EngineState; effects: Effect[] };
 export function createInitialState(
   pack: Pack,
   counterIds: string[],
+  hostId: string | null = null,
 ): EngineState {
   if (counterIds.length === 0) {
     throw new Error('Нужен хотя бы один счётчик, чтобы начать партию');
@@ -69,10 +80,11 @@ export function createInitialState(
     turnCounterId: counterIds[Math.floor(Math.random() * counterIds.length)],
     currentQuestion: null,
     buzzedCounterId: null,
-    triedCounterIds: [],
+    graceExcludedCounterId: null,
     votes: {},
     scores,
     lastCorrectCounterId: null,
+    hostId,
   };
 }
 
@@ -141,7 +153,7 @@ function handleSelectQuestion(
         themeIndex: event.themeIndex,
         questionId: event.questionId,
       },
-      triedCounterIds: [],
+      graceExcludedCounterId: null,
     },
     effects: [
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
@@ -155,7 +167,7 @@ function handleBuzz(
 ): Result {
   if (
     state.phase !== 'question-open' ||
-    state.triedCounterIds.includes(event.counterId) ||
+    event.counterId === state.graceExcludedCounterId ||
     !(event.counterId in state.scores)
   ) {
     return unchanged(state);
@@ -193,11 +205,28 @@ function handleVote(
   state: EngineState,
   event: Extract<EngineEvent, { type: 'vote' }>,
 ): Result {
-  if (
-    state.phase !== 'judging' ||
-    event.counterId === state.buzzedCounterId ||
-    !(event.counterId in state.scores)
-  ) {
+  if (state.phase !== 'judging' || event.counterId === state.buzzedCounterId) {
+    return unchanged(state);
+  }
+
+  if (state.hostId !== null) {
+    // Судейство с ведущим: решает один голос, и решает сразу — ждать
+    // VOTE_TIMER_MS незачем, это не голосование. Таймер остаётся взведённым
+    // как подстраховка на случай, если ведущий вообще не нажмёт (design.md,
+    // «ни одно состояние не ждёт человека бесконечно»); resolveVote() ниже
+    // сам вернёт новый start-timer (или ни одного, если партия кончилась),
+    // и Room.applyEffects снимет прежний таймер 'vote' как побочный эффект
+    // непустого списка эффектов — отдельный cancel-timer не нужен.
+    if (event.counterId !== state.hostId) {
+      return unchanged(state);
+    }
+    return resolveVote({
+      ...state,
+      votes: { [event.counterId]: event.correct },
+    });
+  }
+
+  if (!(event.counterId in state.scores)) {
     return unchanged(state);
   }
   return unchanged({
@@ -221,7 +250,23 @@ function handleTimerExpired(
       return afterReveal(state);
     case 'round-end':
       return startNextRound(state);
+    case 'reopen-grace':
+      return endGrace(state);
   }
+}
+
+// Грейс истёк — временно исключённый снова может жать наравне со всеми.
+// Свежий полный `question`-таймер, а не «остаток»: тот же принцип, что и у
+// самого переоткрытия (см. «Отклонения от исходной спеки», по обеим
+// причинам сразу — движок не знает часов, и щедрее никогда не бывает
+// нечестно).
+function endGrace(state: EngineState): Result {
+  return {
+    state: { ...state, graceExcludedCounterId: null },
+    effects: [
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ],
+  };
 }
 
 function resolveVote(state: EngineState): Result {
@@ -243,41 +288,40 @@ function resolveVote(state: EngineState): Result {
     });
   }
 
-  // Неверно: штраф, вопрос переоткрывается для остальных со свежим полным
-  // таймером (не буквальным «остатком» — см. дизайн-документ, раздел
-  // «Отклонения от исходной спеки»), отвечавший больше не может нажать на
-  // этот же вопрос.
-  const triedCounterIds = [...state.triedCounterIds, buzzedCounterId];
-  const nextState: EngineState = {
-    ...state,
-    phase: 'question-open',
-    buzzedCounterId: null,
-    votes: {},
-    triedCounterIds,
-    scores: {
-      ...state.scores,
-      [buzzedCounterId]: state.scores[buzzedCounterId] - question.price,
-    },
+  const penalizedScores = {
+    ...state.scores,
+    [buzzedCounterId]: state.scores[buzzedCounterId] - question.price,
   };
 
-  // Если после этого штрафа в triedCounterIds оказались уже все счётчики
-  // партии, handleBuzz отклонит нажатие от кого угодно (он сам проверяет
-  // triedCounterIds.includes) — нажимать больше некому. Переоткрывать вопрос
-  // на полные QUESTION_TIMER_MS в этом случае значит показать 25 секунд
-  // мёртвого экрана с активной на вид, но нерабочей кнопкой «Жать!». Вместо
-  // этого сразу раскрываем вопрос тем же путём, что и истёкший таймер без
-  // единого нажатия — без изменения счёта и с тем же выбирающим.
-  const everyoneHasTried = Object.keys(state.scores).every((id) =>
-    triedCounterIds.includes(id),
-  );
-  if (everyoneHasTried) {
-    return revealQuestion(nextState, null);
+  if (state.hostId === null) {
+    // Открытое судейство (двое, без ведущего): переоткрыть кнопку нельзя —
+    // ответ уже показан на табло единственному, кто голосовал, то есть тому
+    // же человеку, кто мог бы жать повторно. Вопрос закрывается сразу, как
+    // по тайм-ауту (design.md, «СУДЕЙСТВО», решение от 2026-08-05 после
+    // первой живой проверки — до этого здесь было переоткрытие для любого
+    // числа игроков).
+    return revealQuestion({ ...state, scores: penalizedScores }, null);
   }
 
+  // Судейство с ведущим: ответ никому, кроме ведущего, не показывался —
+  // переоткрыть честно и сразу, но ответившего на 10 секунд исключить
+  // (design.md, «СУДЕЙСТВО», 2026-08-05: штраф уже списан, отдельного
+  // постоянного запрета сверх него не нужно — только короткая фора
+  // остальным). Счётчиков всегда ⩾ 2 (минимум партии), значит хотя бы один
+  // не исключённый есть всегда — в отличие от старого списка
+  // `triedCounterIds`, «доска мертва, некому больше жать» здесь в принципе
+  // невозможна, и отдельная проверка на этот случай не нужна.
   return {
-    state: nextState,
+    state: {
+      ...state,
+      phase: 'question-open',
+      buzzedCounterId: null,
+      votes: {},
+      graceExcludedCounterId: buzzedCounterId,
+      scores: penalizedScores,
+    },
     effects: [
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      { type: 'start-timer', timer: 'reopen-grace', ms: REOPEN_GRACE_MS },
     ],
   };
 }
@@ -313,7 +357,7 @@ function revealQuestion(
 }
 
 function afterReveal(state: EngineState): Result {
-  const base = { ...state, currentQuestion: null, triedCounterIds: [] };
+  const base = { ...state, currentQuestion: null };
   if (
     !isRoundComplete(state.pack, state.roundIndex, state.answeredQuestionIds)
   ) {

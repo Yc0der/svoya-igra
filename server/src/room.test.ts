@@ -35,6 +35,7 @@ describe('Room.join', () => {
     expect(listener).toHaveBeenCalledWith({
       participants: [expect.objectContaining({ name: 'Ваня' })],
       game: null,
+      hostParticipantId: null,
     });
   });
 
@@ -294,6 +295,144 @@ describe('Room.startGame', () => {
 
       vi.advanceTimersByTime(QUESTION_TIMER_MS);
       expect(room.toGameStateView()?.phase).toBe('reveal');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('fails with host-required when three or more are present and nobody is marked host', () => {
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    joinedId(room, 'Петя');
+    expect(room.startGame()).toEqual({ error: 'host-required' });
+  });
+
+  it('starts with a host once someone is marked host, excluding the host from counters and scores', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+
+    expect(room.startGame()).toEqual({ ok: true });
+
+    const view = room.toGameStateView(petya);
+    expect(view?.scores.map((s) => s.participantId).sort()).toEqual(
+      [vanya, katya].sort(),
+    );
+    expect(view?.turnParticipantId).not.toBe(petya);
+  });
+
+  it('ignores a stale host marking for someone who disconnected before start', () => {
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    joinedId(room, 'Петя');
+    const dasha = joinedId(room, 'Даша');
+    room.toggleHost(dasha);
+    room.disconnect(dasha);
+
+    expect(room.startGame()).toEqual({ error: 'host-required' });
+  });
+
+  it('toggleHost is idempotent (marking and unmarking the same participant)', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    joinedId(room, 'Петя');
+    room.toggleHost(vanya);
+    expect(room.getState().hostParticipantId).toBe(vanya);
+    room.toggleHost(vanya);
+    expect(room.getState().hostParticipantId).toBeNull();
+  });
+
+  it('shows the correct answer during judging only to the host, not to the board or other players', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame();
+    const picker = room.toGameStateView(petya)!.turnParticipantId;
+    const answerer = picker === vanya ? vanya : katya;
+
+    room.selectQuestion(picker, 0, 'q1');
+    room.buzz(answerer);
+    room.saidAnswer(answerer);
+
+    expect(room.toGameStateView(petya)?.correctAnswer).not.toBeNull();
+    expect(room.toGameStateView(null)?.correctAnswer).toBeNull();
+    expect(
+      room.toGameStateView(answerer === vanya ? katya : vanya)?.correctAnswer,
+    ).toBeNull();
+  });
+
+  it('reopens the question for others after an incorrect host verdict, and closes it after an incorrect open-mode verdict', () => {
+    // Двое, без ведущего: закрывается сразу.
+    const open = new Room(undefined, TEST_PACK);
+    const v1 = joinedId(open, 'Ваня');
+    const k1 = joinedId(open, 'Катя');
+    open.startGame();
+    const picker1 = open.toGameStateView()!.turnParticipantId;
+    const other1 = picker1 === v1 ? k1 : v1;
+    open.selectQuestion(picker1, 0, 'q1');
+    open.buzz(picker1);
+    open.saidAnswer(picker1);
+    open.vote(other1, false);
+    expect(open.toGameStateView()?.phase).toBe('judging');
+
+    // Трое с ведущим: переоткрывается сразу же по вердикту ведущего.
+    const hosted = new Room(undefined, TEST_PACK);
+    const v2 = joinedId(hosted, 'Ваня');
+    const k2 = joinedId(hosted, 'Катя');
+    const p2 = joinedId(hosted, 'Петя');
+    hosted.toggleHost(p2);
+    hosted.startGame();
+    const picker2 = hosted.toGameStateView(p2)!.turnParticipantId;
+    const answerer2 = picker2 === v2 ? v2 : k2;
+    hosted.selectQuestion(picker2, 0, 'q1');
+    hosted.buzz(answerer2);
+    hosted.saidAnswer(answerer2);
+    hosted.vote(p2, false);
+    expect(hosted.toGameStateView(p2)?.phase).toBe('question-open');
+    expect(hosted.toGameStateView(p2)?.graceExcludedParticipantId).toBe(
+      answerer2,
+    );
+  });
+
+  it('re-admits the excluded answerer once the 10s grace period expires', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame();
+      const picker = room.toGameStateView(petya)!.turnParticipantId;
+      const answerer = picker === vanya ? vanya : katya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      room.buzz(answerer);
+      room.saidAnswer(answerer);
+      room.vote(petya, false);
+      expect(room.toGameStateView(petya)?.graceExcludedParticipantId).toBe(
+        answerer,
+      );
+      // Пока грейс не истёк, повторное нажатие того же счётчика ни к чему не
+      // приводит — фаза не меняется.
+      expect(room.buzz(answerer)).toBe('ok');
+      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
+
+      vi.advanceTimersByTime(10_000); // REOPEN_GRACE_MS
+      expect(
+        room.toGameStateView(petya)?.graceExcludedParticipantId,
+      ).toBeNull();
+
+      expect(room.buzz(answerer)).toBe('ok');
+      expect(room.toGameStateView(petya)?.phase).toBe('buzzed');
+      expect(room.toGameStateView(petya)?.buzzedParticipantId).toBe(answerer);
     } finally {
       vi.useRealTimers();
     }

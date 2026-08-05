@@ -7,6 +7,7 @@ import {
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
   ROUND_END_TIMER_MS,
+  REOPEN_GRACE_MS,
   type EngineState,
 } from './engine.js';
 import type { Pack } from './pack.js';
@@ -268,6 +269,41 @@ describe('vote', () => {
   });
 });
 
+describe('vote — host mode', () => {
+  // hostId — не counterId (design.md, «Ведущий»): ни в scores, ни среди тех,
+  // кому select-question/buzz дали бы что-то сделать. 'judge' здесь — id
+  // участника-ведущего, не счётчика.
+  it("resolves immediately on the host's vote, without waiting for the timer", () => {
+    const judging = toJudging(
+      createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
+    );
+    const { state: next, effects } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: true,
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.scores.p1).toBe(100);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
+    ]);
+  });
+
+  it('ignores a vote from anyone other than the host, even an eligible non-answering counter', () => {
+    const judging = toJudging(
+      createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
+    );
+    const { state: next, effects } = reduce(judging, {
+      type: 'vote',
+      counterId: 'p2',
+      correct: true,
+    });
+    expect(next.phase).toBe('judging');
+    expect(next.votes).toEqual({});
+    expect(effects).toEqual([]);
+  });
+});
+
 describe('timer-expired: vote — correct', () => {
   it('awards the price, advances the turn to the answerer, marks the question answered, and reveals', () => {
     const judging = toJudging(createInitialState(PACK, ['p1', 'p2']));
@@ -315,9 +351,14 @@ describe('timer-expired: vote — correct', () => {
   });
 });
 
-describe('timer-expired: vote — incorrect', () => {
-  it('penalizes the answerer, reopens the same question with a fresh timer, and does not mark it answered', () => {
-    const judging = toJudging(createInitialState(PACK, ['p1', 'p2']));
+describe('timer-expired: vote — incorrect, open mode (two counters, no host)', () => {
+  it('penalizes the answerer and closes the question immediately, without reopening for anyone', () => {
+    // До 2026-08-05 здесь проверялось переоткрытие — убрано как дефект
+    // спеки, найденный на первой живой проверке: единственный голосующий на
+    // двоих уже видел ответ на табло, так что повторное «Жать!» для него не
+    // было бы честным. См. design.md, «СУДЕЙСТВО».
+    const initial = createInitialState(PACK, ['p1', 'p2']);
+    const judging = toJudging(initial);
     const { state: voted } = reduce(judging, {
       type: 'vote',
       counterId: 'p2',
@@ -328,72 +369,89 @@ describe('timer-expired: vote — incorrect', () => {
       timer: 'vote',
     });
 
+    expect(next.phase).toBe('reveal');
+    expect(next.scores.p1).toBe(-100);
+    expect(next.answeredQuestionIds).toEqual(['a1']);
+    expect(next.buzzedCounterId).toBeNull();
+    expect(next.turnCounterId).toBe(initial.turnCounterId);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
+    ]);
+  });
+});
+
+describe('vote — incorrect, host mode (three or more counters)', () => {
+  it('penalizes the answerer and reopens the question immediately, starting a 10s grace timer', () => {
+    const judging = toJudging(
+      createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
+    );
+    const { state: next, effects } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: false,
+    });
+
     expect(next.phase).toBe('question-open');
     expect(next.scores.p1).toBe(-100);
     expect(next.answeredQuestionIds).toEqual([]);
     expect(next.buzzedCounterId).toBeNull();
-    expect(next.triedCounterIds).toEqual(['p1']);
+    expect(next.graceExcludedCounterId).toBe('p1');
     expect(effects).toEqual([
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      { type: 'start-timer', timer: 'reopen-grace', ms: REOPEN_GRACE_MS },
     ]);
   });
 
-  it('does not let a counter who already answered wrong buzz again on the same question', () => {
-    const judging = toJudging(createInitialState(PACK, ['p1', 'p2']));
-    const { state: voted } = reduce(judging, {
+  it('blocks a buzz from the just-excluded answerer during the grace period, but lets everyone else through', () => {
+    const judging = toJudging(
+      createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
+    );
+    const { state: reopened } = reduce(judging, {
       type: 'vote',
-      counterId: 'p2',
+      counterId: 'judge',
       correct: false,
     });
-    const { state: reopened } = reduce(voted, {
-      type: 'timer-expired',
-      timer: 'vote',
-    });
-    const { state: next, effects } = reduce(reopened, {
+
+    const { state: blocked, effects: blockedEffects } = reduce(reopened, {
       type: 'buzz',
       counterId: 'p1',
     });
-    expect(next.phase).toBe('question-open');
-    expect(effects).toEqual([]);
+    expect(blocked.phase).toBe('question-open');
+    expect(blockedEffects).toEqual([]);
+
+    const { state: admitted } = reduce(reopened, {
+      type: 'buzz',
+      counterId: 'p2',
+    });
+    expect(admitted.phase).toBe('buzzed');
+    expect(admitted.buzzedCounterId).toBe('p2');
   });
 
-  it('reveals instead of reopening once every counter has tried and failed, since nobody left can buzz', () => {
-    // Two-counter game: p1 buzzes and answers wrong, question reopens (only
-    // p2 left who could buzz); p2 then buzzes and also answers wrong. At
-    // that point triedCounterIds covers both counters in state.scores, so
-    // there is nobody left who handleBuzz would ever accept a buzz from —
-    // reopening with a fresh timer would just be 25 seconds of a dead
-    // "Жать!" button. The engine should reveal immediately instead.
-    let state = toJudging(createInitialState(PACK, ['p1', 'p2']));
-    state = reduce(state, {
+  it('re-admits the excluded answerer once the grace period expires, with a fresh full question timer', () => {
+    const judging = toJudging(
+      createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
+    );
+    const reopened = reduce(judging, {
       type: 'vote',
-      counterId: 'p2',
+      counterId: 'judge',
       correct: false,
     }).state;
-    state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
-    expect(state.phase).toBe('question-open');
-    expect(state.triedCounterIds).toEqual(['p1']);
 
-    state = reduce(state, { type: 'buzz', counterId: 'p2' }).state;
-    expect(state.phase).toBe('buzzed');
-    state = reduce(state, { type: 'said-answer', counterId: 'p2' }).state;
-    state = reduce(state, {
-      type: 'vote',
-      counterId: 'p1',
-      correct: false,
-    }).state;
-    const { state: next, effects } = reduce(state, {
+    const { state: graceOver, effects } = reduce(reopened, {
       type: 'timer-expired',
-      timer: 'vote',
+      timer: 'reopen-grace',
     });
-
-    expect(next.phase).toBe('reveal');
-    expect(next.turnCounterId).toBe(state.turnCounterId);
-    expect(next.answeredQuestionIds).toEqual(['a1']);
-    expect(next.scores).toEqual({ p1: -100, p2: -100 });
+    expect(graceOver.phase).toBe('question-open');
+    expect(graceOver.graceExcludedCounterId).toBeNull();
     expect(effects).toEqual([
-      { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ]);
+
+    const { state: next } = reduce(graceOver, {
+      type: 'buzz',
+      counterId: 'p1',
+    });
+    expect(next.phase).toBe('buzzed');
+    expect(next.buzzedCounterId).toBe('p1');
   });
 });
 
@@ -567,10 +625,17 @@ describe('a full two-question game, played end to end', () => {
         },
       ],
     });
-    let state = createInitialState(twoQuestionPack, ['p1', 'p2']);
+    // Трое счётчиков + ведущий: только с ведущим "Незачёт" переоткрывает
+    // вопрос для перехвата (design.md, «СУДЕЙСТВО») — без него, как в
+    // отдельном тесте открытого режима выше, вопрос закрылся бы сразу.
+    let state = createInitialState(
+      twoQuestionPack,
+      ['p1', 'p2', 'p3'],
+      'judge',
+    );
     const firstPicker = state.turnCounterId;
 
-    // Раунд 1: p1 берёт вопрос верно.
+    // Раунд 1: p1 берёт вопрос верно, ведущий решает сразу.
     state = reduce(state, {
       type: 'select-question',
       counterId: firstPicker,
@@ -581,11 +646,11 @@ describe('a full two-question game, played end to end', () => {
     state = reduce(state, { type: 'said-answer', counterId: 'p1' }).state;
     state = reduce(state, {
       type: 'vote',
-      counterId: 'p2',
+      counterId: 'judge',
       correct: true,
     }).state;
-    state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
-    expect(state.scores).toEqual({ p1: 100, p2: 0 });
+    expect(state.scores).toEqual({ p1: 100, p2: 0, p3: 0 });
+    expect(state.phase).toBe('reveal');
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
     expect(state.phase).toBe('round-end');
     state = reduce(state, { type: 'timer-expired', timer: 'round-end' }).state;
@@ -605,22 +670,20 @@ describe('a full two-question game, played end to end', () => {
     state = reduce(state, { type: 'said-answer', counterId: 'p2' }).state;
     state = reduce(state, {
       type: 'vote',
-      counterId: 'p1',
+      counterId: 'judge',
       correct: false,
     }).state;
-    state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
-    expect(state.scores).toEqual({ p1: 100, p2: -200 });
+    expect(state.scores).toEqual({ p1: 100, p2: -200, p3: 0 });
     expect(state.phase).toBe('question-open');
 
     state = reduce(state, { type: 'buzz', counterId: 'p1' }).state;
     state = reduce(state, { type: 'said-answer', counterId: 'p1' }).state;
     state = reduce(state, {
       type: 'vote',
-      counterId: 'p2',
+      counterId: 'judge',
       correct: true,
     }).state;
-    state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
-    expect(state.scores).toEqual({ p1: 300, p2: -200 });
+    expect(state.scores).toEqual({ p1: 300, p2: -200, p3: 0 });
 
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
     expect(state.phase).toBe('game-end');

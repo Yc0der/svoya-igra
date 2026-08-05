@@ -43,6 +43,7 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
         { id: '2', name: 'Катя', token: 'tok-2', connected: false },
       ],
       game: null,
+      hostParticipantId: null,
     };
 
     const restored = deserializeSnapshot(serializeSnapshot(state));
@@ -53,6 +54,7 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
         { id: '2', name: 'Катя', token: 'tok-2', connected: false },
       ],
       game: null,
+      hostParticipantId: null,
     });
   });
 });
@@ -81,6 +83,7 @@ describe('writeSnapshot / readSnapshot', () => {
         { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
       ],
       game: null,
+      hostParticipantId: null,
     };
 
     await writeSnapshot(path, state);
@@ -91,6 +94,7 @@ describe('writeSnapshot / readSnapshot', () => {
         { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
       ],
       game: null,
+      hostParticipantId: null,
     });
   });
 
@@ -121,6 +125,7 @@ describe('writeSnapshot / readSnapshot', () => {
         { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
       ],
       game: null,
+      hostParticipantId: null,
     };
     await writeSnapshot(path, initial);
 
@@ -138,6 +143,7 @@ describe('writeSnapshot / readSnapshot', () => {
         { id: '2', name: 'Катя', token: 'tok-2', connected: true },
       ],
       game: null,
+      hostParticipantId: null,
     };
     await expect(writeSnapshot(path, next)).rejects.toThrow(
       'simulated crash mid-write',
@@ -149,6 +155,7 @@ describe('writeSnapshot / readSnapshot', () => {
         { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
       ],
       game: null,
+      hostParticipantId: null,
     });
   });
 });
@@ -160,12 +167,14 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
         { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
       ],
       game: null,
+      hostParticipantId: null,
     };
     expect(deserializeSnapshot(serializeSnapshot(state))).toEqual({
       participants: [
         { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
       ],
       game: null,
+      hostParticipantId: null,
     });
   });
 
@@ -177,6 +186,7 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
         { id: '2', name: 'Катя', token: 'tok-2', connected: true },
       ],
       game,
+      hostParticipantId: null,
     };
     const restored = deserializeSnapshot(serializeSnapshot(state));
     expect(restored.game).toEqual(game);

@@ -1,8 +1,11 @@
+import { Fragment } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoomConnection } from './useRoomConnection';
+import { useCountdown } from './useCountdown';
 
 export function Board() {
   const { participants, lanUrl, game } = useRoomConnection();
+  const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
 
   function nameOf(participantId: string): string {
     return (
@@ -12,17 +15,17 @@ export function Board() {
 
   if (!game) {
     return (
-      <div>
+      <div className="board board--lobby">
         <h1>Своя игра</h1>
         {lanUrl && (
-          <>
-            <QRCodeSVG value={lanUrl} size={200} title="QR-код для входа" />
-            <p>{lanUrl}</p>
-          </>
+          <div className="board-qr">
+            <QRCodeSVG value={lanUrl} size={220} title="QR-код для входа" />
+            <p className="board-qr-url">{lanUrl}</p>
+          </div>
         )}
-        <ul>
+        <ul className="board-participants">
           {participants.map((p) => (
-            <li key={p.id}>
+            <li key={p.id} className={p.connected ? '' : 'is-disconnected'}>
               {p.name} {p.connected ? '' : '(отключён)'}
             </li>
           ))}
@@ -32,12 +35,13 @@ export function Board() {
   }
 
   const scoreboard = (
-    <ul>
+    <ul className="scoreboard">
       {[...game.scores]
         .sort((a, b) => b.score - a.score)
         .map((s) => (
           <li key={s.participantId}>
-            {nameOf(s.participantId)}: {s.score}
+            <span className="scoreboard-name">{nameOf(s.participantId)}</span>
+            <span className="scoreboard-value">{s.score}</span>
           </li>
         ))}
     </ul>
@@ -45,7 +49,7 @@ export function Board() {
 
   if (game.phase === 'game-end') {
     return (
-      <div>
+      <div className="board">
         <h1>Игра окончена</h1>
         {scoreboard}
       </div>
@@ -53,32 +57,61 @@ export function Board() {
   }
 
   return (
-    <div>
+    <div className="board">
       {game.phase === 'selecting' && (
-        <p>Выбирает {nameOf(game.turnParticipantId)}</p>
+        <p className="board-status">
+          Выбирает <strong>{nameOf(game.turnParticipantId)}</strong>
+        </p>
       )}
 
-      <div>
+      <div className="board-grid">
         {game.grid.map((theme) => (
-          <div key={theme.themeName}>
-            <h2>{theme.themeName}</h2>
-            {theme.questions
-              .filter((q) => !q.answered)
-              .map((q) => (
-                <span key={q.id}>{q.price}</span>
-              ))}
-          </div>
+          <Fragment key={theme.themeName}>
+            <h2 className="theme-name">{theme.themeName}</h2>
+            {theme.questions.map((q) => (
+              <span
+                key={q.id}
+                className={`price-cell${q.answered ? ' price-cell--answered' : ''}`}
+              >
+                {q.answered ? '' : q.price}
+              </span>
+            ))}
+          </Fragment>
         ))}
       </div>
 
-      {game.currentQuestion && <p>{game.currentQuestion.text}</p>}
+      {game.currentQuestion && (
+        <>
+          <p className="board-question">{game.currentQuestion.text}</p>
+          {game.phase === 'question-open' && remainingSeconds !== null && (
+            <p className="board-timer">{remainingSeconds}с</p>
+          )}
+        </>
+      )}
 
       {game.buzzedParticipantId && (
-        <p>{nameOf(game.buzzedParticipantId)} жмёт кнопку</p>
+        <p className="board-status board-status--buzzed">
+          {nameOf(game.buzzedParticipantId)} жмёт кнопку
+        </p>
+      )}
+
+      {game.phase === 'judging' && (
+        <>
+          {/* Пусто, если судит ведущий: ответ ему виден только на его
+              собственном экране (design.md, «СУДЕЙСТВО») — показывать его
+              здесь означало бы вернуть ту самую утечку, ради которой ведущий
+              вообще появился. */}
+          {!game.correctAnswer && (
+            <p className="board-status">Ведущий судит…</p>
+          )}
+          {remainingSeconds !== null && (
+            <p className="board-timer">{remainingSeconds}с</p>
+          )}
+        </>
       )}
 
       {game.correctAnswer && (
-        <div>
+        <div className="board-answer">
           <p>{game.correctAnswer.text}</p>
           {game.correctAnswer.comment && <p>{game.correctAnswer.comment}</p>}
         </div>

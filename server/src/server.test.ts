@@ -92,7 +92,12 @@ describe('createServer', () => {
     });
 
     const state = await nextMessage();
-    expect(state).toEqual({ type: 'state', participants: [], game: null });
+    expect(state).toEqual({
+      type: 'state',
+      participants: [],
+      hostParticipantId: null,
+      game: null,
+    });
 
     ws.close();
   });
@@ -125,6 +130,7 @@ describe('createServer', () => {
           connected: true,
         },
       ],
+      hostParticipantId: null,
       game: null,
     });
 
@@ -180,6 +186,7 @@ describe('createServer', () => {
       participants: [
         { id: joined.participantId, name: 'Ваня', connected: false },
       ],
+      hostParticipantId: null,
       game: null,
     });
 
@@ -205,6 +212,7 @@ describe('createServer', () => {
       participants: [
         { id: joined.participantId, name: 'Ваня', connected: true },
       ],
+      hostParticipantId: null,
       game: null,
     });
 
@@ -365,6 +373,7 @@ describe('createServer', () => {
       participants: [
         { id: joined.participantId, name: 'Ваня', connected: true },
       ],
+      hostParticipantId: null,
       game: null,
     });
 
@@ -396,6 +405,7 @@ describe('createServer', () => {
         { id: joined.participantId, name: 'Ваня', connected: true },
         { id: expect.any(String), name: 'Оля', connected: true },
       ],
+      hostParticipantId: null,
       game: null,
     });
 
@@ -471,6 +481,7 @@ describe('createServer heartbeat', () => {
       participants: [
         { id: joined.participantId, name: 'Ваня', connected: false },
       ],
+      hostParticipantId: null,
       game: null,
     });
 
@@ -795,6 +806,117 @@ describe('createServer game flow', () => {
 
     a.ws.close();
     reconnected.close();
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('createServer host mode', () => {
+  it('replies start-game-error to the requester when three join and nobody is host', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-host-required-'));
+    const room = new Room(undefined, TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage(); // трансляция состава лобби после join b
+    const c = await joinPlayer(url, 'Петя');
+    await a.nextMessage(); // трансляция состава лобби после join c
+    await b.nextMessage();
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const reply = await a.nextMessage();
+    expect(reply).toEqual({
+      type: 'start-game-error',
+      reason: 'host-required',
+    });
+
+    a.ws.close();
+    b.ws.close();
+    c.ws.close();
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('broadcasts hostParticipantId once toggled, and shows the answer during judging only to the host socket', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-host-mode-'));
+    const room = new Room(undefined, TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage();
+    const c = await joinPlayer(url, 'Петя');
+    await a.nextMessage();
+    await b.nextMessage();
+
+    c.ws.send(JSON.stringify({ type: 'toggle-host' }));
+    const [aAfterToggle, bAfterToggle, cAfterToggle] = await Promise.all([
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ]);
+    expect(
+      (aAfterToggle as { hostParticipantId: string }).hostParticipantId,
+    ).toBe(c.participantId);
+    expect(
+      (bAfterToggle as { hostParticipantId: string }).hostParticipantId,
+    ).toBe(c.participantId);
+    expect(
+      (cAfterToggle as { hostParticipantId: string }).hostParticipantId,
+    ).toBe(c.participantId);
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const aState = (await settle(a, b, a)) as {
+      game: { phase: string; turnParticipantId: string };
+    };
+    await c.nextMessage(); // same broadcast, delivered to the host too
+    expect(aState.game.phase).toBe('selecting');
+
+    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'q1',
+      }),
+    );
+    await settle(a, b, picker);
+    await c.nextMessage();
+
+    picker.ws.send(JSON.stringify({ type: 'buzz' }));
+    await settle(a, b, picker);
+    await c.nextMessage();
+
+    picker.ws.send(JSON.stringify({ type: 'said-answer' }));
+    const [aJudging, bJudging, cJudging] = (await Promise.all([
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ])) as { game: { correctAnswer: unknown } }[];
+    expect(aJudging.game.correctAnswer).toBeNull();
+    expect(bJudging.game.correctAnswer).toBeNull();
+    expect(cJudging.game.correctAnswer).not.toBeNull();
+
+    a.ws.close();
+    b.ws.close();
+    c.ws.close();
     await server.close();
     await rm(dir, { recursive: true, force: true });
   });

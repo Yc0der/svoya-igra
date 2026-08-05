@@ -27,6 +27,12 @@ export interface Participant {
 export interface RoomState {
   participants: Participant[];
   game: EngineState | null;
+  // Кто отмечен ведущим в лобби. Не counterId — ведущий не входит в scores
+  // (design.md, «Ведущий»). Живёт на Room, а не в EngineState, потому что
+  // это выбирается ДО того, как EngineState вообще существует; при
+  // startGame() копируется в EngineState.hostId и на время партии больше не
+  // меняется (см. toggleHost()).
+  hostParticipantId: string | null;
 }
 
 export type JoinResult = { participant: Participant } | { error: 'name-taken' };
@@ -34,7 +40,10 @@ export type ReconnectResult =
   { participant: Participant } | { error: 'invalid-token' };
 export type StartGameResult =
   | { ok: true }
-  | { error: 'not-enough-players' | 'no-pack' | 'game-in-progress' };
+  | {
+      error:
+        'not-enough-players' | 'no-pack' | 'game-in-progress' | 'host-required';
+    };
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
@@ -58,6 +67,7 @@ export class Room {
   private participants: Participant[];
   private pack: Pack | undefined;
   private game: EngineState | null;
+  private hostParticipantId: string | null;
   private gameTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   private gameTimerDeadline: number | null = null;
   private listeners = new Set<(state: RoomState) => void>();
@@ -68,6 +78,7 @@ export class Room {
       : [];
     this.pack = pack;
     this.game = initial?.game ? { ...initial.game } : null;
+    this.hostParticipantId = initial?.hostParticipantId ?? null;
     if (this.game) {
       const restart = PHASE_TIMER[this.game.phase];
       if (restart) {
@@ -115,6 +126,18 @@ export class Room {
     this.notify();
   }
 
+  // Только в лобби — во время партии роль ведущего зафиксирована в
+  // EngineState.hostId (design.md, «Ведущий», «во время партии роль
+  // зафиксирована»), менять её здесь на лету значило бы разойтись с уже
+  // идущей партией, ничего в ней при этом не поменяв.
+  toggleHost(participantId: string): void {
+    if (this.game && this.game.phase !== 'game-end') return;
+    if (!this.participants.some((p) => p.id === participantId)) return;
+    this.hostParticipantId =
+      this.hostParticipantId === participantId ? null : participantId;
+    this.notify();
+  }
+
   startGame(): StartGameResult {
     if (!this.pack) {
       return { error: 'no-pack' };
@@ -142,8 +165,24 @@ export class Room {
     // должен считаться от реально присутствующих, а не от всех, кто когда-то
     // заходил за время жизни процесса.
     const present = this.participants.filter((p) => p.connected);
-    if (present.length < 2) {
+    // Ведущий берётся из лобби, только если он всё ещё реально подключён —
+    // отметка, оставшаяся от кого-то, кто успел уйти, не должна тихо
+    // заблокировать старт партии с ошибкой host-required, когда на самом
+    // деле в комнате просто нет ведущего.
+    const hostId =
+      this.hostParticipantId &&
+      present.some((p) => p.id === this.hostParticipantId)
+        ? this.hostParticipantId
+        : null;
+    const counters = present.filter((p) => p.id !== hostId);
+    if (counters.length < 2) {
       return { error: 'not-enough-players' };
+    }
+    // Трое и больше счётчиков без ведущего — открытое судейство голосованием
+    // при таком составе не работает честно (design.md, «СУДЕЙСТВО»): партия
+    // не начнётся, пока кто-то не отметит себя ведущим в лобби.
+    if (counters.length >= 3 && !hostId) {
+      return { error: 'host-required' };
     }
     // Гасим только здесь, непосредственно перед тем, как реально перезаписать
     // this.game: таймер от ПРЕДЫДУЩЕЙ партии (например, оставшийся от
@@ -155,8 +194,8 @@ export class Room {
       this.gameTimeoutHandle = null;
       this.gameTimerDeadline = null;
     }
-    const counterIds = present.map((p) => p.id);
-    this.game = createInitialState(this.pack, counterIds);
+    const counterIds = counters.map((p) => p.id);
+    this.game = createInitialState(this.pack, counterIds, hostId);
     this.notify();
     return { ok: true };
   }
@@ -197,10 +236,18 @@ export class Room {
     return {
       participants: this.participants.map((p) => ({ ...p })),
       game: this.game ? { ...this.game } : null,
+      hostParticipantId: this.hostParticipantId,
     };
   }
 
-  toGameStateView(): GameStateView | null {
+  // `viewerId` — participantId сокета, которому строится это конкретное
+  // состояние (null для ещё не залогиненного сокета и для табло — оно не
+  // шлёт `join`). На judging с ведущим (game.hostId !== null) ответ обязан
+  // видеть только он: это единственный смысл всей роли (design.md,
+  // «СУДЕЙСТВО») — если разослать его всем как раньше, второй попытке при
+  // переоткрытии вопроса опять будет грош цена, ровно тот дефект, ради
+  // которого ведущий вообще появился.
+  toGameStateView(viewerId: string | null = null): GameStateView | null {
     if (!this.game) return null;
     const game = this.game;
     const round = game.pack.rounds[game.roundIndex];
@@ -210,7 +257,10 @@ export class Room {
         )
       : undefined;
 
-    const showAnswer = game.phase === 'judging' || game.phase === 'reveal';
+    const showAnswer =
+      game.phase === 'reveal' ||
+      (game.phase === 'judging' &&
+        (game.hostId === null || viewerId === game.hostId));
 
     return {
       phase: game.phase,
@@ -228,6 +278,7 @@ export class Room {
         ? { text: currentQuestionData.text, price: currentQuestionData.price }
         : null,
       buzzedParticipantId: game.buzzedCounterId,
+      graceExcludedParticipantId: game.graceExcludedCounterId,
       correctAnswer:
         showAnswer && currentQuestionData
           ? {

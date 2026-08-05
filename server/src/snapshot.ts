@@ -19,6 +19,9 @@ export function deserializeSnapshot(json: string): RoomState {
       connected: false,
     })),
     game: parsed.game ?? null,
+    // Тот же паттерн, что у `game` строкой выше: снапшоты, записанные до
+    // появления ведущего, этого поля не содержат — по умолчанию его нет.
+    hostParticipantId: parsed.hostParticipantId ?? null,
   };
 }
 

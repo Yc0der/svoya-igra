@@ -65,13 +65,19 @@ export function createServer(options: CreateServerOptions): GameServer {
   // reconnected on a different socket in the meantime.
   const owners = new Map<string, WebSocket>();
 
+  // Не один общий payload на всех: `correctAnswer` на judging в режиме с
+  // ведущим обязан дойти только до сокета ведущего (protocol.ts,
+  // GameStateView.correctAnswer) — остальным, включая табло, строится
+  // отдельное сообщение с viewerId = null/чужой id, и Room.toGameStateView
+  // сама скрывает в нём ответ.
+  const stateMessageFor = (viewerId: string | null): ServerMessage => ({
+    type: 'state',
+    participants: toParticipantView(room.getState()),
+    hostParticipantId: room.getState().hostParticipantId,
+    game: room.toGameStateView(viewerId),
+  });
+
   const broadcastState = (): void => {
-    const message: ServerMessage = {
-      type: 'state',
-      participants: toParticipantView(room.getState()),
-      game: room.toGameStateView(),
-    };
-    const payload = JSON.stringify(message);
     // Deferred to a microtask so that a direct, synchronous reply to the
     // triggering client (e.g. the 'joined' confirmation sent right after
     // room.join()/room.reconnect() returns, later in the same 'message'
@@ -92,7 +98,7 @@ export function createServer(options: CreateServerOptions): GameServer {
     queueMicrotask(() => {
       for (const ws of wss.clients) {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(payload);
+          send(ws, stateMessageFor(connections.get(ws) ?? null));
         }
       }
     });
@@ -119,11 +125,7 @@ export function createServer(options: CreateServerOptions): GameServer {
     ws.on('pong', () => alive.add(ws));
 
     send(ws, { type: 'hello', lanUrl });
-    send(ws, {
-      type: 'state',
-      participants: toParticipantView(room.getState()),
-      game: room.toGameStateView(),
-    });
+    send(ws, stateMessageFor(connections.get(ws) ?? null));
 
     ws.on('message', (data) => {
       let message: ClientMessage;
@@ -168,7 +170,17 @@ export function createServer(options: CreateServerOptions): GameServer {
       if (message.type === 'start-game') {
         const participantId = connections.get(ws);
         if (participantId) {
-          room.startGame();
+          const result = room.startGame();
+          if ('error' in result) {
+            send(ws, { type: 'start-game-error', reason: result.error });
+          }
+        }
+      }
+
+      if (message.type === 'toggle-host') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.toggleHost(participantId);
         }
       }
 

@@ -19,6 +19,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     currentQuestion: null,
     buzzedParticipantId: null,
     correctAnswer: null,
+    graceExcludedParticipantId: null,
     timerDeadline: null,
     scores: [],
     ...overrides,
@@ -33,8 +34,12 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     lanUrl: null,
     game: null,
     falsestart: false,
+    hostParticipantId: null,
+    isHost: false,
+    startGameError: null,
     join: vi.fn(),
     startGame: vi.fn(),
+    toggleHost: vi.fn(),
     selectQuestion: vi.fn(),
     buzz: vi.fn(),
     saidAnswer: vi.fn(),
@@ -114,7 +119,8 @@ describe('Board', () => {
       }),
     );
     render(<Board />);
-    expect(screen.getByText(/выбирает Ваня/i)).toBeInTheDocument();
+    expect(screen.getByText(/выбирает/i)).toBeInTheDocument();
+    expect(screen.getByText('Ваня')).toBeInTheDocument();
   });
 
   it('removes answered questions from the visible grid', () => {
@@ -151,6 +157,20 @@ describe('Board', () => {
     expect(screen.getByText('Столица Франции?')).toBeInTheDocument();
   });
 
+  it('shows a countdown while the question is open', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: { text: 'Столица Франции?', price: 100 },
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
   it('shows who buzzed', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
@@ -175,7 +195,8 @@ describe('Board', () => {
     );
     render(<Board />);
     expect(screen.getByText('Париж')).toBeInTheDocument();
-    expect(screen.getByText(/Ваня: 100/)).toBeInTheDocument();
+    expect(screen.getByText('Ваня')).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
   });
 
   it('shows the correct answer during judging too, not only reveal', () => {
@@ -193,6 +214,20 @@ describe('Board', () => {
     );
     render(<Board />);
     expect(screen.getByText('Париж')).toBeInTheDocument();
+  });
+
+  it('shows a waiting status instead of leaking the answer during host-mode judging', () => {
+    // В режиме с ведущим Room.toGameStateView() не шлёт correctAnswer табло
+    // вообще (server/src/room.ts) — именно ради этого ведущий и появился
+    // (design.md, «СУДЕЙСТВО»). Табло должно отличать эту ситуацию от
+    // открытого режима явным статусом, а не молчанием.
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({ phase: 'judging', correctAnswer: null }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText(/ведущий судит/i)).toBeInTheDocument();
   });
 
   it('shows final standings at game-end', () => {

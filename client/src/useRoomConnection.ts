@@ -24,9 +24,13 @@ export interface GameStateView {
   currentQuestion: { text: string; price: number } | null;
   buzzedParticipantId: string | null;
   correctAnswer: { text: string; comment?: string } | null;
+  graceExcludedParticipantId: string | null;
   timerDeadline: number | null;
   scores: { participantId: string; score: number }[];
 }
+
+export type StartGameErrorReason =
+  'not-enough-players' | 'no-pack' | 'game-in-progress' | 'host-required';
 
 type ServerMessage =
   | { type: 'hello'; lanUrl: string }
@@ -36,14 +40,17 @@ type ServerMessage =
   | {
       type: 'state';
       participants: ParticipantView[];
+      hostParticipantId: string | null;
       game: GameStateView | null;
     }
-  | { type: 'falsestart' };
+  | { type: 'falsestart' }
+  | { type: 'start-game-error'; reason: StartGameErrorReason };
 
 type ClientMessage =
   | { type: 'join'; name: string }
   | { type: 'reconnect'; token: string }
   | { type: 'start-game' }
+  | { type: 'toggle-host' }
   | { type: 'select-question'; themeIndex: number; questionId: string }
   | { type: 'buzz' }
   | { type: 'said-answer' }
@@ -59,8 +66,12 @@ export interface RoomConnection {
   lanUrl: string | null;
   game: GameStateView | null;
   falsestart: boolean;
+  hostParticipantId: string | null;
+  isHost: boolean;
+  startGameError: StartGameErrorReason | null;
   join(name: string): void;
   startGame(): void;
+  toggleHost(): void;
   selectQuestion(themeIndex: number, questionId: string): void;
   buzz(): void;
   saidAnswer(): void;
@@ -84,6 +95,11 @@ export function useRoomConnection(
   const [lanUrl, setLanUrl] = useState<string | null>(null);
   const [game, setGame] = useState<GameStateView | null>(null);
   const [falsestart, setFalsestart] = useState(false);
+  const [hostParticipantId, setHostParticipantId] = useState<string | null>(
+    null,
+  );
+  const [startGameError, setStartGameError] =
+    useState<StartGameErrorReason | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pendingNameRef = useRef<string | null>(null);
 
@@ -135,7 +151,16 @@ export function useRoomConnection(
         }
         if (message.type === 'state') {
           setParticipants(message.participants);
+          setHostParticipantId(message.hostParticipantId);
           setGame(message.game);
+          // Любое изменение в комнате (кто-то присоединился, кто-то стал
+          // ведущим, партия реально началась) делает старую ошибку запуска
+          // неактуальной — пользователь либо чинит проблему прямо сейчас,
+          // либо она уже больше не про то, что показано на экране.
+          setStartGameError(null);
+        }
+        if (message.type === 'start-game-error') {
+          setStartGameError(message.reason);
         }
         if (message.type === 'falsestart') {
           setFalsestart(true);
@@ -187,8 +212,12 @@ export function useRoomConnection(
     lanUrl,
     game,
     falsestart,
+    hostParticipantId,
+    isHost: selfId !== null && selfId === hostParticipantId,
+    startGameError,
     join,
     startGame: () => send({ type: 'start-game' }),
+    toggleHost: () => send({ type: 'toggle-host' }),
     selectQuestion: (themeIndex, questionId) =>
       send({ type: 'select-question', themeIndex, questionId }),
     buzz: () => send({ type: 'buzz' }),
