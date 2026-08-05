@@ -420,4 +420,40 @@ describe('Room game flow', () => {
       vi.useRealTimers();
     }
   });
+
+  // PHASE_TIMER в конструкторе Room — единственный механизм, не дающий
+  // партии зависнуть навсегда после падения и перезапуска сервера: настоящий
+  // setTimeout, который двигал игру дальше, погиб вместе со старым процессом,
+  // и движок сам не знает о часах вообще. Раньше это было покрыто только
+  // косвенно (timerDeadline не null сразу после конструктора) — здесь же
+  // проверяется, что восстановленный таймер реально тикает, а не просто
+  // выглядит выставленным.
+  it('restarts a live timer for a game restored mid-question from a snapshot', () => {
+    const first = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(first, 'Ваня');
+    const katya = joinedId(first, 'Катя');
+    first.startGame();
+    const picker = first.toGameStateView()!.turnParticipantId;
+    first.selectQuestion(picker, 0, 'q1');
+    expect(first.toGameStateView()?.phase).toBe('question-open');
+    const snapshot = first.getState();
+
+    vi.useFakeTimers();
+    try {
+      // Снапшот-цикл без реального файла: тот же RoomState, что и после
+      // serializeSnapshot/deserializeSnapshot (Task 10 уже покрывает сам
+      // JSON round-trip в snapshot.test.ts), передан как initial новой Room
+      // — ровно то, что index.ts делает при старте после падения. Часы
+      // должны быть фейковыми уже на момент конструктора: именно там
+      // взводится восстановленный таймер.
+      const restored = new Room(snapshot, TEST_PACK);
+      expect(restored.toGameStateView()?.phase).toBe('question-open');
+      expect([vanya, katya]).toContain(picker);
+
+      vi.advanceTimersByTime(25_000); // QUESTION_TIMER_MS
+      expect(restored.toGameStateView()?.phase).toBe('reveal');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

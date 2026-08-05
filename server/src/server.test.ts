@@ -12,6 +12,7 @@ import {
 } from './server.js';
 import type { ServerMessage } from './protocol.js';
 import type { Pack } from './pack.js';
+import { VOTE_TIMER_MS } from './engine.js';
 
 // Attaches a persistent 'message' listener synchronously at socket creation
 // (before any await), so no frame can ever arrive unheard even if the server
@@ -515,7 +516,12 @@ async function joinPlayer(baseUrl: string, name: string) {
     token: string;
   };
   await nextMessage(); // сборос состояния лобби после join, которое видит сам подключившийся
-  return { ws, nextMessage, participantId: joined.participantId };
+  return {
+    ws,
+    nextMessage,
+    participantId: joined.participantId,
+    token: joined.token,
+  };
 }
 
 type Player = Awaited<ReturnType<typeof joinPlayer>>;
@@ -538,54 +544,115 @@ async function settle(
 
 describe('createServer game flow', () => {
   it('plays a question from start-game through a correct answer', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-game-'));
-    const room = new Room(undefined, TEST_PACK);
-    const server = createServer({
-      room,
-      clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
-    });
-    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
-    const { port } =
-      server.httpServer.address() as import('node:net').AddressInfo;
-    const url = `ws://127.0.0.1:${port}/ws`;
+    // Fake timers are needed to resolve judging deterministically (the
+    // engine only resolves a vote via its own timer, never on the 'vote'
+    // event itself) while keeping real WS network I/O — same
+    // shouldAdvanceTime pattern as the heartbeat describe block below, but
+    // enabled per-test here since the rest of this describe relies on real
+    // wall-clock I/O without any fake timers at all.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-game-'));
+      const room = new Room(undefined, TEST_PACK);
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        lanUrl: 'http://192.168.1.1:8080/',
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } =
+        server.httpServer.address() as import('node:net').AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
 
-    const a = await joinPlayer(url, 'Ваня');
-    const b = await joinPlayer(url, 'Катя');
-    // Присоединение b уже транслировало обновлённый состав лобби всем — эту
-    // трансляцию joinPlayer(b) вычитал только из очереди b, не из очереди a.
-    await a.nextMessage();
+      const a = await joinPlayer(url, 'Ваня');
+      const b = await joinPlayer(url, 'Катя');
+      // Присоединение b уже транслировало обновлённый состав лобби всем —
+      // эту трансляцию joinPlayer(b) вычитал только из очереди b, не из
+      // очереди a.
+      await a.nextMessage();
 
-    a.ws.send(JSON.stringify({ type: 'start-game' }));
-    const aState = (await settle(a, b, a)) as {
-      game: { phase: string; turnParticipantId: string };
-    };
-    expect(aState.game.phase).toBe('selecting');
+      a.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(a, b, a)) as {
+        game: { phase: string; turnParticipantId: string };
+      };
+      expect(aState.game.phase).toBe('selecting');
 
-    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
-    picker.ws.send(
-      JSON.stringify({
-        type: 'select-question',
-        themeIndex: 0,
-        questionId: 'q1',
-      }),
-    );
-    const afterSelect = (await settle(a, b, picker)) as {
-      game: { phase: string };
-    };
-    expect(afterSelect.game.phase).toBe('question-open');
+      const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+      const other = picker === a ? b : a;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      const afterSelect = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterSelect.game.phase).toBe('question-open');
 
-    picker.ws.send(JSON.stringify({ type: 'buzz' }));
-    const afterBuzz = (await settle(a, b, picker)) as {
-      game: { phase: string; buzzedParticipantId: string };
-    };
-    expect(afterBuzz.game.phase).toBe('buzzed');
-    expect(afterBuzz.game.buzzedParticipantId).toBe(picker.participantId);
+      picker.ws.send(JSON.stringify({ type: 'buzz' }));
+      const afterBuzz = (await settle(a, b, picker)) as {
+        game: { phase: string; buzzedParticipantId: string };
+      };
+      expect(afterBuzz.game.phase).toBe('buzzed');
+      expect(afterBuzz.game.buzzedParticipantId).toBe(picker.participantId);
 
-    a.ws.close();
-    b.ws.close();
-    await server.close();
-    await rm(dir, { recursive: true, force: true });
+      picker.ws.send(JSON.stringify({ type: 'said-answer' }));
+      const afterSaidAnswer = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterSaidAnswer.game.phase).toBe('judging');
+
+      other.ws.send(JSON.stringify({ type: 'vote', correct: true }));
+      // A cast vote alone never resolves judging — it just gets recorded —
+      // but it still changes room state and therefore still broadcasts.
+      // Consume that broadcast before advancing the vote timer, same as
+      // 'does not clear the vote timer when a vote is cast' in room.test.ts.
+      const afterVoteCast = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterVoteCast.game.phase).toBe('judging');
+
+      // Advance in HEARTBEAT_INTERVAL_MS-sized steps, not one big jump: a
+      // single advanceTimersByTimeAsync(VOTE_TIMER_MS) call fires both
+      // pending heartbeat ticks back-to-back without yielding to the real
+      // event loop in between, so the real pong frame the (perfectly alive)
+      // sockets send in response to the first tick's ping never has a
+      // chance to arrive before the second tick checks `alive` — the
+      // heartbeat then wrongly terminates both sockets. Stepping through in
+      // HEARTBEAT_INTERVAL_MS chunks (same granularity the heartbeat
+      // describe block below uses) gives each real pong round-trip room to
+      // land between ticks.
+      let remaining = VOTE_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterVoteResolved = (await settle(a, b, picker)) as {
+        game: {
+          phase: string;
+          scores: { participantId: string; score: number }[];
+        };
+      };
+      expect(afterVoteResolved.game.phase).toBe('reveal');
+      expect(afterVoteResolved.game.scores).toEqual(
+        expect.arrayContaining([
+          { participantId: picker.participantId, score: 100 },
+          { participantId: other.participantId, score: 0 },
+        ]),
+      );
+
+      a.ws.close();
+      b.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('replies falsestart to the offending socket alone, without broadcasting a state change', async () => {
@@ -617,6 +684,117 @@ describe('createServer game flow', () => {
 
     a.ws.close();
     b.ws.close();
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  // Дизайн-документ прямо требует «обрыв связи — норма, а не исключение»
+  // применительно и к обрыву посреди партии, не только в лобби (единственный
+  // сценарий, который был покрыт раньше). Проверяем, что переподключившийся
+  // сокет видит текущую игровую (не только лобби) game, а сама партия не
+  // потревожена самим фактом обрыва/возврата — фаза и счёт остаются теми же.
+  it('sends the in-progress game state to a socket reconnecting mid-game, leaving the game itself undisturbed', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-reconnect-mid-game-'));
+    const room = new Room(undefined, TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage(); // трансляция состава лобби после join b
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const aState = (await settle(a, b, a)) as {
+      game: { phase: string; turnParticipantId: string };
+    };
+    expect(aState.game.phase).toBe('selecting');
+
+    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'q1',
+      }),
+    );
+    const afterSelect = (await settle(a, b, picker)) as {
+      game: {
+        phase: string;
+        scores: { participantId: string; score: number }[];
+      };
+    };
+    expect(afterSelect.game.phase).toBe('question-open');
+    const scoresBeforeDisconnect = afterSelect.game.scores;
+
+    // b's socket "drops" mid-game. a is left holding a broadcast showing b
+    // disconnected — consume it so a's queue doesn't leak into a later
+    // assertion, matching the pattern of the existing lobby reconnect test.
+    const bClosed = new Promise<void>((resolve) =>
+      b.ws.once('close', () => resolve()),
+    );
+    b.ws.close();
+    await bClosed;
+    const afterDisconnect = (await a.nextMessage()) as {
+      participants: { id: string; connected: boolean }[];
+      game: { phase: string };
+    };
+    expect(
+      afterDisconnect.participants.find((p) => p.id === b.participantId)
+        ?.connected,
+    ).toBe(false);
+    // The disconnect itself must not have touched the game.
+    expect(afterDisconnect.game.phase).toBe('question-open');
+
+    const reconnected = new WebSocket(url);
+    const nextReconnectedMessage = collectMessages(reconnected);
+    await waitForOpen(reconnected);
+    await nextReconnectedMessage(); // hello
+    const stateOnConnect = (await nextReconnectedMessage()) as {
+      game: { phase: string } | null;
+    };
+    // Even before sending 'reconnect', a freshly connected socket already
+    // sees the room's current state — proving it is the real in-progress
+    // game, not a lobby-only placeholder.
+    expect(stateOnConnect.game?.phase).toBe('question-open');
+
+    reconnected.send(JSON.stringify({ type: 'reconnect', token: b.token }));
+    const reconnectedJoined = (await nextReconnectedMessage()) as {
+      type: string;
+      participantId: string;
+    };
+    expect(reconnectedJoined).toMatchObject({
+      type: 'joined',
+      participantId: b.participantId,
+    });
+
+    // Broadcast following the reconnect: b shows connected again, and the
+    // game is exactly where it was left — same phase, same scores. Goes to
+    // both a and the reconnected socket; read from `reconnected`'s queue.
+    const afterReconnectBroadcast = (await nextReconnectedMessage()) as {
+      participants: { id: string; connected: boolean }[];
+      game: {
+        phase: string;
+        scores: { participantId: string; score: number }[];
+      };
+    };
+    expect(
+      afterReconnectBroadcast.participants.find((p) => p.id === b.participantId)
+        ?.connected,
+    ).toBe(true);
+    expect(afterReconnectBroadcast.game.phase).toBe('question-open');
+    expect(afterReconnectBroadcast.game.scores).toEqual(scoresBeforeDisconnect);
+
+    await a.nextMessage(); // same broadcast, delivered to a as well
+
+    a.ws.close();
+    reconnected.close();
     await server.close();
     await rm(dir, { recursive: true, force: true });
   });
