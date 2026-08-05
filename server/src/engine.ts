@@ -247,18 +247,35 @@ function resolveVote(state: EngineState): Result {
   // таймером (не буквальным «остатком» — см. дизайн-документ, раздел
   // «Отклонения от исходной спеки»), отвечавший больше не может нажать на
   // этот же вопрос.
-  return {
-    state: {
-      ...state,
-      phase: 'question-open',
-      buzzedCounterId: null,
-      votes: {},
-      triedCounterIds: [...state.triedCounterIds, buzzedCounterId],
-      scores: {
-        ...state.scores,
-        [buzzedCounterId]: state.scores[buzzedCounterId] - question.price,
-      },
+  const triedCounterIds = [...state.triedCounterIds, buzzedCounterId];
+  const nextState: EngineState = {
+    ...state,
+    phase: 'question-open',
+    buzzedCounterId: null,
+    votes: {},
+    triedCounterIds,
+    scores: {
+      ...state.scores,
+      [buzzedCounterId]: state.scores[buzzedCounterId] - question.price,
     },
+  };
+
+  // Если после этого штрафа в triedCounterIds оказались уже все счётчики
+  // партии, handleBuzz отклонит нажатие от кого угодно (он сам проверяет
+  // triedCounterIds.includes) — нажимать больше некому. Переоткрывать вопрос
+  // на полные QUESTION_TIMER_MS в этом случае значит показать 25 секунд
+  // мёртвого экрана с активной на вид, но нерабочей кнопкой «Жать!». Вместо
+  // этого сразу раскрываем вопрос тем же путём, что и истёкший таймер без
+  // единого нажатия — без изменения счёта и с тем же выбирающим.
+  const everyoneHasTried = Object.keys(state.scores).every((id) =>
+    triedCounterIds.includes(id),
+  );
+  if (everyoneHasTried) {
+    return revealQuestion(nextState, null);
+  }
+
+  return {
+    state: nextState,
     effects: [
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ],

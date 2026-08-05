@@ -356,6 +356,45 @@ describe('timer-expired: vote — incorrect', () => {
     expect(next.phase).toBe('question-open');
     expect(effects).toEqual([]);
   });
+
+  it('reveals instead of reopening once every counter has tried and failed, since nobody left can buzz', () => {
+    // Two-counter game: p1 buzzes and answers wrong, question reopens (only
+    // p2 left who could buzz); p2 then buzzes and also answers wrong. At
+    // that point triedCounterIds covers both counters in state.scores, so
+    // there is nobody left who handleBuzz would ever accept a buzz from —
+    // reopening with a fresh timer would just be 25 seconds of a dead
+    // "Жать!" button. The engine should reveal immediately instead.
+    let state = toJudging(createInitialState(PACK, ['p1', 'p2']));
+    state = reduce(state, {
+      type: 'vote',
+      counterId: 'p2',
+      correct: false,
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
+    expect(state.phase).toBe('question-open');
+    expect(state.triedCounterIds).toEqual(['p1']);
+
+    state = reduce(state, { type: 'buzz', counterId: 'p2' }).state;
+    expect(state.phase).toBe('buzzed');
+    state = reduce(state, { type: 'said-answer', counterId: 'p2' }).state;
+    state = reduce(state, {
+      type: 'vote',
+      counterId: 'p1',
+      correct: false,
+    }).state;
+    const { state: next, effects } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'vote',
+    });
+
+    expect(next.phase).toBe('reveal');
+    expect(next.turnCounterId).toBe(state.turnCounterId);
+    expect(next.answeredQuestionIds).toEqual(['a1']);
+    expect(next.scores).toEqual({ p1: -100, p2: -100 });
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
+    ]);
+  });
 });
 
 describe('timer-expired: question — nobody buzzed', () => {
