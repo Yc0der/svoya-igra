@@ -31,6 +31,15 @@ export interface GameStateView {
   graceExcludedUntil: number | null;
   timerDeadline: number | null;
   scores: { participantId: string; score: number }[];
+  finalThemes: { name: string; eliminated: boolean }[] | null;
+  finalElimParticipantId: string | null;
+  finalQuestion: { text: string } | null;
+  // Персональные поля, как correctAnswer: обычному игроку — только его
+  // собственная запись (или пустой массив, пока не отправил); ведущему на
+  // final-judging и всем на final-reveal — все (см. Room.toGameStateView).
+  finalWagers: { participantId: string; amount: number }[] | null;
+  finalAnswers: { participantId: string; text: string }[] | null;
+  finalVerdicts: { participantId: string; correct: boolean }[] | null;
 }
 
 export type ClientMessage =
@@ -45,7 +54,11 @@ export type ClientMessage =
   // Панель ведущего — сервер сам проверяет, что отправитель и есть hostId,
   // клиентскому participantId в поле не доверяет.
   | { type: 'adjust-score'; participantId: string; delta: number }
-  | { type: 'cancel-question' };
+  | { type: 'cancel-question' }
+  | { type: 'eliminate-final-theme'; themeIndex: number }
+  | { type: 'submit-wager'; amount: number }
+  | { type: 'submit-final-answer'; text: string }
+  | { type: 'final-vote'; participantId: string; correct: boolean };
 
 export type StartGameErrorReason =
   'not-enough-players' | 'no-pack' | 'game-in-progress' | 'host-required';
