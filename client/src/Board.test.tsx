@@ -117,7 +117,7 @@ describe('Board', () => {
     expect(screen.getByText(/выбирает Ваня/i)).toBeInTheDocument();
   });
 
-  it('shows the grid with answered cells greyed out once the game has started', () => {
+  it('removes answered questions from the visible grid', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         game: baseGame({
