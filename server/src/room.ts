@@ -118,10 +118,17 @@ export class Room {
     if (!this.pack) {
       return { error: 'no-pack' };
     }
-    if (this.participants.length < 2) {
+    // Только подключённые сейчас участники становятся счётчиками. Тот, кто
+    // зашёл в лобби и ушёл (закрыл вкладку) до начала игры, не должен
+    // остаться фантомным счётчиком с шансом на первый ход наравне с теми,
+    // кто реально играет — он не участвует, и «минимум два игрока» тоже
+    // должен считаться от реально присутствующих, а не от всех, кто когда-то
+    // заходил за время жизни процесса.
+    const present = this.participants.filter((p) => p.connected);
+    if (present.length < 2) {
       return { error: 'not-enough-players' };
     }
-    const counterIds = this.participants.map((p) => p.id);
+    const counterIds = present.map((p) => p.id);
     this.game = createInitialState(this.pack, counterIds);
     this.notify();
     return { ok: true };

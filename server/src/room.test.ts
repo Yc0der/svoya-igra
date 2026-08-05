@@ -220,6 +220,26 @@ describe('Room.startGame', () => {
     );
   });
 
+  it('excludes a disconnected participant from the game and from the minimum-players count', () => {
+    // Кто-то зашёл в лобби и ушёл до начала игры — не должен остаться
+    // фантомным счётчиком со случайным шансом на первый ход, и не должен
+    // засчитываться в «минимум два игрока».
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.disconnect(vanya);
+
+    // Осталась только Катя реально подключённой — меньше двух.
+    expect(room.startGame()).toEqual({ error: 'not-enough-players' });
+
+    const petya = joinedId(room, 'Петя');
+    expect(room.startGame()).toEqual({ ok: true });
+
+    const view = room.toGameStateView();
+    expect(view?.scores.map((s) => s.participantId)).not.toContain(vanya);
+    expect(view?.scores.map((s) => s.participantId)).toContain(petya);
+  });
+
   it('notifies listeners on a successful start', () => {
     const room = new Room(undefined, TEST_PACK);
     joinedId(room, 'Ваня');
