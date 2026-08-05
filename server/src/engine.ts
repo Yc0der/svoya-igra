@@ -7,16 +7,35 @@ export type Phase =
   | 'judging'
   | 'reveal'
   | 'round-end'
+  | 'final-elim'
+  | 'final-wager'
+  | 'final-answer'
+  | 'final-judging'
+  | 'final-reveal'
   | 'game-end';
 
 export type TimerName =
-  'question' | 'said-answer' | 'vote' | 'reveal' | 'round-end';
+  | 'question'
+  | 'said-answer'
+  | 'vote'
+  | 'reveal'
+  | 'round-end'
+  | 'final-elim'
+  | 'final-wager'
+  | 'final-answer'
+  | 'final-judging'
+  | 'final-reveal';
 
 export const QUESTION_TIMER_MS = 30_000;
 export const SAID_ANSWER_TIMER_MS = 10_000;
 export const VOTE_TIMER_MS = 10_000;
 export const REVEAL_TIMER_MS = 4_000;
 export const ROUND_END_TIMER_MS = 5_000;
+export const FINAL_ELIM_TIMER_MS = 20_000;
+export const FINAL_WAGER_TIMER_MS = 20_000;
+export const FINAL_ANSWER_TIMER_MS = 45_000;
+export const FINAL_JUDGING_TIMER_MS = 60_000;
+export const FINAL_REVEAL_TIMER_MS = 10_000;
 
 // Плоские массивы/объекты, а не Set/Map — EngineState целиком проходит через
 // JSON.stringify в снапшоте комнаты (Task 4), а Map/Set сериализуются в '{}'.
@@ -35,6 +54,12 @@ export interface EngineState {
   // двоих и открытое судейство голосованием; иначе — судит только этот
   // счётчик... то есть на самом деле не счётчик вовсе (design.md, «Ведущий»).
   hostId: string | null;
+  finalRemainingThemeIndices: number[] | null;
+  finalElimCounterId: string | null;
+  finalThemeIndex: number | null;
+  finalWagers: Record<string, number>;
+  finalAnswers: Record<string, string>;
+  finalVerdicts: Record<string, boolean>;
 }
 
 export type EngineEvent =
@@ -56,7 +81,16 @@ export type EngineEvent =
       targetCounterId: string;
       delta: number;
     }
-  | { type: 'cancel-question'; requesterId: string };
+  | { type: 'cancel-question'; requesterId: string }
+  | { type: 'eliminate-final-theme'; counterId: string; themeIndex: number }
+  | { type: 'submit-wager'; counterId: string; amount: number }
+  | { type: 'submit-final-answer'; counterId: string; text: string }
+  | {
+      type: 'final-vote';
+      requesterId: string;
+      counterId: string;
+      correct: boolean;
+    };
 
 export type Effect =
   | { type: 'start-timer'; timer: TimerName; ms: number }
@@ -86,6 +120,12 @@ export function createInitialState(
     scores,
     lastCorrectCounterId: null,
     hostId,
+    finalRemainingThemeIndices: null,
+    finalElimCounterId: null,
+    finalThemeIndex: null,
+    finalWagers: {},
+    finalAnswers: {},
+    finalVerdicts: {},
   };
 }
 
@@ -131,6 +171,14 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
       return handleAdjustScore(state, event);
     case 'cancel-question':
       return handleCancelQuestion(state, event);
+    case 'eliminate-final-theme':
+      return handleEliminateFinalTheme(state, event);
+    case 'submit-wager':
+      return handleSubmitWager(state, event);
+    case 'submit-final-answer':
+      return handleSubmitFinalAnswer(state, event);
+    case 'final-vote':
+      return handleFinalVote(state, event);
   }
 }
 
@@ -292,6 +340,20 @@ function handleTimerExpired(
       return afterReveal(state);
     case 'round-end':
       return startNextRound(state);
+    case 'final-elim': {
+      const remaining = state.finalRemainingThemeIndices!;
+      const randomIndex =
+        remaining[Math.floor(Math.random() * remaining.length)];
+      return eliminateFinalTheme(state, randomIndex);
+    }
+    case 'final-wager':
+      return resolveWagers(state);
+    case 'final-answer':
+      return resolveAnswers(state);
+    case 'final-judging':
+      return resolveFinalVerdicts(state);
+    case 'final-reveal':
+      return { state: { ...state, phase: 'game-end' }, effects: [] };
   }
 }
 
@@ -396,7 +458,29 @@ function afterReveal(state: EngineState): Result {
       ],
     };
   }
-  return { state: { ...base, phase: 'game-end' }, effects: [] };
+  return startFinalOrEnd(base);
+}
+
+// Финал требует ведущего всегда, даже при двух счётчиках — это отдельное
+// правило от стартового (design.md, финал-спека, «Правила финала»). Партия
+// на двоих без ведущего или партия по пакету без final играется как раньше,
+// без изменений.
+function startFinalOrEnd(state: EngineState): Result {
+  if (!state.pack.final || state.hostId === null) {
+    return { state: { ...state, phase: 'game-end' }, effects: [] };
+  }
+  const ordered = ascendingByScore(state);
+  return {
+    state: {
+      ...state,
+      phase: 'final-elim',
+      finalRemainingThemeIndices: state.pack.final.themes.map((_, i) => i),
+      finalElimCounterId: ordered[0],
+    },
+    effects: [
+      { type: 'start-timer', timer: 'final-elim', ms: FINAL_ELIM_TIMER_MS },
+    ],
+  };
 }
 
 function startNextRound(state: EngineState): Result {
@@ -404,4 +488,169 @@ function startNextRound(state: EngineState): Result {
     state: { ...state, phase: 'selecting', roundIndex: state.roundIndex + 1 },
     effects: [],
   };
+}
+
+// Порядок счётчиков по возрастанию счёта — общий helper, используется и при
+// старте финала, и при передаче хода.
+function ascendingByScore(state: EngineState): string[] {
+  return [...Object.keys(state.scores)].sort(
+    (a, b) => state.scores[a] - state.scores[b],
+  );
+}
+
+function handleEliminateFinalTheme(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'eliminate-final-theme' }>,
+): Result {
+  if (
+    state.phase !== 'final-elim' ||
+    event.counterId !== state.finalElimCounterId ||
+    !state.finalRemainingThemeIndices?.includes(event.themeIndex)
+  ) {
+    return unchanged(state);
+  }
+  return eliminateFinalTheme(state, event.themeIndex);
+}
+
+function eliminateFinalTheme(state: EngineState, themeIndex: number): Result {
+  const remaining = state.finalRemainingThemeIndices!.filter(
+    (i) => i !== themeIndex,
+  );
+  if (remaining.length === 1) {
+    return {
+      state: {
+        ...state,
+        phase: 'final-wager',
+        finalRemainingThemeIndices: remaining,
+        finalThemeIndex: remaining[0],
+        finalElimCounterId: null,
+      },
+      effects: [
+        { type: 'start-timer', timer: 'final-wager', ms: FINAL_WAGER_TIMER_MS },
+      ],
+    };
+  }
+  const ordered = ascendingByScore(state);
+  const turnIndex = ordered.indexOf(state.finalElimCounterId!);
+  const nextCounterId = ordered[(turnIndex + 1) % ordered.length];
+  return {
+    state: {
+      ...state,
+      finalRemainingThemeIndices: remaining,
+      finalElimCounterId: nextCounterId,
+    },
+    effects: [
+      { type: 'start-timer', timer: 'final-elim', ms: FINAL_ELIM_TIMER_MS },
+    ],
+  };
+}
+
+function handleSubmitWager(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'submit-wager' }>,
+): Result {
+  if (state.phase !== 'final-wager' || !(event.counterId in state.scores)) {
+    return unchanged(state);
+  }
+  const max = Math.max(0, state.scores[event.counterId]);
+  const amount = Math.min(max, Math.max(0, event.amount));
+  const wagers = { ...state.finalWagers, [event.counterId]: amount };
+  if (Object.keys(wagers).length < Object.keys(state.scores).length) {
+    return unchanged({ ...state, finalWagers: wagers });
+  }
+  return startFinalAnswer({ ...state, finalWagers: wagers });
+}
+
+function startFinalAnswer(state: EngineState): Result {
+  return {
+    state: { ...state, phase: 'final-answer' },
+    effects: [
+      { type: 'start-timer', timer: 'final-answer', ms: FINAL_ANSWER_TIMER_MS },
+    ],
+  };
+}
+
+function resolveWagers(state: EngineState): Result {
+  const wagers = { ...state.finalWagers };
+  for (const counterId of Object.keys(state.scores)) {
+    if (!(counterId in wagers)) wagers[counterId] = 0;
+  }
+  return startFinalAnswer({ ...state, finalWagers: wagers });
+}
+
+function handleSubmitFinalAnswer(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'submit-final-answer' }>,
+): Result {
+  if (state.phase !== 'final-answer' || !(event.counterId in state.scores)) {
+    return unchanged(state);
+  }
+  const answers = { ...state.finalAnswers, [event.counterId]: event.text };
+  if (Object.keys(answers).length < Object.keys(state.scores).length) {
+    return unchanged({ ...state, finalAnswers: answers });
+  }
+  return startFinalJudging({ ...state, finalAnswers: answers });
+}
+
+function startFinalJudging(state: EngineState): Result {
+  return {
+    state: { ...state, phase: 'final-judging' },
+    effects: [
+      {
+        type: 'start-timer',
+        timer: 'final-judging',
+        ms: FINAL_JUDGING_TIMER_MS,
+      },
+    ],
+  };
+}
+
+function resolveAnswers(state: EngineState): Result {
+  const answers = { ...state.finalAnswers };
+  for (const counterId of Object.keys(state.scores)) {
+    if (!(counterId in answers)) answers[counterId] = '';
+  }
+  return startFinalJudging({ ...state, finalAnswers: answers });
+}
+
+function handleFinalVote(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'final-vote' }>,
+): Result {
+  if (
+    state.phase !== 'final-judging' ||
+    state.hostId === null ||
+    event.requesterId !== state.hostId ||
+    !(event.counterId in state.scores)
+  ) {
+    return unchanged(state);
+  }
+  const verdicts = { ...state.finalVerdicts, [event.counterId]: event.correct };
+  if (Object.keys(verdicts).length < Object.keys(state.scores).length) {
+    return unchanged({ ...state, finalVerdicts: verdicts });
+  }
+  return applyFinalVerdicts({ ...state, finalVerdicts: verdicts });
+}
+
+function applyFinalVerdicts(state: EngineState): Result {
+  const scores = { ...state.scores };
+  for (const counterId of Object.keys(scores)) {
+    const wager = state.finalWagers[counterId] ?? 0;
+    const correct = state.finalVerdicts[counterId] ?? false;
+    scores[counterId] = scores[counterId] + (correct ? wager : -wager);
+  }
+  return {
+    state: { ...state, phase: 'final-reveal', scores },
+    effects: [
+      { type: 'start-timer', timer: 'final-reveal', ms: FINAL_REVEAL_TIMER_MS },
+    ],
+  };
+}
+
+function resolveFinalVerdicts(state: EngineState): Result {
+  const verdicts = { ...state.finalVerdicts };
+  for (const counterId of Object.keys(state.scores)) {
+    if (!(counterId in verdicts)) verdicts[counterId] = false;
+  }
+  return applyFinalVerdicts({ ...state, finalVerdicts: verdicts });
 }

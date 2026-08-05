@@ -7,6 +7,11 @@ import {
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
   ROUND_END_TIMER_MS,
+  FINAL_ELIM_TIMER_MS,
+  FINAL_WAGER_TIMER_MS,
+  FINAL_ANSWER_TIMER_MS,
+  FINAL_JUDGING_TIMER_MS,
+  FINAL_REVEAL_TIMER_MS,
   type EngineState,
 } from './engine.js';
 import type { Pack } from './pack.js';
@@ -62,6 +67,38 @@ function makePack(overrides: Partial<Pack> = {}): Pack {
 }
 
 const PACK = makePack();
+
+const FINAL_PACK = makePack({
+  final: {
+    themes: [
+      {
+        name: 'Финал A',
+        question: { id: 'f1', text: 'F1?', answer: 'ответ f1' },
+      },
+      {
+        name: 'Финал B',
+        question: { id: 'f2', text: 'F2?', answer: 'ответ f2' },
+      },
+      {
+        name: 'Финал C',
+        question: { id: 'f3', text: 'F3?', answer: 'ответ f3' },
+      },
+    ],
+  },
+});
+
+// Строит EngineState прямо в final-elim, минуя весь предыдущий раунд —
+// unit-тестам финала не нужно доигрывать до него через select/buzz/vote.
+function finalElimState(scores: Record<string, number>): EngineState {
+  const ordered = Object.keys(scores).sort((a, b) => scores[a] - scores[b]);
+  return {
+    ...createInitialState(FINAL_PACK, Object.keys(scores), 'judge'),
+    phase: 'final-elim',
+    scores,
+    finalRemainingThemeIndices: [0, 1, 2],
+    finalElimCounterId: ordered[0],
+  };
+}
 
 function selectFirst(state: EngineState) {
   return reduce(state, {
@@ -756,5 +793,438 @@ describe('a full two-question game, played end to end', () => {
 
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
     expect(state.phase).toBe('game-end');
+  });
+});
+
+describe('final round transition', () => {
+  it('starts final-elim after the last round when a final pack and a host exist', () => {
+    let state = createInitialState(FINAL_PACK, ['p1', 'p2'], 'judge');
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a2',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'round-end' }).state;
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'b1',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    const { state: next, effects } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'reveal',
+    });
+
+    expect(next.phase).toBe('final-elim');
+    expect(next.finalRemainingThemeIndices).toEqual([0, 1, 2]);
+    expect(['p1', 'p2']).toContain(next.finalElimCounterId);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'final-elim', ms: FINAL_ELIM_TIMER_MS },
+    ]);
+  });
+
+  it('goes straight to game-end after the last round when the pack has no final block', () => {
+    let state = createInitialState(PACK, ['p1', 'p2'], 'judge');
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a2',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'round-end' }).state;
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'b1',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    const { state: next } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'reveal',
+    });
+
+    expect(next.phase).toBe('game-end');
+  });
+
+  it('goes straight to game-end after the last round when there is no host (two counters)', () => {
+    let state = createInitialState(FINAL_PACK, ['p1', 'p2']); // hostId по умолчанию null
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    // hostId === null: голосует единственный не отвечавший, разрешается
+    // немедленно тем же путём, что уже покрыт в 'vote' — здесь важен только
+    // конечный переход после последнего раунда, поэтому идём по тайм-ауту.
+    state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a2',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'round-end' }).state;
+    state = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'b1',
+    }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
+    state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
+    const { state: next } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'reveal',
+    });
+
+    expect(next.phase).toBe('game-end');
+  });
+});
+
+describe('eliminate-final-theme', () => {
+  it('removes the theme and advances the turn to the next counter by ascending score', () => {
+    const state = finalElimState({ p1: 100, p2: 0, p3: 50 });
+    expect(state.finalElimCounterId).toBe('p2');
+    const { state: next, effects } = reduce(state, {
+      type: 'eliminate-final-theme',
+      counterId: 'p2',
+      themeIndex: 0,
+    });
+    expect(next.phase).toBe('final-elim');
+    expect(next.finalRemainingThemeIndices).toEqual([1, 2]);
+    expect(next.finalElimCounterId).toBe('p3');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'final-elim', ms: FINAL_ELIM_TIMER_MS },
+    ]);
+  });
+
+  it('moves to final-wager once a single theme remains', () => {
+    const state = {
+      ...finalElimState({ p1: 0, p2: 100 }),
+      finalRemainingThemeIndices: [1, 2],
+    };
+    const { state: next, effects } = reduce(state, {
+      type: 'eliminate-final-theme',
+      counterId: 'p1',
+      themeIndex: 1,
+    });
+    expect(next.phase).toBe('final-wager');
+    expect(next.finalRemainingThemeIndices).toEqual([2]);
+    expect(next.finalThemeIndex).toBe(2);
+    expect(next.finalElimCounterId).toBeNull();
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'final-wager', ms: FINAL_WAGER_TIMER_MS },
+    ]);
+  });
+
+  it('is a no-op from someone other than finalElimCounterId', () => {
+    const state = finalElimState({ p1: 100, p2: 0 });
+    const { state: next, effects } = reduce(state, {
+      type: 'eliminate-final-theme',
+      counterId: 'p1',
+      themeIndex: 0,
+    });
+    expect(next).toEqual(state);
+    expect(effects).toEqual([]);
+  });
+
+  it('is a no-op for an already-eliminated theme', () => {
+    const state = {
+      ...finalElimState({ p1: 0, p2: 100 }),
+      finalRemainingThemeIndices: [1, 2],
+    };
+    const { state: next } = reduce(state, {
+      type: 'eliminate-final-theme',
+      counterId: 'p1',
+      themeIndex: 0,
+    });
+    expect(next).toEqual(state);
+  });
+});
+
+describe('timer-expired: final-elim', () => {
+  it('eliminates a random remaining theme and keeps going', () => {
+    const state = finalElimState({ p1: 0, p2: 100 });
+    const { state: next, effects } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'final-elim',
+    });
+    expect(next.finalRemainingThemeIndices).toHaveLength(2);
+    expect(next.finalElimCounterId).toBe('p2');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'final-elim', ms: FINAL_ELIM_TIMER_MS },
+    ]);
+  });
+});
+
+function finalWagerState(scores: Record<string, number>): EngineState {
+  return {
+    ...finalElimState(scores),
+    phase: 'final-wager',
+    finalRemainingThemeIndices: [1],
+    finalThemeIndex: 1,
+    finalElimCounterId: null,
+  };
+}
+
+describe('submit-wager', () => {
+  it('clamps the amount to [0, score]', () => {
+    const state = finalWagerState({ p1: 300, p2: 0 });
+    const { state: next } = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p1',
+      amount: 9999,
+    });
+    expect(next.finalWagers.p1).toBe(300);
+  });
+
+  it('clamps a negative amount up to zero', () => {
+    const state = finalWagerState({ p1: 300, p2: 0 });
+    const { state: next } = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p1',
+      amount: -50,
+    });
+    expect(next.finalWagers.p1).toBe(0);
+  });
+
+  it('clamps the maximum to zero when the score is negative', () => {
+    const state = finalWagerState({ p1: -100, p2: 0 });
+    const { state: next } = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p1',
+      amount: 50,
+    });
+    expect(next.finalWagers.p1).toBe(0);
+  });
+
+  it('moves to final-answer once every counter has wagered', () => {
+    let state = finalWagerState({ p1: 100, p2: 200 });
+    state = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p1',
+      amount: 50,
+    }).state;
+    expect(state.phase).toBe('final-wager');
+    const { state: next, effects } = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p2',
+      amount: 100,
+    });
+    expect(next.phase).toBe('final-answer');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'final-answer', ms: FINAL_ANSWER_TIMER_MS },
+    ]);
+  });
+
+  it('is a no-op outside final-wager', () => {
+    const state = finalElimState({ p1: 0, p2: 100 });
+    const { state: next } = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p1',
+      amount: 10,
+    });
+    expect(next).toEqual(state);
+  });
+});
+
+describe('timer-expired: final-wager', () => {
+  it('defaults missing wagers to 0 and moves to final-answer', () => {
+    let state = finalWagerState({ p1: 100, p2: 200 });
+    state = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p1',
+      amount: 50,
+    }).state;
+    const { state: next, effects } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'final-wager',
+    });
+    expect(next.phase).toBe('final-answer');
+    expect(next.finalWagers).toEqual({ p1: 50, p2: 0 });
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'final-answer', ms: FINAL_ANSWER_TIMER_MS },
+    ]);
+  });
+});
+
+function finalAnswerState(scores: Record<string, number>): EngineState {
+  return {
+    ...finalWagerState(scores),
+    phase: 'final-answer',
+    finalWagers: Object.fromEntries(Object.keys(scores).map((id) => [id, 0])),
+  };
+}
+
+describe('submit-final-answer', () => {
+  it('moves to final-judging once every counter has answered', () => {
+    let state = finalAnswerState({ p1: 100, p2: 200 });
+    state = reduce(state, {
+      type: 'submit-final-answer',
+      counterId: 'p1',
+      text: 'ответ p1',
+    }).state;
+    expect(state.phase).toBe('final-answer');
+    const { state: next, effects } = reduce(state, {
+      type: 'submit-final-answer',
+      counterId: 'p2',
+      text: 'ответ p2',
+    });
+    expect(next.phase).toBe('final-judging');
+    expect(next.finalAnswers).toEqual({ p1: 'ответ p1', p2: 'ответ p2' });
+    expect(effects).toEqual([
+      {
+        type: 'start-timer',
+        timer: 'final-judging',
+        ms: FINAL_JUDGING_TIMER_MS,
+      },
+    ]);
+  });
+});
+
+describe('timer-expired: final-answer', () => {
+  it('defaults missing answers to an empty string and moves to final-judging', () => {
+    let state = finalAnswerState({ p1: 100, p2: 200 });
+    state = reduce(state, {
+      type: 'submit-final-answer',
+      counterId: 'p1',
+      text: 'ответ p1',
+    }).state;
+    const { state: next } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'final-answer',
+    });
+    expect(next.phase).toBe('final-judging');
+    expect(next.finalAnswers).toEqual({ p1: 'ответ p1', p2: '' });
+  });
+});
+
+function finalJudgingState(
+  scores: Record<string, number>,
+  wagers: Record<string, number>,
+): EngineState {
+  return {
+    ...finalAnswerState(scores),
+    phase: 'final-judging',
+    finalWagers: wagers,
+    finalAnswers: Object.fromEntries(
+      Object.keys(scores).map((id) => [id, 'x']),
+    ),
+  };
+}
+
+describe('final-vote', () => {
+  it('is a no-op from someone other than the host', () => {
+    const state = finalJudgingState({ p1: 100, p2: 200 }, { p1: 50, p2: 50 });
+    const { state: next } = reduce(state, {
+      type: 'final-vote',
+      requesterId: 'p1',
+      counterId: 'p2',
+      correct: true,
+    });
+    expect(next).toEqual(state);
+  });
+
+  it('does not resolve on a partial set of verdicts', () => {
+    const state = finalJudgingState({ p1: 100, p2: 200 }, { p1: 50, p2: 50 });
+    const { state: next, effects } = reduce(state, {
+      type: 'final-vote',
+      requesterId: 'judge',
+      counterId: 'p1',
+      correct: true,
+    });
+    expect(next.phase).toBe('final-judging');
+    expect(next.finalVerdicts).toEqual({ p1: true });
+    expect(effects).toEqual([]);
+  });
+
+  it('applies scores by wager and moves to final-reveal once every counter is judged', () => {
+    let state = finalJudgingState({ p1: 100, p2: 200 }, { p1: 50, p2: 80 });
+    state = reduce(state, {
+      type: 'final-vote',
+      requesterId: 'judge',
+      counterId: 'p1',
+      correct: true,
+    }).state;
+    const { state: next, effects } = reduce(state, {
+      type: 'final-vote',
+      requesterId: 'judge',
+      counterId: 'p2',
+      correct: false,
+    });
+    expect(next.phase).toBe('final-reveal');
+    expect(next.scores).toEqual({ p1: 150, p2: 120 });
+    expect(effects).toEqual([
+      {
+        type: 'start-timer',
+        timer: 'final-reveal',
+        ms: FINAL_REVEAL_TIMER_MS,
+      },
+    ]);
+  });
+});
+
+describe('timer-expired: final-judging', () => {
+  it('defaults missing verdicts to false, applies scores, and moves to final-reveal', () => {
+    let state = finalJudgingState({ p1: 100, p2: 200 }, { p1: 50, p2: 80 });
+    state = reduce(state, {
+      type: 'final-vote',
+      requesterId: 'judge',
+      counterId: 'p1',
+      correct: true,
+    }).state;
+    const { state: next } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'final-judging',
+    });
+    expect(next.phase).toBe('final-reveal');
+    // p1 отмечен верно вручную (+50 -> 150); p2 не отмечен -> незачёт по
+    // умолчанию (-80 -> 120).
+    expect(next.scores).toEqual({ p1: 150, p2: 120 });
+  });
+});
+
+describe('timer-expired: final-reveal', () => {
+  it('moves to game-end', () => {
+    const state: EngineState = {
+      ...finalJudgingState({ p1: 150, p2: 120 }, { p1: 50, p2: 80 }),
+      phase: 'final-reveal',
+    };
+    const { state: next, effects } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'final-reveal',
+    });
+    expect(next.phase).toBe('game-end');
+    expect(effects).toEqual([]);
   });
 });
