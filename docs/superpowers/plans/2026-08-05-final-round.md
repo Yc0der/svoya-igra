@@ -3017,9 +3017,42 @@ test('board, two players and a host play through the final round', async ({
     timeout: 20_000,
   });
 
-  // other ответил неверно/не отвечал (score 0 < picker'а 100) — ходит первым
-  // по правилу «по возрастанию счёта» (design.md, финал-спека).
-  await other.getByRole('button', { name: 'Финал A', exact: true }).click();
+  // Изначально other пришёл бы к финалу с 0 < picker'а 100 и ходил бы первым
+  // по правилу «по возрастанию счёта» (design.md, финал-спека). Но панель
+  // ведущего выше выдала other фиксированные +100 (кнопка Player.tsx не
+  // параметризуется), а единственный вопрос пакета тоже стоит 100 — счета
+  // сравниваются 100 на 100. При равенстве engine.ts (ascendingByScore)
+  // разрешает порядок по тому, в каком порядке сформирован список счётчиков
+  // — то есть по порядку входа в комнату, который не совпадает ни с picker,
+  // ни с other предсказуемо: кто из них войдёт первым, зависит от того, кого
+  // случайный стартовый turnCounterId (engine.ts, createInitialState)
+  // назначил picker'ом в начале теста. Поэтому здесь не фиксируем, что
+  // первый ход — за other, а опрашиваем, у кого из двух реально включена
+  // кнопка темы, тем же паттерном toPass(), что и при определении picker'а
+  // выше.
+  await expect(async () => {
+    if (
+      await picker
+        .getByRole('button', { name: 'Финал A', exact: true })
+        .isEnabled()
+        .catch(() => false)
+    ) {
+      await picker
+        .getByRole('button', { name: 'Финал A', exact: true })
+        .click();
+      return;
+    }
+    if (
+      await other
+        .getByRole('button', { name: 'Финал A', exact: true })
+        .isEnabled()
+        .catch(() => false)
+    ) {
+      await other.getByRole('button', { name: 'Финал A', exact: true }).click();
+      return;
+    }
+    throw new Error('final elim turn not resolved on either page yet');
+  }).toPass();
 
   await expect(picker.getByLabel('Ставка')).toBeVisible();
   await picker.getByLabel('Ставка').fill('50');
