@@ -219,7 +219,7 @@ FINAL_REVEAL_TIMER_MS)` — не переиспользуем таймер `reve
 ```ts
 finalThemes: { name: string; eliminated: boolean }[] | null; // видно всем начиная с final-elim
 finalElimParticipantId: string | null; // чей ход вычёркивать
-finalQuestion: { text: string } | null; // видно с final-wager (тема уже известна раньше — по имени)
+finalQuestion: { text: string } | null; // видно с final-answer (на final-wager известно только имя темы — finalThemes)
 // Персональные, тем же паттерном что correctAnswer: обычному игроку — только ЕГО ставка/ответ (или
 // null, пока не отправил); ведущему на final-judging — ставки+ответы ВСЕХ; всем — на final-reveal.
 finalWagers: { participantId: string; amount: number }[] | null;
