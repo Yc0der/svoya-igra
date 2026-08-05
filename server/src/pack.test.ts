@@ -117,6 +117,32 @@ describe('validatePack', () => {
     expect(() => validatePack('строка')).toThrow();
     expect(() => validatePack(null)).toThrow();
   });
+
+  it('rejects duplicate question ids across different themes', () => {
+    // The engine uses `id` as a global key across the whole pack
+    // (answeredQuestionIds, grid[].answered, findQuestion) — a duplicate id
+    // in a hand-written pack would silently corrupt gameplay (a question
+    // showing as already-answered before it's ever opened) instead of
+    // failing validation up front.
+    const data = validPackData();
+    data.rounds.push({
+      themes: [
+        {
+          name: 'Другая тема',
+          questions: [
+            {
+              id: 'q1',
+              price: 300,
+              text: 'Другой вопрос?',
+              answer: 'Другой ответ',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    });
+    expect(() => validatePack(data)).toThrow(/q1/);
+  });
 });
 
 describe('loadPack', () => {

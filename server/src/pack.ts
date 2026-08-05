@@ -103,6 +103,27 @@ function validateRound(data: unknown, where: string): Round {
   return { themes };
 }
 
+function checkUniqueQuestionIds(rounds: Round[]): void {
+  // Движок использует `id` вопроса как глобальный ключ на весь пакет
+  // (answeredQuestionIds, grid[].answered, findQuestion) — дубль id в
+  // написанном руками пакете иначе тихо портит партию (вопрос показывается
+  // уже отвеченным ещё до того, как его вообще открыли) вместо явной ошибки
+  // валидации на загрузке.
+  const seen = new Set<string>();
+  for (const round of rounds) {
+    for (const theme of round.themes) {
+      for (const question of theme.questions) {
+        if (seen.has(question.id)) {
+          throw new Error(
+            `пакет: повторяющийся id вопроса "${question.id}" — id должны быть уникальны на весь пакет`,
+          );
+        }
+        seen.add(question.id);
+      }
+    }
+  }
+}
+
 export function validatePack(data: unknown): Pack {
   const pack = requireRecord(data, 'пакет');
   const title = requireString(pack.title, 'пакет.title');
@@ -112,6 +133,7 @@ export function validatePack(data: unknown): Pack {
   const rounds = roundsData.map((r, i) =>
     validateRound(r, `пакет.rounds[${i}]`),
   );
+  checkUniqueQuestionIds(rounds);
   return { title, author, createdAt, rounds };
 }
 
