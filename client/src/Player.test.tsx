@@ -24,6 +24,12 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     graceExcludedUntil: null,
     timerDeadline: null,
     scores: [],
+    finalThemes: null,
+    finalElimParticipantId: null,
+    finalQuestion: null,
+    finalWagers: null,
+    finalAnswers: null,
+    finalVerdicts: null,
     ...overrides,
   };
 }
@@ -48,6 +54,10 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     vote: vi.fn(),
     adjustScore: vi.fn(),
     cancelQuestion: vi.fn(),
+    eliminateFinalTheme: vi.fn(),
+    submitWager: vi.fn(),
+    submitFinalAnswer: vi.fn(),
+    finalVote: vi.fn(),
     ...overrides,
   };
 }
@@ -540,5 +550,175 @@ describe('Player', () => {
       screen.getByRole('button', { name: /отменить вопрос/i }),
     );
     expect(cancelQuestion).toHaveBeenCalledOnce();
+  });
+
+  it('final-elim: highlights my turn and eliminates a theme on click', async () => {
+    const eliminateFinalTheme = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        eliminateFinalTheme,
+        game: baseGame({
+          phase: 'final-elim',
+          finalThemes: [
+            { name: 'Финал A', eliminated: false },
+            { name: 'Финал B', eliminated: false },
+          ],
+          finalElimParticipantId: 'self',
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByText('Финал A'));
+    expect(eliminateFinalTheme).toHaveBeenCalledWith(0);
+  });
+
+  it('final-elim: shows whose turn it is when it is not mine', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        participants: [{ id: 'other', name: 'Катя', connected: true }],
+        game: baseGame({
+          phase: 'final-elim',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+          finalElimParticipantId: 'other',
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/Катя/)).toBeInTheDocument();
+  });
+
+  it('final-wager: submits a clamped wager', async () => {
+    const submitWager = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        submitWager,
+        game: baseGame({
+          phase: 'final-wager',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+          scores: [{ participantId: 'self', score: 200 }],
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.type(screen.getByLabelText('Ставка'), '150');
+    await userEvent.click(screen.getByText('Готово'));
+    expect(submitWager).toHaveBeenCalledWith(150);
+  });
+
+  it('final-wager: the host sees a waiting message, not a wager form', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host',
+        isHost: true,
+        hostParticipantId: 'host',
+        game: baseGame({
+          phase: 'final-wager',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByLabelText('Ставка')).not.toBeInTheDocument();
+    expect(screen.getByText(/Игроки делают ставки/)).toBeInTheDocument();
+  });
+
+  it('final-answer: submits the typed answer', async () => {
+    const submitFinalAnswer = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        submitFinalAnswer,
+        game: baseGame({
+          phase: 'final-answer',
+          finalQuestion: { text: 'Вопрос финала?' },
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.type(screen.getByLabelText('Ответ'), 'мой ответ');
+    await userEvent.click(screen.getByText('Готово'));
+    expect(submitFinalAnswer).toHaveBeenCalledWith('мой ответ');
+  });
+
+  it('final-answer: the host sees a waiting message, not an answer form', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host',
+        isHost: true,
+        hostParticipantId: 'host',
+        game: baseGame({
+          phase: 'final-answer',
+          finalQuestion: { text: 'Вопрос финала?' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByLabelText('Ответ')).not.toBeInTheDocument();
+    expect(screen.getByText(/Игроки пишут ответы/)).toBeInTheDocument();
+  });
+
+  it('final-judging: host sees every wager and answer with verdict buttons', async () => {
+    const finalVote = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host',
+        isHost: true,
+        hostParticipantId: 'host',
+        finalVote,
+        participants: [
+          { id: 'p1', name: 'Ваня', connected: true },
+          { id: 'p2', name: 'Катя', connected: true },
+        ],
+        game: baseGame({
+          phase: 'final-judging',
+          finalWagers: [
+            { participantId: 'p1', amount: 50 },
+            { participantId: 'p2', amount: 20 },
+          ],
+          finalAnswers: [
+            { participantId: 'p1', text: 'ответ 1' },
+            { participantId: 'p2', text: 'ответ 2' },
+          ],
+        }),
+      }),
+    );
+    render(<Player />);
+    const yesButtons = screen.getAllByText('Верно');
+    await userEvent.click(yesButtons[0]);
+    expect(finalVote).toHaveBeenCalledWith('p1', true);
+  });
+
+  it('final-judging: non-host waits', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'p1',
+        hostParticipantId: 'host',
+        game: baseGame({ phase: 'final-judging' }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/Ведущий проверяет/)).toBeInTheDocument();
+  });
+
+  it('final-reveal: shows wagers, answers, verdicts and updated scores', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'p1',
+        participants: [{ id: 'p1', name: 'Ваня', connected: true }],
+        game: baseGame({
+          phase: 'final-reveal',
+          finalWagers: [{ participantId: 'p1', amount: 50 }],
+          finalAnswers: [{ participantId: 'p1', text: 'ответ 1' }],
+          finalVerdicts: [{ participantId: 'p1', correct: true }],
+          scores: [{ participantId: 'p1', score: 150 }],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText('ответ 1')).toBeInTheDocument();
+    expect(screen.getByText('150')).toBeInTheDocument();
   });
 });

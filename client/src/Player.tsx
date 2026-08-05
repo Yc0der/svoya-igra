@@ -33,9 +33,15 @@ export function Player() {
     vote,
     adjustScore,
     cancelQuestion,
+    eliminateFinalTheme,
+    submitWager,
+    submitFinalAnswer,
+    finalVote,
   } = useRoomConnection();
   const [name, setName] = useState('');
   const [myVote, setMyVote] = useState<boolean | null>(null);
+  const [wagerInput, setWagerInput] = useState('');
+  const [answerInput, setAnswerInput] = useState('');
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
   // Отдельный от remainingSeconds счётчик: временная блокировка после своей
   // неверной попытки идёт параллельно с уже возобновившимся отсчётом
@@ -45,6 +51,11 @@ export function Player() {
 
   useEffect(() => {
     if (game?.phase !== 'judging') setMyVote(null);
+  }, [game?.phase]);
+
+  useEffect(() => {
+    if (game?.phase !== 'final-wager') setWagerInput('');
+    if (game?.phase !== 'final-answer') setAnswerInput('');
   }, [game?.phase]);
 
   function nameOf(participantId: string | null): string {
@@ -366,10 +377,187 @@ export function Player() {
             {scoreboard(game.scores)}
           </div>
         );
+
+      case 'final-elim': {
+        const isMyElimTurn = game.finalElimParticipantId === selfId;
+        return (
+          <div className="player">
+            <h2>Финал — выбор темы</h2>
+            {!isMyElimTurn && (
+              <p>Сейчас выбирает {nameOf(game.finalElimParticipantId)}</p>
+            )}
+            <ul className="final-theme-list">
+              {game.finalThemes?.map((theme, i) => (
+                <li
+                  key={theme.name}
+                  className={theme.eliminated ? 'is-eliminated' : ''}
+                >
+                  <button
+                    className="button"
+                    disabled={!isMyElimTurn || theme.eliminated}
+                    onClick={() => eliminateFinalTheme(i)}
+                  >
+                    {theme.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      }
+
+      case 'final-wager': {
+        // Ведущий не счётчик (не в game.scores) — он не ставит, движок молча
+        // проигнорировал бы его submit-wager (handleSubmitWager проверяет
+        // event.counterId in state.scores). Показывать ему форму ставки было
+        // бы обманом интерфейса: клик выглядел бы рабочим, но ни на что не
+        // влиял бы — тот же принцип, что уже применён к кнопке «Ответ» на
+        // question-open (design.md, «Клиенты»).
+        if (isHost) {
+          return (
+            <div className="player player--center">
+              <h2>Финал — ставка</h2>
+              <p>Игроки делают ставки…</p>
+            </div>
+          );
+        }
+        const myScore =
+          game.scores.find((s) => s.participantId === selfId)?.score ?? 0;
+        const max = Math.max(0, myScore);
+        return (
+          <div className="player player--center">
+            <h2>Финал — ставка</h2>
+            <p>{game.finalThemes?.find((t) => !t.eliminated)?.name}</p>
+            <label htmlFor="wager">Ставка</label>
+            <input
+              id="wager"
+              type="number"
+              min={0}
+              max={max}
+              value={wagerInput}
+              onChange={(e) => setWagerInput(e.target.value)}
+            />
+            <button
+              className="button button--primary"
+              onClick={() =>
+                submitWager(Math.min(max, Math.max(0, Number(wagerInput) || 0)))
+              }
+            >
+              Готово
+            </button>
+          </div>
+        );
+      }
+
+      case 'final-answer':
+        if (isHost) {
+          return (
+            <div className="player player--center">
+              <h2>Финал — ответ</h2>
+              <p className="board-question">{game.finalQuestion?.text}</p>
+              <p>Игроки пишут ответы…</p>
+            </div>
+          );
+        }
+        return (
+          <div className="player player--center">
+            <h2>Финал — ответ</h2>
+            <p className="board-question">{game.finalQuestion?.text}</p>
+            <label htmlFor="final-answer">Ответ</label>
+            <input
+              id="final-answer"
+              value={answerInput}
+              onChange={(e) => setAnswerInput(e.target.value)}
+            />
+            <button
+              className="button button--primary"
+              onClick={() => submitFinalAnswer(answerInput)}
+            >
+              Готово
+            </button>
+          </div>
+        );
+
+      case 'final-judging':
+        if (isHost) {
+          return (
+            <div className="player">
+              <h2>Финал — проверка ответов</h2>
+              <ul className="final-judging-list">
+                {game.finalAnswers?.map((a) => {
+                  const wager = game.finalWagers?.find(
+                    (w) => w.participantId === a.participantId,
+                  )?.amount;
+                  return (
+                    <li key={a.participantId}>
+                      <span className="final-judging-name">
+                        {nameOf(a.participantId)}
+                      </span>
+                      <span className="final-judging-wager">{wager}</span>
+                      <span className="final-judging-answer">{a.text}</span>
+                      <button
+                        className="button button--yes"
+                        onClick={() => finalVote(a.participantId, true)}
+                      >
+                        Верно
+                      </button>
+                      <button
+                        className="button button--no"
+                        onClick={() => finalVote(a.participantId, false)}
+                      >
+                        Неверно
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        }
+        return (
+          <div className="player player--center">
+            <p>Ведущий проверяет ответы…</p>
+          </div>
+        );
+
+      case 'final-reveal':
+        return (
+          <div className="player">
+            <h2>Финал — итог</h2>
+            <ul className="final-judging-list">
+              {game.finalAnswers?.map((a) => {
+                const wager = game.finalWagers?.find(
+                  (w) => w.participantId === a.participantId,
+                )?.amount;
+                const correct = game.finalVerdicts?.find(
+                  (v) => v.participantId === a.participantId,
+                )?.correct;
+                return (
+                  <li key={a.participantId}>
+                    <span className="final-judging-name">
+                      {nameOf(a.participantId)}
+                    </span>
+                    <span className="final-judging-wager">{wager}</span>
+                    <span className="final-judging-answer">{a.text}</span>
+                    <span>{correct ? '✓' : '✗'}</span>
+                  </li>
+                );
+              })}
+            </ul>
+            {scoreboard(game.scores)}
+          </div>
+        );
     }
   })();
 
-  return isHost ? (
+  const isFinalPhase =
+    game?.phase === 'final-elim' ||
+    game?.phase === 'final-wager' ||
+    game?.phase === 'final-answer' ||
+    game?.phase === 'final-judging' ||
+    game?.phase === 'final-reveal';
+
+  return isHost && !isFinalPhase ? (
     <>
       {phaseContent}
       {hostAdminPanel()}
