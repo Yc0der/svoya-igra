@@ -1780,9 +1780,24 @@ describe('createServer final round', () => {
       );
       await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
 
+      // other пришёл к финалу с 0 очков (не ответил в базовом раунде) — движок
+      // зажимает ставку до max(0, score) (engine.ts, handleSubmitWager), так
+      // что ставка больше 0 без этого была бы молча обнулена, а не
+      // содержательным тестом проигрыша. Панель ведущего (adjust-score) уже
+      // проверена в базовом раунде — переиспользуем её, чтобы задать other
+      // очки, на которые реально можно поставить.
+      c.ws.send(
+        JSON.stringify({
+          type: 'adjust-score',
+          participantId: other.participantId,
+          delta: 100,
+        }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
       picker.ws.send(JSON.stringify({ type: 'submit-wager', amount: 50 }));
       await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
-      other.ws.send(JSON.stringify({ type: 'submit-wager', amount: 20 }));
+      other.ws.send(JSON.stringify({ type: 'submit-wager', amount: 30 }));
       const afterWagers = (await Promise.all([
         a.nextMessage(),
         b.nextMessage(),
@@ -1922,50 +1937,39 @@ git commit -m "feat: dispatch final round messages over the transport"
 - [ ] **Step 1: Написать падающие тесты**
 
 ```ts
-// client/src/useRoomConnection.test.ts — добавить рядом с существующими
-// тестами действий (buzz/vote/adjustScore/…), тем же паттерном: рендерим
-// хук через renderHook, дожидаемся 'joined', вызываем действие, проверяем
-// последнее отправленное сообщение через mock WebSocket.
+// client/src/useRoomConnection.test.ts — расширить существующий тест
+// 'sends start-game/select-question/buzz/said-answer/vote as the matching
+// client messages' четырьмя новыми действиями (тот же `socket`/`act`/
+// `socket.sent`, никакого нового хелпера заводить не нужно — паттерн уже
+// есть в файле, см. этот же тест и FakeWebSocket выше него).
 
-it('sends eliminate-final-theme with the theme index', async () => {
-  const { result, ws } = await setupJoinedConnection();
-  act(() => result.current.eliminateFinalTheme(1));
-  expect(JSON.parse(ws.lastSent())).toEqual({
-    type: 'eliminate-final-theme',
-    themeIndex: 1,
-  });
-});
+    act(() => result.current.eliminateFinalTheme(1));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'eliminate-final-theme', themeIndex: 1 }),
+    );
 
-it('sends submit-wager with the amount', async () => {
-  const { result, ws } = await setupJoinedConnection();
-  act(() => result.current.submitWager(150));
-  expect(JSON.parse(ws.lastSent())).toEqual({
-    type: 'submit-wager',
-    amount: 150,
-  });
-});
+    act(() => result.current.submitWager(150));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'submit-wager', amount: 150 }),
+    );
 
-it('sends submit-final-answer with the text', async () => {
-  const { result, ws } = await setupJoinedConnection();
-  act(() => result.current.submitFinalAnswer('мой ответ'));
-  expect(JSON.parse(ws.lastSent())).toEqual({
-    type: 'submit-final-answer',
-    text: 'мой ответ',
-  });
-});
+    act(() => result.current.submitFinalAnswer('мой ответ'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'submit-final-answer', text: 'мой ответ' }),
+    );
 
-it('sends final-vote with the target participant and verdict', async () => {
-  const { result, ws } = await setupJoinedConnection();
-  act(() => result.current.finalVote('p2', false));
-  expect(JSON.parse(ws.lastSent())).toEqual({
-    type: 'final-vote',
-    participantId: 'p2',
-    correct: false,
+    act(() => result.current.finalVote('p2', false));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'final-vote',
+        participantId: 'p2',
+        correct: false,
+      }),
+    );
   });
-});
 ```
 
-Если в файле ещё нет общего `setupJoinedConnection()`-хелпера — использовать тот же паттерн настройки, что и в уже существующем тесте на `vote`/`adjustScore` (тот же mock `WebSocketFactory`, тот же порядок событий `open` → `joined`), скопировав его форму, а не изобретая новую.
+Добавить эти четыре блока в конец уже существующего теста (перед его закрывающей `});`), а не заводить отдельные новые `it(...)` — файл уже проверяет `start-game`/`select-question`/`buzz`/`said-answer`/`vote` этим же способом в одном тесте, и новые действия следуют тому же паттерну на том же `socket`.
 
 - [ ] **Step 2: Запустить тесты, убедиться что падают**
 
@@ -2991,6 +2995,22 @@ test('board, two players and a host play through the final round', async ({
   await expect(c.getByText('Ответ')).toBeVisible();
   await c.getByRole('button', { name: 'Зачёт', exact: true }).click();
 
+  // other пришёл бы к финалу с 0 очков — движок зажимает ставку до
+  // max(0, score) (engine.ts, handleSubmitWager), так что ставка больше 0
+  // ниже была бы молча обнулена, а тест перестал бы содержательно проверять
+  // проигрыш ставки. Панель ведущего ещё видна: сейчас идёт reveal обычного
+  // раунда, не финальная фаза (Player.tsx, hostAdminPanel скрыта только в
+  // final-*). Пользуемся тем же путём (±очки), что уже проверен в базовом
+  // раунде, чтобы дать other очки, на которые реально можно поставить.
+  await expect(
+    c.getByRole('listitem').filter({ hasText: otherName }),
+  ).toBeVisible();
+  await c
+    .getByRole('listitem')
+    .filter({ hasText: otherName })
+    .getByRole('button', { name: '+100', exact: true })
+    .click();
+
   // Единственный вопрос единственного раунда исчерпан — после раскрытия
   // (REVEAL_TIMER_MS) партия сразу переходит в финал, минуя round-end.
   await expect(board.getByText('Финал — выбор темы')).toBeVisible({
@@ -3028,12 +3048,12 @@ test('board, two players and a host play through the final round', async ({
     .click();
 
   // picker: 100 (базовый раунд) + 50 (верная ставка) = 150.
-  // other: 0 (базовый раунд) − 30 (неверная ставка) = −30.
+  // other: 0 (базовый раунд) + 100 (панель ведущего) − 30 (неверная ставка) = 70.
   await expect(board.getByText('Финал — итог')).toBeVisible();
   await expect(board.getByText('150')).toBeVisible();
-  await expect(board.getByText('-30')).toBeVisible();
+  await expect(board.getByText('70')).toBeVisible();
   await expect(picker.getByText('150')).toBeVisible();
-  await expect(other.getByText('-30')).toBeVisible();
+  await expect(other.getByText('70')).toBeVisible();
 
   await boardContext.close();
   await aContext.close();
