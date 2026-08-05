@@ -8,6 +8,11 @@ import {
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
   ROUND_END_TIMER_MS,
+  FINAL_ELIM_TIMER_MS,
+  FINAL_WAGER_TIMER_MS,
+  FINAL_ANSWER_TIMER_MS,
+  FINAL_JUDGING_TIMER_MS,
+  FINAL_REVEAL_TIMER_MS,
   type EngineState,
   type EngineEvent,
   type Effect,
@@ -61,6 +66,11 @@ const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   judging: { timer: 'vote', ms: VOTE_TIMER_MS },
   reveal: { timer: 'reveal', ms: REVEAL_TIMER_MS },
   'round-end': { timer: 'round-end', ms: ROUND_END_TIMER_MS },
+  'final-elim': { timer: 'final-elim', ms: FINAL_ELIM_TIMER_MS },
+  'final-wager': { timer: 'final-wager', ms: FINAL_WAGER_TIMER_MS },
+  'final-answer': { timer: 'final-answer', ms: FINAL_ANSWER_TIMER_MS },
+  'final-judging': { timer: 'final-judging', ms: FINAL_JUDGING_TIMER_MS },
+  'final-reveal': { timer: 'final-reveal', ms: FINAL_REVEAL_TIMER_MS },
 };
 
 // Сколько секунд ответивший неверно не может нажать повторно — не игровое
@@ -308,6 +318,42 @@ export class Room {
     this.dispatch({ type: 'cancel-question', requesterId });
   }
 
+  eliminateFinalTheme(participantId: string, themeIndex: number): void {
+    this.dispatch({
+      type: 'eliminate-final-theme',
+      counterId: participantId,
+      themeIndex,
+    });
+  }
+
+  submitWager(participantId: string, amount: number): void {
+    this.dispatch({ type: 'submit-wager', counterId: participantId, amount });
+  }
+
+  submitFinalAnswer(participantId: string, text: string): void {
+    this.dispatch({
+      type: 'submit-final-answer',
+      counterId: participantId,
+      text,
+    });
+  }
+
+  // Панель ведущего в финале — тем же паттерном, что adjustScore/
+  // cancelQuestion: requesterId настоящий отправитель, не то, что клиент о
+  // себе заявляет; движок сам сверяет requesterId === hostId.
+  finalVote(
+    requesterId: string,
+    targetParticipantId: string,
+    correct: boolean,
+  ): void {
+    this.dispatch({
+      type: 'final-vote',
+      requesterId,
+      counterId: targetParticipantId,
+      correct,
+    });
+  }
+
   getState(): RoomState {
     return {
       participants: this.participants.map((p) => ({ ...p })),
@@ -337,6 +383,14 @@ export class Room {
       game.phase === 'reveal' ||
       (game.phase === 'judging' &&
         (game.hostId === null || viewerId === game.hostId));
+
+    // Ведущему на final-judging нужно видеть ставки/ответы всех, чтобы
+    // судить (design.md, финал-спека, «Комната») — та же причина, по которой
+    // на judging только ему виден correctAnswer. На final-reveal видно всем,
+    // ставка/ответ соперника уже не секрет — партия окончена.
+    const showAllFinal =
+      game.phase === 'final-reveal' ||
+      (game.phase === 'final-judging' && viewerId === game.hostId);
 
     return {
       phase: game.phase,
@@ -375,6 +429,40 @@ export class Room {
         participantId,
         score,
       })),
+      finalThemes: game.finalRemainingThemeIndices
+        ? game.pack.final!.themes.map((theme, i) => ({
+            name: theme.name,
+            eliminated: !game.finalRemainingThemeIndices!.includes(i),
+          }))
+        : null,
+      finalElimParticipantId: game.finalElimCounterId,
+      finalQuestion:
+        game.finalThemeIndex !== null &&
+        (game.phase === 'final-answer' ||
+          game.phase === 'final-judging' ||
+          game.phase === 'final-reveal')
+          ? {
+              text: game.pack.final!.themes[game.finalThemeIndex].question.text,
+            }
+          : null,
+      finalWagers:
+        game.finalThemeIndex === null
+          ? null
+          : Object.entries(game.finalWagers)
+              .filter(([counterId]) => showAllFinal || counterId === viewerId)
+              .map(([participantId, amount]) => ({ participantId, amount })),
+      finalAnswers:
+        game.finalThemeIndex === null
+          ? null
+          : Object.entries(game.finalAnswers)
+              .filter(([counterId]) => showAllFinal || counterId === viewerId)
+              .map(([participantId, text]) => ({ participantId, text })),
+      finalVerdicts:
+        game.phase === 'final-judging' || game.phase === 'final-reveal'
+          ? Object.entries(game.finalVerdicts)
+              .filter(() => showAllFinal)
+              .map(([participantId, correct]) => ({ participantId, correct }))
+          : null,
     };
   }
 

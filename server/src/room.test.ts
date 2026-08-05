@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Room } from './room.js';
 import { deserializeSnapshot, serializeSnapshot } from './snapshot.js';
-import { QUESTION_TIMER_MS } from './engine.js';
+import { QUESTION_TIMER_MS, REVEAL_TIMER_MS } from './engine.js';
 
 describe('Room.join', () => {
   it('adds a new participant', () => {
@@ -724,5 +724,218 @@ describe('Room game flow', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+const FINAL_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            { id: 'q1', price: 100, text: 'В?', answer: 'О', type: 'обычный' },
+          ],
+        },
+      ],
+    },
+  ],
+  final: {
+    themes: [
+      {
+        name: 'Финал A',
+        question: { id: 'f1', text: 'F1?', answer: 'ответ f1' },
+      },
+      {
+        name: 'Финал B',
+        question: { id: 'f2', text: 'F2?', answer: 'ответ f2' },
+      },
+    ],
+  },
+};
+
+describe('Room final round', () => {
+  // turnCounterId (кто выбирает первый вопрос) выбирается движком случайно
+  // между двумя счётчиками (engine.ts, createInitialState) — нельзя жёстко
+  // считать picker'ом конкретного из a/b, иначе тест плавает примерно в
+  // половине прогонов. driveToFinalWager сам определяет, чей ход, доигрывает
+  // единственный вопрос пакета верным ответом от него (получает +100),
+  // гасит reveal-таймер и вычёркивает вторую тему от имени того, кто не
+  // отвечал (у него счёт меньше — он и ходит первым в final-elim), приводя
+  // партию к final-wager. Возвращает { picker, other }, чтобы вызывающий тест
+  // не гадал, кто есть кто.
+  function driveToFinalWager(
+    room: Room,
+    a: string,
+    b: string,
+    host: string,
+  ): { picker: string; other: string } {
+    const picker = room.getState().game?.turnCounterId === a ? a : b;
+    const other = picker === a ? b : a;
+    room.selectQuestion(picker, 0, 'q1');
+    room.buzz(picker);
+    room.saidAnswer(picker);
+    room.vote(host, true); // судейство с ведущим — решает сразу
+    vi.advanceTimersByTime(REVEAL_TIMER_MS);
+    room.eliminateFinalTheme(other, 0);
+    return { picker, other };
+  }
+
+  it('submitWager clamps and reflects in scores only once judged', () => {
+    vi.useFakeTimers();
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [a, b, host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame();
+    const { picker, other } = driveToFinalWager(room, a, b, host);
+
+    expect(room.getState().game?.phase).toBe('final-wager');
+    room.submitWager(picker, 999); // клэмп до текущего счёта picker'а (100)
+    room.submitWager(other, 0);
+    expect(room.getState().game?.phase).toBe('final-answer');
+    expect(room.getState().game?.finalWagers).toEqual({
+      [picker]: 100,
+      [other]: 0,
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('submitFinalAnswer moves to final-judging once everyone answered', () => {
+    vi.useFakeTimers();
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [a, b, host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame();
+    const { picker, other } = driveToFinalWager(room, a, b, host);
+    room.submitWager(picker, 50);
+    room.submitWager(other, 0);
+
+    room.submitFinalAnswer(picker, 'ответ picker');
+    room.submitFinalAnswer(other, 'ответ other');
+    expect(room.getState().game?.phase).toBe('final-judging');
+
+    vi.useRealTimers();
+  });
+
+  it('finalVote from the host applies scores and reaches final-reveal', () => {
+    vi.useFakeTimers();
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [a, b, host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame();
+    const { picker, other } = driveToFinalWager(room, a, b, host);
+    room.submitWager(picker, 50);
+    room.submitWager(other, 0);
+    room.submitFinalAnswer(picker, 'ответ picker');
+    room.submitFinalAnswer(other, 'ответ other');
+
+    room.finalVote(host, picker, true);
+    room.finalVote(host, other, false);
+
+    const state = room.getState();
+    expect(state.game?.phase).toBe('final-reveal');
+    expect(state.game?.scores[picker]).toBe(150);
+    expect(state.game?.scores[other]).toBe(0);
+
+    vi.useRealTimers();
+  });
+
+  it('finalVote from someone other than the host is ignored', () => {
+    vi.useFakeTimers();
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [a, b, host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame();
+    const { picker, other } = driveToFinalWager(room, a, b, host);
+    room.submitWager(picker, 50);
+    room.submitWager(other, 0);
+    room.submitFinalAnswer(picker, 'ответ picker');
+    room.submitFinalAnswer(other, 'ответ other');
+
+    room.finalVote(picker, other, true); // picker не ведущий
+    expect(room.getState().game?.phase).toBe('final-judging');
+
+    vi.useRealTimers();
+  });
+
+  it("toGameStateView hides other counters' wagers and answers from a non-host viewer, but shows everything to the host on final-judging and to everyone on final-reveal", () => {
+    vi.useFakeTimers();
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [a, b, host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame();
+    const { picker, other } = driveToFinalWager(room, a, b, host);
+    room.submitWager(picker, 50);
+    room.submitWager(other, 20);
+    room.submitFinalAnswer(picker, 'ответ picker');
+    room.submitFinalAnswer(other, 'ответ other');
+
+    const pickerView = room.toGameStateView(picker);
+    expect(pickerView?.finalWagers).toEqual([
+      { participantId: picker, amount: 50 },
+    ]);
+    expect(pickerView?.finalAnswers).toEqual([
+      { participantId: picker, text: 'ответ picker' },
+    ]);
+
+    const hostView = room.toGameStateView(host);
+    expect(hostView?.finalWagers).toHaveLength(2);
+    expect(hostView?.finalAnswers).toHaveLength(2);
+
+    room.finalVote(host, picker, true);
+    room.finalVote(host, other, true);
+
+    const pickerRevealView = room.toGameStateView(picker);
+    expect(pickerRevealView?.finalWagers).toHaveLength(2);
+    expect(pickerRevealView?.finalVerdicts).toHaveLength(2);
+
+    vi.useRealTimers();
+  });
+
+  it('restores the final-elim timer after restoring from a snapshot mid-final', () => {
+    vi.useFakeTimers();
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [a, b, host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame();
+    const picker = room.getState().game?.turnCounterId === a ? a : b;
+    const other = picker === a ? b : a;
+    room.selectQuestion(picker, 0, 'q1');
+    room.buzz(picker);
+    room.saidAnswer(picker);
+    room.vote(host, true);
+    vi.advanceTimersByTime(REVEAL_TIMER_MS);
+    const snapshot = room.getState();
+    expect(snapshot.game?.phase).toBe('final-elim');
+
+    const restored = new Room(snapshot, FINAL_PACK);
+    // Сработает только если таймер/фаза восстановлены штатно — other ходит
+    // первым (счёт 0 против picker'а 100).
+    restored.eliminateFinalTheme(other, 0);
+    expect(restored.getState().game?.phase).toBe('final-wager');
+
+    vi.useRealTimers();
   });
 });
