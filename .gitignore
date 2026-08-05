@@ -52,3 +52,5 @@ Thumbs.db
 # temp file writeSnapshot() writes-then-renames for atomicity
 room-snapshot.json
 room-snapshot.json.tmp
+e2e/fixtures/final-room-snapshot.json
+e2e/fixtures/final-room-snapshot.json.tmp

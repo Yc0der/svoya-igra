@@ -13,4 +13,9 @@ import { rmSync } from 'node:fs';
 // Playwright starts webServer plugins before running globalSetup, so by
 // the time globalSetup would run, the server has already loaded the stale
 // snapshot.
-rmSync('./room-snapshot.json', { force: true });
+//
+// Path is passed as an argument so the same script can serve both
+// webServers in playwright.config.ts — each has its own snapshot file, so
+// two server processes running in parallel don't clobber each other's state.
+const path = process.argv[2] ?? './room-snapshot.json';
+rmSync(path, { force: true });
