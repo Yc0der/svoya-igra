@@ -36,6 +36,10 @@ class FakeWebSocket {
     this.emit('message', { data: JSON.stringify(data) });
   }
 
+  lastSent(): string {
+    return this.sent[this.sent.length - 1];
+  }
+
   private emit(type: string, event: unknown): void {
     for (const listener of this.listeners[type] ?? []) {
       listener(event);
@@ -56,6 +60,24 @@ describe('useRoomConnection', () => {
 
   function factory(url: string): WebSocket {
     return new FakeWebSocket(url) as unknown as WebSocket;
+  }
+
+  async function setupJoinedConnection() {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const ws = FakeWebSocket.instances[0];
+
+    act(() => ws.emitOpen());
+    act(() => result.current.join('Test Player'));
+    act(() =>
+      ws.emitMessage({
+        type: 'joined',
+        participantId: 'p1',
+        token: 'tok-1',
+        name: 'Test Player',
+      }),
+    );
+
+    return { result, ws };
   }
 
   it('starts in connecting status with no participants', () => {
@@ -254,5 +276,42 @@ describe('useRoomConnection', () => {
 
     act(() => vi.advanceTimersByTime(2000));
     expect(result.current.falsestart).toBe(false);
+  });
+
+  it('sends eliminate-final-theme with the theme index', async () => {
+    const { result, ws } = await setupJoinedConnection();
+    act(() => result.current.eliminateFinalTheme(1));
+    expect(JSON.parse(ws.lastSent())).toEqual({
+      type: 'eliminate-final-theme',
+      themeIndex: 1,
+    });
+  });
+
+  it('sends submit-wager with the amount', async () => {
+    const { result, ws } = await setupJoinedConnection();
+    act(() => result.current.submitWager(150));
+    expect(JSON.parse(ws.lastSent())).toEqual({
+      type: 'submit-wager',
+      amount: 150,
+    });
+  });
+
+  it('sends submit-final-answer with the text', async () => {
+    const { result, ws } = await setupJoinedConnection();
+    act(() => result.current.submitFinalAnswer('мой ответ'));
+    expect(JSON.parse(ws.lastSent())).toEqual({
+      type: 'submit-final-answer',
+      text: 'мой ответ',
+    });
+  });
+
+  it('sends final-vote with the target participant and verdict', async () => {
+    const { result, ws } = await setupJoinedConnection();
+    act(() => result.current.finalVote('p2', false));
+    expect(JSON.parse(ws.lastSent())).toEqual({
+      type: 'final-vote',
+      participantId: 'p2',
+      correct: false,
+    });
   });
 });

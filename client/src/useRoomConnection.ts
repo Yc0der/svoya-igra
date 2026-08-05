@@ -14,6 +14,11 @@ export interface GameStateView {
     | 'judging'
     | 'reveal'
     | 'round-end'
+    | 'final-elim'
+    | 'final-wager'
+    | 'final-answer'
+    | 'final-judging'
+    | 'final-reveal'
     | 'game-end';
   roundIndex: number;
   grid: {
@@ -28,6 +33,12 @@ export interface GameStateView {
   graceExcludedUntil: number | null;
   timerDeadline: number | null;
   scores: { participantId: string; score: number }[];
+  finalThemes: { name: string; eliminated: boolean }[] | null;
+  finalElimParticipantId: string | null;
+  finalQuestion: { text: string } | null;
+  finalWagers: { participantId: string; amount: number }[] | null;
+  finalAnswers: { participantId: string; text: string }[] | null;
+  finalVerdicts: { participantId: string; correct: boolean }[] | null;
 }
 
 export type StartGameErrorReason =
@@ -57,7 +68,11 @@ type ClientMessage =
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
   | { type: 'adjust-score'; participantId: string; delta: number }
-  | { type: 'cancel-question' };
+  | { type: 'cancel-question' }
+  | { type: 'eliminate-final-theme'; themeIndex: number }
+  | { type: 'submit-wager'; amount: number }
+  | { type: 'submit-final-answer'; text: string }
+  | { type: 'final-vote'; participantId: string; correct: boolean };
 
 export type ConnectionStatus =
   'connecting' | 'joining' | 'joined' | 'name-taken' | 'disconnected';
@@ -81,6 +96,10 @@ export interface RoomConnection {
   vote(correct: boolean): void;
   adjustScore(participantId: string, delta: number): void;
   cancelQuestion(): void;
+  eliminateFinalTheme(themeIndex: number): void;
+  submitWager(amount: number): void;
+  submitFinalAnswer(text: string): void;
+  finalVote(participantId: string, correct: boolean): void;
 }
 
 const TOKEN_KEY = 'svoya-igra-token';
@@ -231,5 +250,11 @@ export function useRoomConnection(
     adjustScore: (participantId, delta) =>
       send({ type: 'adjust-score', participantId, delta }),
     cancelQuestion: () => send({ type: 'cancel-question' }),
+    eliminateFinalTheme: (themeIndex) =>
+      send({ type: 'eliminate-final-theme', themeIndex }),
+    submitWager: (amount) => send({ type: 'submit-wager', amount }),
+    submitFinalAnswer: (text) => send({ type: 'submit-final-answer', text }),
+    finalVote: (participantId, correct) =>
+      send({ type: 'final-vote', participantId, correct }),
   };
 }
