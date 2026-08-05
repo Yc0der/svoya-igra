@@ -920,4 +920,93 @@ describe('createServer host mode', () => {
     await server.close();
     await rm(dir, { recursive: true, force: true });
   });
+
+  it("wires the host admin panel's adjust-score and cancel-question over the real transport", async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-host-admin-'));
+    const room = new Room(undefined, TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage();
+    const c = await joinPlayer(url, 'Петя');
+    await a.nextMessage();
+    await b.nextMessage();
+
+    c.ws.send(JSON.stringify({ type: 'toggle-host' }));
+    await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const aState = (await settle(a, b, a)) as {
+      game: { turnParticipantId: string };
+    };
+    await c.nextMessage();
+
+    // Хочет ли ведущий подправить чужой счёт — можно в любой момент, не
+    // дожидаясь конкретной фазы.
+    c.ws.send(
+      JSON.stringify({
+        type: 'adjust-score',
+        participantId: b.participantId,
+        delta: 50,
+      }),
+    );
+    const [aAdjusted, bAdjusted, cAdjusted] = (await Promise.all([
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ])) as { game: { scores: { participantId: string; score: number }[] } }[];
+    for (const view of [aAdjusted, bAdjusted, cAdjusted]) {
+      expect(view.game.scores).toContainEqual({
+        participantId: b.participantId,
+        score: 50,
+      });
+    }
+
+    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'q1',
+      }),
+    );
+    await settle(a, b, picker);
+    await c.nextMessage();
+
+    c.ws.send(JSON.stringify({ type: 'cancel-question' }));
+    const [aCancelled, bCancelled, cCancelled] = (await Promise.all([
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ])) as {
+      game: {
+        phase: string;
+        scores: { participantId: string; score: number }[];
+      };
+    }[];
+    for (const view of [aCancelled, bCancelled, cCancelled]) {
+      expect(view.game.phase).toBe('reveal');
+      // Отменённый вопрос не начисляет очков — предыдущая правка Кати не
+      // потревожена, и никто больше не получил/не потерял очков.
+      expect(view.game.scores).toContainEqual({
+        participantId: b.participantId,
+        score: 50,
+      });
+    }
+
+    a.ws.close();
+    b.ws.close();
+    c.ws.close();
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
 });

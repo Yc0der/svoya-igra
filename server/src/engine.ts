@@ -54,7 +54,16 @@ export type EngineEvent =
   | { type: 'buzz'; counterId: string }
   | { type: 'said-answer'; counterId: string }
   | { type: 'vote'; counterId: string; correct: boolean }
-  | { type: 'timer-expired'; timer: TimerName };
+  | { type: 'timer-expired'; timer: TimerName }
+  // Панель ведущего (design.md, «Ведущий»): доступна только hostId, движок
+  // сам это проверяет — requesterId, не counterId, ведущий не счётчик.
+  | {
+      type: 'adjust-score';
+      requesterId: string;
+      targetCounterId: string;
+      delta: number;
+    }
+  | { type: 'cancel-question'; requesterId: string };
 
 export type Effect =
   | { type: 'start-timer'; timer: TimerName; ms: number }
@@ -126,6 +135,10 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
       return handleVote(state, event);
     case 'timer-expired':
       return handleTimerExpired(state, event);
+    case 'adjust-score':
+      return handleAdjustScore(state, event);
+    case 'cancel-question':
+      return handleCancelQuestion(state, event);
   }
 }
 
@@ -233,6 +246,48 @@ function handleVote(
     ...state,
     votes: { ...state.votes, [event.counterId]: event.correct },
   });
+}
+
+// Панель ведущего: доступна в любой фазе, не только во время судейства —
+// ошибку в счёте естественно захотеть поправить в любой момент (design.md,
+// «Ведущий»). Не через unchanged() формально — эффекты пустые, но состояние
+// (scores) реально меняется; сам helper просто означает «без start/cancel
+// timer», а не «без изменений вообще».
+function handleAdjustScore(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'adjust-score' }>,
+): Result {
+  if (state.hostId === null || event.requesterId !== state.hostId) {
+    return unchanged(state);
+  }
+  if (!(event.targetCounterId in state.scores)) {
+    return unchanged(state);
+  }
+  return unchanged({
+    ...state,
+    scores: {
+      ...state.scores,
+      [event.targetCounterId]:
+        state.scores[event.targetCounterId] + event.delta,
+    },
+  });
+}
+
+// Закрывает текущий вопрос без начисления очков — тем же путём, что и
+// «никто не нажал за 25 секунд» (revealQuestion(state, null)): вопрос
+// помечается отвеченным, ход остаётся у того же счётчика. Для кривого
+// вопроса из пакета или зависшей по факту партии.
+function handleCancelQuestion(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'cancel-question' }>,
+): Result {
+  if (state.hostId === null || event.requesterId !== state.hostId) {
+    return unchanged(state);
+  }
+  if (!state.currentQuestion) {
+    return unchanged(state);
+  }
+  return revealQuestion(state, null);
 }
 
 function handleTimerExpired(

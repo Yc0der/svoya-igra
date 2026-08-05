@@ -438,6 +438,86 @@ describe('Room.startGame', () => {
     }
   });
 
+  it('reopens the question with the time remaining when it was buzzed, not a fresh 25s, after the grace period', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame();
+      const picker = room.toGameStateView(petya)!.turnParticipantId;
+      const answerer = picker === vanya ? vanya : katya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(20_000); // 20s of the 25s question timer pass
+      room.buzz(answerer); // ~5s of open-question budget left, captured here
+      room.saidAnswer(answerer);
+      room.vote(petya, false); // wrong — grace(10s) starts
+
+      vi.advanceTimersByTime(10_000); // grace ends, reopened 'question' timer starts
+      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
+      expect(
+        room.toGameStateView(petya)?.graceExcludedParticipantId,
+      ).toBeNull();
+
+      // Should have ~5s left, not a fresh 25s: advancing just short of 5s
+      // must not have timed out yet...
+      vi.advanceTimersByTime(4_900);
+      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
+
+      // ...but crossing the ~5s mark should reveal with no answerer, exactly
+      // like the original question genuinely ran out of time.
+      vi.advanceTimersByTime(200);
+      expect(room.toGameStateView(petya)?.phase).toBe('reveal');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not corrupt the saved remaining time when someone else buzzes during the grace period itself', () => {
+    // Регрессия: buzz() раньше захватывал "остаток времени" по одному
+    // условию — что фаза 'question-open' — а грейс-период ТОЖЕ идёт в фазе
+    // 'question-open' (просто с активным таймером 'reopen-grace', а не
+    // 'question'). Без различения этих двух случаев нажатие ВО ВРЕМЯ грейса
+    // затирало бы сохранённый остаток вопроса остатком самого грейса.
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame();
+      const picker = room.toGameStateView(petya)!.turnParticipantId;
+      const answerer = picker === vanya ? vanya : katya;
+      const other = answerer === vanya ? katya : vanya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(20_000); // ~5s of the question's 25s left
+      room.buzz(answerer);
+      room.saidAnswer(answerer);
+      room.vote(petya, false); // wrong — grace(10s) starts, 'other' is free to buzz
+
+      vi.advanceTimersByTime(2_000); // 2s into the grace period
+      room.buzz(other); // buzzes while the *grace* timer, not 'question', is active
+      room.saidAnswer(other);
+      room.vote(petya, false); // also wrong — grace(10s) starts again
+
+      vi.advanceTimersByTime(10_000); // this grace ends, reopened 'question' starts
+      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
+
+      // Still the original ~5s, not corrupted by 'other's buzz during grace.
+      vi.advanceTimersByTime(4_900);
+      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
+      vi.advanceTimersByTime(200);
+      expect(room.toGameStateView(petya)?.phase).toBe('reveal');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('allows starting a fresh game once the previous one reached game-end', () => {
     const room = new Room(undefined, ONE_QUESTION_PACK);
     const vanya = joinedId(room, 'Ваня');

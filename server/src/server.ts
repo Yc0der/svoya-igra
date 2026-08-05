@@ -219,6 +219,24 @@ export function createServer(options: CreateServerOptions): GameServer {
           room.vote(participantId, message.correct);
         }
       }
+
+      if (message.type === 'adjust-score') {
+        const participantId = connections.get(ws);
+        if (
+          participantId &&
+          typeof message.participantId === 'string' &&
+          typeof message.delta === 'number'
+        ) {
+          room.adjustScore(participantId, message.participantId, message.delta);
+        }
+      }
+
+      if (message.type === 'cancel-question') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.cancelQuestion(participantId);
+        }
+      }
     });
 
     ws.on('error', (err) => {

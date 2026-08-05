@@ -54,7 +54,9 @@ type ClientMessage =
   | { type: 'select-question'; themeIndex: number; questionId: string }
   | { type: 'buzz' }
   | { type: 'said-answer' }
-  | { type: 'vote'; correct: boolean };
+  | { type: 'vote'; correct: boolean }
+  | { type: 'adjust-score'; participantId: string; delta: number }
+  | { type: 'cancel-question' };
 
 export type ConnectionStatus =
   'connecting' | 'joining' | 'joined' | 'name-taken' | 'disconnected';
@@ -76,6 +78,8 @@ export interface RoomConnection {
   buzz(): void;
   saidAnswer(): void;
   vote(correct: boolean): void;
+  adjustScore(participantId: string, delta: number): void;
+  cancelQuestion(): void;
 }
 
 const TOKEN_KEY = 'svoya-igra-token';
@@ -223,5 +227,8 @@ export function useRoomConnection(
     buzz: () => send({ type: 'buzz' }),
     saidAnswer: () => send({ type: 'said-answer' }),
     vote: (correct) => send({ type: 'vote', correct }),
+    adjustScore: (participantId, delta) =>
+      send({ type: 'adjust-score', participantId, delta }),
+    cancelQuestion: () => send({ type: 'cancel-question' }),
   };
 }

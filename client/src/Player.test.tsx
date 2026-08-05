@@ -45,6 +45,8 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     buzz: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
+    adjustScore: vi.fn(),
+    cancelQuestion: vi.fn(),
     ...overrides,
   };
 }
@@ -216,6 +218,22 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
+  it('does not show a buzz button to the host while the question is open — the host is not a counter', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        game: baseGame({ phase: 'question-open' }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /жать/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/ждём, кто нажмёт/i)).toBeInTheDocument();
   });
 
   it('disables the buzz button and explains why for the just-excluded answerer during reopen grace', () => {
@@ -429,5 +447,88 @@ describe('Player', () => {
     expect(screen.getByText('Другой')).toBeInTheDocument();
     expect(screen.getByText('100')).toBeInTheDocument();
     expect(screen.queryByText('me')).not.toBeInTheDocument();
+  });
+
+  it("shows the host admin panel with per-player score buttons, on top of the phase's own screen", async () => {
+    const adjustScore = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        adjustScore,
+        participants: [
+          { id: 'p1', name: 'Ваня', connected: true },
+          { id: 'p2', name: 'Катя', connected: true },
+        ],
+        game: baseGame({
+          phase: 'selecting',
+          turnParticipantId: 'p1',
+          scores: [
+            { participantId: 'p1', score: 100 },
+            { participantId: 'p2', score: 0 },
+          ],
+        }),
+      }),
+    );
+    render(<Player />);
+    // Фазовый экран (не мой ход) остаётся на месте.
+    expect(screen.getByText(/сейчас выбирает Ваня/i)).toBeInTheDocument();
+    // ...и панель управления показана поверх него.
+    expect(screen.getByText('Ваня')).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
+
+    const minusButtons = screen.getAllByRole('button', { name: '−100' });
+    await userEvent.click(minusButtons[0]);
+    expect(adjustScore).toHaveBeenCalledWith('p1', -100);
+
+    const plusButtons = screen.getAllByRole('button', { name: '+100' });
+    await userEvent.click(plusButtons[1]);
+    expect(adjustScore).toHaveBeenCalledWith('p2', 100);
+  });
+
+  it('does not show the host admin panel to a regular player', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        isHost: false,
+        hostParticipantId: 'host-id',
+        game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByText('Управление')).not.toBeInTheDocument();
+  });
+
+  it('shows "cancel question" only while a question is actually open, not while merely selecting', async () => {
+    const cancelQuestion = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        cancelQuestion,
+        game: baseGame({ phase: 'selecting', turnParticipantId: 'p1' }),
+      }),
+    );
+    const { rerender } = render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /отменить вопрос/i }),
+    ).not.toBeInTheDocument();
+
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        cancelQuestion,
+        game: baseGame({ phase: 'question-open' }),
+      }),
+    );
+    rerender(<Player />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /отменить вопрос/i }),
+    );
+    expect(cancelQuestion).toHaveBeenCalledOnce();
   });
 });

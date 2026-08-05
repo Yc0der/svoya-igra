@@ -44,6 +44,8 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     buzz: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
+    adjustScore: vi.fn(),
+    cancelQuestion: vi.fn(),
     ...overrides,
   };
 }

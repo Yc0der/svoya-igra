@@ -587,6 +587,105 @@ describe('timer-expired: round-end', () => {
   });
 });
 
+describe('adjust-score', () => {
+  it("lets the host adjust any counter's score, in any phase", () => {
+    const state = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const { state: next, effects } = reduce(state, {
+      type: 'adjust-score',
+      requesterId: 'judge',
+      targetCounterId: 'p2',
+      delta: -100,
+    });
+    expect(next.scores.p2).toBe(-100);
+    expect(next.scores.p1).toBe(0);
+    expect(effects).toEqual([]);
+  });
+
+  it('ignores the request from anyone other than the host', () => {
+    const state = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const { state: next } = reduce(state, {
+      type: 'adjust-score',
+      requesterId: 'p1',
+      targetCounterId: 'p2',
+      delta: 100,
+    });
+    expect(next.scores.p2).toBe(0);
+  });
+
+  it('is a no-op in open mode, where there is no host', () => {
+    const state = createInitialState(PACK, ['p1', 'p2']);
+    const { state: next } = reduce(state, {
+      type: 'adjust-score',
+      requesterId: 'p1',
+      targetCounterId: 'p2',
+      delta: 100,
+    });
+    expect(next.scores.p2).toBe(0);
+  });
+
+  it('ignores an unknown target counter', () => {
+    const state = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const { state: next } = reduce(state, {
+      type: 'adjust-score',
+      requesterId: 'judge',
+      targetCounterId: 'ghost',
+      delta: 100,
+    });
+    expect(next.scores).toEqual({ p1: 0, p2: 0, p3: 0 });
+  });
+});
+
+describe('cancel-question', () => {
+  it('closes the open question with no score change and keeps the same picker, like a timeout', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const opened = selectFirst(initial).state;
+    const { state: next, effects } = reduce(opened, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.answeredQuestionIds).toEqual(['a1']);
+    expect(next.scores).toEqual(initial.scores);
+    expect(next.turnCounterId).toBe(initial.turnCounterId);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
+    ]);
+  });
+
+  it('also cancels mid-buzz or mid-judging, not only while merely open', () => {
+    const state = toJudging(
+      createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
+    );
+    const { state: next } = reduce(state, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.scores.p1).toBe(0);
+  });
+
+  it('is a no-op when there is no open question (e.g. still selecting)', () => {
+    const state = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const { state: next, effects } = reduce(state, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    });
+    expect(next).toBe(state);
+    expect(effects).toEqual([]);
+  });
+
+  it('ignores the request from anyone other than the host', () => {
+    const opened = selectFirst(
+      createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
+    ).state;
+    const { state: next } = reduce(opened, {
+      type: 'cancel-question',
+      requesterId: 'p1',
+    });
+    expect(next.phase).toBe('question-open');
+  });
+});
+
 describe('a full two-question game, played end to end', () => {
   it('produces the expected final scores and reaches game-end', () => {
     const twoQuestionPack = makePack({

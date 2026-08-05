@@ -35,7 +35,11 @@ export type ClientMessage =
   | { type: 'select-question'; themeIndex: number; questionId: string }
   | { type: 'buzz' }
   | { type: 'said-answer' }
-  | { type: 'vote'; correct: boolean };
+  | { type: 'vote'; correct: boolean }
+  // Панель ведущего — сервер сам проверяет, что отправитель и есть hostId,
+  // клиентскому participantId в поле не доверяет.
+  | { type: 'adjust-score'; participantId: string; delta: number }
+  | { type: 'cancel-question' };
 
 export type StartGameErrorReason =
   'not-enough-players' | 'no-pack' | 'game-in-progress' | 'host-required';
