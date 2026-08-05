@@ -145,6 +145,91 @@ describe('validatePack', () => {
   });
 });
 
+describe('validatePack — final', () => {
+  function withFinal(themes: unknown) {
+    const data = validPackData() as Record<string, unknown>;
+    data.final = { themes };
+    return data;
+  }
+
+  it('accepts a well-formed final block', () => {
+    const data = withFinal([
+      {
+        name: 'Финал A',
+        question: { id: 'f1', text: 'F1?', answer: 'ответ f1' },
+      },
+      {
+        name: 'Финал B',
+        question: { id: 'f2', text: 'F2?', answer: 'ответ f2', comment: 'к.' },
+      },
+    ]);
+    const pack = validatePack(data);
+    expect(pack.final).toEqual({
+      themes: [
+        {
+          name: 'Финал A',
+          question: {
+            id: 'f1',
+            text: 'F1?',
+            answer: 'ответ f1',
+            comment: undefined,
+          },
+        },
+        {
+          name: 'Финал B',
+          question: {
+            id: 'f2',
+            text: 'F2?',
+            answer: 'ответ f2',
+            comment: 'к.',
+          },
+        },
+      ],
+    });
+  });
+
+  it('is undefined when the pack has no final block', () => {
+    expect(validatePack(validPackData()).final).toBeUndefined();
+  });
+
+  it('rejects a final block with fewer than two themes', () => {
+    const data = withFinal([
+      { name: 'Финал A', question: { id: 'f1', text: 'F1?', answer: 'x' } },
+    ]);
+    expect(() => validatePack(data)).toThrow(/final/);
+  });
+
+  it('rejects a final theme with an empty name', () => {
+    const data = withFinal([
+      { name: '', question: { id: 'f1', text: 'F1?', answer: 'x' } },
+      { name: 'Б', question: { id: 'f2', text: 'F2?', answer: 'x' } },
+    ]);
+    expect(() => validatePack(data)).toThrow(/name/);
+  });
+
+  it('rejects a final question missing an answer', () => {
+    const data = withFinal([
+      { name: 'А', question: { id: 'f1', text: 'F1?' } },
+      { name: 'Б', question: { id: 'f2', text: 'F2?', answer: 'x' } },
+    ]);
+    expect(() => validatePack(data)).toThrow(/answer/);
+  });
+
+  it('rejects a final question id that collides with a round question id', () => {
+    const data = validPackData() as Record<string, unknown>;
+    data.final = {
+      themes: [
+        // 'q1' переиспользует id, уже занятый round[0].themes[0].questions[0]
+        // в validPackData() — проверка уникальности должна видеть весь пакет
+        // целиком, не только rounds.
+        { name: 'А', question: { id: 'q1', text: 'F1?', answer: 'x' } },
+        { name: 'Б', question: { id: 'f2', text: 'F2?', answer: 'x' } },
+      ],
+    };
+    expect(() => validatePack(data)).toThrow(/повторяющийся id/);
+  });
+});
+
 describe('loadPack', () => {
   let dir: string;
 
