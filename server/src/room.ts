@@ -116,14 +116,6 @@ export class Room {
   }
 
   startGame(): StartGameResult {
-    // Гасим безусловно, даже если ниже вернём ошибку и не тронем this.game:
-    // таймер от ПРЕДЫДУЩЕЙ партии не должен продолжать тикать после того, как
-    // startGame() вообще был вызван — тот же паттерн, что и в applyEffects.
-    if (this.gameTimeoutHandle) {
-      clearTimeout(this.gameTimeoutHandle);
-      this.gameTimeoutHandle = null;
-      this.gameTimerDeadline = null;
-    }
     if (!this.pack) {
       return { error: 'no-pack' };
     }
@@ -134,6 +126,12 @@ export class Room {
     // этой проверки) состояния мог бы сработать против нового this.game.
     // 'game-end' — исключение: это единственный способ сыграть вторую
     // партию без удаления файла снапшота.
+    //
+    // Эта проверка обязана идти РАНЬШЕ сброса таймера ниже: для фаз
+    // 'reveal'/'round-end' таймер — единственное, что вообще продвигает
+    // партию (нет действия игрока, которое бы это сделало), так что
+    // отклонённый здесь вызов не должен его касаться — иначе он погасит
+    // работающий таймер и партия зависнет навсегда без перезапуска процесса.
     if (this.game && this.game.phase !== 'game-end') {
       return { error: 'game-in-progress' };
     }
@@ -146,6 +144,16 @@ export class Room {
     const present = this.participants.filter((p) => p.connected);
     if (present.length < 2) {
       return { error: 'not-enough-players' };
+    }
+    // Гасим только здесь, непосредственно перед тем, как реально перезаписать
+    // this.game: таймер от ПРЕДЫДУЩЕЙ партии (например, оставшийся от
+    // 'game-end', у которого таймера и так нет, но на всякий случай) не
+    // должен продолжать тикать против нового this.game — тот же паттерн, что
+    // и в applyEffects.
+    if (this.gameTimeoutHandle) {
+      clearTimeout(this.gameTimeoutHandle);
+      this.gameTimeoutHandle = null;
+      this.gameTimerDeadline = null;
     }
     const counterIds = present.map((p) => p.id);
     this.game = createInitialState(this.pack, counterIds);

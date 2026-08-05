@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Room } from './room.js';
 import { deserializeSnapshot, serializeSnapshot } from './snapshot.js';
+import { QUESTION_TIMER_MS } from './engine.js';
 
 describe('Room.join', () => {
   it('adds a new participant', () => {
@@ -262,6 +263,40 @@ describe('Room.startGame', () => {
 
     expect(room.startGame()).toEqual({ error: 'game-in-progress' });
     expect(room.toGameStateView()).toEqual(before);
+  });
+
+  it('rejects starting a new game mid-question without killing the live timer of the game in progress', () => {
+    // Regression: startGame() used to clear gameTimeoutHandle/gameTimerDeadline
+    // unconditionally before checking game-in-progress, so even a REJECTED
+    // call would kill the running timer. 'selecting' (the previous version of
+    // this test) can't catch that — it has no timer at all, so
+    // timerDeadline is null before and after regardless of the bug. Exercise
+    // 'question-open' instead, which has a live timer, and prove that timer
+    // is still genuinely alive — not just that the field looks non-null — by
+    // advancing fake timers past it and confirming the phase still advances.
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame();
+    const picker = room.toGameStateView()!.turnParticipantId;
+
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      const before = room.toGameStateView();
+      expect(before?.phase).toBe('question-open');
+      expect(before?.timerDeadline).not.toBeNull();
+
+      expect(room.startGame()).toEqual({ error: 'game-in-progress' });
+
+      const afterReject = room.toGameStateView();
+      expect(afterReject?.timerDeadline).toBe(before?.timerDeadline);
+
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
+      expect(room.toGameStateView()?.phase).toBe('reveal');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('allows starting a fresh game once the previous one reached game-end', () => {
