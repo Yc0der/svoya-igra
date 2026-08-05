@@ -109,3 +109,327 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* Табло и игрок — базовая раскладка (2026-08-05, вне обычного порядка вех,
+   см. lifecycle.md п.7: сделано наспех перед живой проверкой, а не по
+   полноценному design-циклу). */
+
+.board,
+.player {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  padding: 24px 16px 48px;
+  box-sizing: border-box;
+}
+
+.player--center {
+  flex: 1;
+  justify-content: center;
+  gap: 16px;
+}
+
+.board-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.board-qr-url {
+  font-family: var(--mono);
+  font-size: 20px;
+}
+
+.board-participants,
+.scoreboard {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px 32px;
+  font-size: 24px;
+}
+
+.board-participants .is-disconnected {
+  opacity: 0.5;
+}
+
+.scoreboard {
+  font-size: 32px;
+  font-weight: 600;
+}
+
+.scoreboard li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.scoreboard-name {
+  color: var(--text-h);
+}
+
+.scoreboard-value {
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
+.board-status {
+  font-size: 32px;
+}
+
+.board-status--buzzed {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.board-question {
+  font-size: 48px;
+  font-weight: 600;
+  color: var(--text-h);
+  max-width: 900px;
+  line-height: 130%;
+}
+
+.board-answer {
+  font-size: 32px;
+  color: var(--text-h);
+}
+
+/* Сетка тем: строка на тему, слева название, справа по возрастанию цены.
+   grid-auto-flow: row раскладывает элементы по DOM-порядку — тема и её 4
+   вопроса идут подряд, поэтому каждая пятёрка (Fragment из Board.tsx/
+   Player.tsx) сама заполняет одну строку из 5 колонок, обёртка не нужна как
+   отдельный grid-item. */
+.board-grid,
+.player-grid {
+  display: grid;
+  grid-auto-flow: row;
+  grid-template-columns: minmax(140px, auto) repeat(4, 1fr);
+  gap: 12px;
+  width: 100%;
+  max-width: 1000px;
+}
+
+.board-grid .theme-name,
+.player-grid .theme-name {
+  font-size: 24px;
+  text-align: left;
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.price-cell {
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--accent);
+  text-align: center;
+}
+
+.price-cell--answered {
+  color: var(--border);
+}
+
+.price-button {
+  font-size: 28px;
+  font-weight: 700;
+  min-height: 64px;
+  border-radius: 8px;
+  border: 2px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.price-button:disabled {
+  opacity: 0.35;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text);
+}
+
+.button {
+  font-size: 24px;
+  font-weight: 600;
+  padding: 16px 32px;
+  border-radius: 12px;
+  border: 2px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  min-height: 56px;
+}
+
+.button:disabled {
+  opacity: 0.4;
+}
+
+.button--primary {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.button--buzz {
+  font-size: 40px;
+  padding: 40px 64px;
+  border-radius: 24px;
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  width: 100%;
+  max-width: 400px;
+}
+
+.player-vote {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+}
+
+.button--yes {
+  background: #1f9d55;
+  color: white;
+  border-color: #1f9d55;
+}
+
+.button--no {
+  background: #d64545;
+  color: white;
+  border-color: #d64545;
+}
+
+.button--yes.is-selected,
+.button--no.is-selected {
+  outline: 4px solid var(--text-h);
+  outline-offset: 2px;
+}
+
+.player-vote-hint {
+  font-size: 16px;
+  color: var(--text);
+  width: 100%;
+}
+
+.player-timer,
+.board-timer {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.board-timer {
+  font-size: 24px;
+}
+
+.player--join {
+  justify-content: center;
+  flex: 1;
+  gap: 12px;
+}
+
+.player--join input {
+  font-size: 20px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  min-height: 48px;
+}
+
+.player-alert {
+  color: #d64545;
+}
+
+.player-answer {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.player-comment {
+  font-size: 18px;
+}
+
+.host-admin {
+  width: 100%;
+  max-width: 500px;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.host-admin h3 {
+  font-size: 16px;
+  color: var(--text);
+  font-weight: 600;
+  margin: 0 0 8px;
+  text-align: center;
+}
+
+.host-admin-scores {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.host-admin-scores li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.host-admin-name {
+  min-width: 80px;
+  font-weight: 600;
+}
+
+.host-admin-value {
+  font-family: var(--mono);
+  color: var(--accent);
+  min-width: 48px;
+  text-align: right;
+}
+
+.host-admin-step {
+  font-size: 16px;
+  padding: 8px 12px;
+  min-height: 40px;
+}
+
+@media (max-width: 640px) {
+  .board-grid,
+  .player-grid {
+    gap: 6px 8px;
+    grid-template-columns: minmax(88px, auto) repeat(4, 1fr);
+  }
+
+  .board-grid .theme-name,
+  .player-grid .theme-name {
+    font-size: 15px;
+  }
+
+  .price-cell {
+    font-size: 22px;
+  }
+
+  .price-button {
+    font-size: 18px;
+    min-height: 52px;
+    padding: 0 4px;
+  }
+
+  .button--buzz {
+    font-size: 32px;
+    padding: 32px 48px;
+  }
+}

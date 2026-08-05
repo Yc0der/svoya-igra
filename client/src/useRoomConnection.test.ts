@@ -178,4 +178,81 @@ describe('useRoomConnection', () => {
     // and reopen the socket as a result.
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
+
+  it('exposes game state from a state message and stays null before any game starts', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() =>
+      socket.emitMessage({ type: 'state', participants: [], game: null }),
+    );
+
+    expect(result.current.game).toBeNull();
+  });
+
+  it('updates game state on every state broadcast', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    const gameView = {
+      phase: 'selecting',
+      roundIndex: 0,
+      grid: [],
+      turnParticipantId: 'p1',
+      currentQuestion: null,
+      buzzedParticipantId: null,
+      correctAnswer: null,
+      timerDeadline: null,
+      scores: [],
+    };
+
+    act(() => socket.emitOpen());
+    act(() =>
+      socket.emitMessage({ type: 'state', participants: [], game: gameView }),
+    );
+
+    expect(result.current.game).toEqual(gameView);
+  });
+
+  it('sends start-game/select-question/buzz/said-answer/vote as the matching client messages', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.startGame());
+    expect(socket.sent).toContainEqual(JSON.stringify({ type: 'start-game' }));
+
+    act(() => result.current.selectQuestion(1, 'q2'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 1,
+        questionId: 'q2',
+      }),
+    );
+
+    act(() => result.current.buzz());
+    expect(socket.sent).toContainEqual(JSON.stringify({ type: 'buzz' }));
+
+    act(() => result.current.saidAnswer());
+    expect(socket.sent).toContainEqual(JSON.stringify({ type: 'said-answer' }));
+
+    act(() => result.current.vote(true));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'vote', correct: true }),
+    );
+  });
+
+  it('sets falsestart on a falsestart message and clears it again after 2 seconds', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => socket.emitMessage({ type: 'falsestart' }));
+    expect(result.current.falsestart).toBe(true);
+
+    act(() => vi.advanceTimersByTime(2000));
+    expect(result.current.falsestart).toBe(false);
+  });
 });

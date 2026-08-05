@@ -5,9 +5,11 @@ import { Room, type RoomState } from './room.js';
 import { readSnapshot, writeSnapshot } from './snapshot.js';
 import { listLanCandidates, pickLanAddress } from './network.js';
 import { createServer } from './server.js';
+import { loadPack } from './pack.js';
 
 const PORT = 8080;
 const SNAPSHOT_PATH = './room-snapshot.json';
+const PACK_PATH = './packs/current.json';
 const CLIENT_DIST_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../client/dist',
@@ -32,7 +34,19 @@ async function main(): Promise<void> {
       err,
     );
   }
-  const room = new Room(initial ?? undefined);
+  let pack;
+  try {
+    pack = await loadPack(PACK_PATH);
+  } catch (err) {
+    console.error(
+      `Не удалось загрузить пакет вопросов ${PACK_PATH} — без него игру не начать:`,
+      err,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const room = new Room(initial ?? undefined, pack);
 
   // Записи снапшота сериализуются в очередь, чтобы более медленная запись
   // не перезаписала диск устаревшим состоянием после более быстрой поздней записи.
