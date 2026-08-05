@@ -33,7 +33,8 @@ export type JoinResult = { participant: Participant } | { error: 'name-taken' };
 export type ReconnectResult =
   { participant: Participant } | { error: 'invalid-token' };
 export type StartGameResult =
-  { ok: true } | { error: 'not-enough-players' | 'no-pack' };
+  | { ok: true }
+  | { error: 'not-enough-players' | 'no-pack' | 'game-in-progress' };
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
@@ -115,8 +116,26 @@ export class Room {
   }
 
   startGame(): StartGameResult {
+    // Гасим безусловно, даже если ниже вернём ошибку и не тронем this.game:
+    // таймер от ПРЕДЫДУЩЕЙ партии не должен продолжать тикать после того, как
+    // startGame() вообще был вызван — тот же паттерн, что и в applyEffects.
+    if (this.gameTimeoutHandle) {
+      clearTimeout(this.gameTimeoutHandle);
+      this.gameTimeoutHandle = null;
+      this.gameTimerDeadline = null;
+    }
     if (!this.pack) {
       return { error: 'no-pack' };
+    }
+    // Повторный запуск во время уже идущей партии штатно недостижим (кнопка
+    // «Начать игру» рендерится в Player.tsx только при game === null), но
+    // если бы это случилось, unconditional overwrite ниже потерял бы текущую
+    // партию, а таймер только что погашенного (или ещё не погашенного без
+    // этой проверки) состояния мог бы сработать против нового this.game.
+    // 'game-end' — исключение: это единственный способ сыграть вторую
+    // партию без удаления файла снапшота.
+    if (this.game && this.game.phase !== 'game-end') {
+      return { error: 'game-in-progress' };
     }
     // Только подключённые сейчас участники становятся счётчиками. Тот, кто
     // зашёл в лобби и ушёл (закрыл вкладку) до начала игры, не должен

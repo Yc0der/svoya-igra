@@ -263,6 +263,29 @@ describe('createServer', () => {
     ws.close();
   });
 
+  it('ignores a start-game message from a socket that never joined', async () => {
+    const ws = new WebSocket(url);
+    const nextMessage = collectMessages(ws);
+    await waitForOpen(ws);
+    await nextMessage(); // hello
+    await nextMessage(); // state
+
+    // No 'join' sent — this socket is unknown to `connections`. An
+    // unguarded `room.startGame()` would still run: with no pack loaded in
+    // this room it would return `{ error: 'no-pack' }` without observable
+    // effect, but the guard itself (matching every other game-message
+    // branch) must still be exercised, so send it and prove the connection
+    // stays alive and unaffected by following up with a normal join.
+    ws.send(JSON.stringify({ type: 'start-game' }));
+
+    ws.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
+    const joined = await nextMessage();
+    expect(joined).toMatchObject({ type: 'joined', name: 'Ваня' });
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+
+    ws.close();
+  });
+
   it("doesn't crash the server when a client sends an invalid WebSocket frame", async () => {
     const attacker = new WebSocket(url);
     const nextAttackerMessage = collectMessages(attacker);

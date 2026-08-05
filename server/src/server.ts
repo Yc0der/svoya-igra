@@ -166,7 +166,10 @@ export function createServer(options: CreateServerOptions): GameServer {
       }
 
       if (message.type === 'start-game') {
-        room.startGame();
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.startGame();
+        }
       }
 
       if (message.type === 'select-question') {

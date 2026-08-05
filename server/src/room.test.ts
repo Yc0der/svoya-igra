@@ -249,6 +249,43 @@ describe('Room.startGame', () => {
     room.startGame();
     expect(listener).toHaveBeenCalledOnce();
   });
+
+  it('rejects starting a new game while one is already in progress, leaving the existing game untouched', () => {
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame();
+    const before = room.toGameStateView();
+    // Any phase other than 'game-end' counts as "in progress" — 'selecting'
+    // right after start is enough to exercise the guard.
+    expect(before?.phase).toBe('selecting');
+
+    expect(room.startGame()).toEqual({ error: 'game-in-progress' });
+    expect(room.toGameStateView()).toEqual(before);
+  });
+
+  it('allows starting a fresh game once the previous one reached game-end', () => {
+    const room = new Room(undefined, ONE_QUESTION_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame();
+    const picker = room.toGameStateView()!.turnParticipantId;
+
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(25_000); // question timer -> reveal
+      vi.advanceTimersByTime(4_000); // reveal timer -> game-end (only round, only question)
+      expect(room.toGameStateView()?.phase).toBe('game-end');
+
+      expect(room.startGame()).toEqual({ ok: true });
+      const view = room.toGameStateView();
+      expect(view?.phase).toBe('selecting');
+      expect([vanya, katya]).toContain(view?.turnParticipantId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 function startedRoom(): { room: Room; picker: string; other: string } {
