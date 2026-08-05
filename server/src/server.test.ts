@@ -12,7 +12,7 @@ import {
 } from './server.js';
 import type { ServerMessage } from './protocol.js';
 import type { Pack } from './pack.js';
-import { VOTE_TIMER_MS } from './engine.js';
+import { REVEAL_TIMER_MS, VOTE_TIMER_MS } from './engine.js';
 
 // Attaches a persistent 'message' listener synchronously at socket creation
 // (before any await), so no frame can ever arrive unheard even if the server
@@ -1008,5 +1008,190 @@ describe('createServer host mode', () => {
     c.ws.close();
     await server.close();
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+const TEST_PACK_WITH_FINAL: Pack = {
+  ...TEST_PACK,
+  final: {
+    themes: [
+      {
+        name: 'Финал A',
+        question: { id: 'f1', text: 'F1?', answer: 'ответ f1' },
+      },
+      {
+        name: 'Финал B',
+        question: { id: 'f2', text: 'F2?', answer: 'ответ f2' },
+      },
+    ],
+  },
+};
+
+describe('createServer final round', () => {
+  it('wires elimination, wagers, answers and host judging over the real transport', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-final-'));
+      const room = new Room(undefined, TEST_PACK_WITH_FINAL);
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        lanUrl: 'http://192.168.1.1:8080/',
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } =
+        server.httpServer.address() as import('node:net').AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const a = await joinPlayer(url, 'Ваня');
+      const b = await joinPlayer(url, 'Катя');
+      await a.nextMessage();
+      const c = await joinPlayer(url, 'Петя');
+      await a.nextMessage();
+      await b.nextMessage();
+
+      c.ws.send(JSON.stringify({ type: 'toggle-host' }));
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+      a.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(a, b, a)) as {
+        game: { turnParticipantId: string };
+      };
+      await c.nextMessage();
+
+      const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+      const other = picker === a ? b : a;
+
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(a, b, picker);
+      await c.nextMessage();
+
+      picker.ws.send(JSON.stringify({ type: 'buzz' }));
+      await settle(a, b, picker);
+      await c.nextMessage();
+
+      picker.ws.send(JSON.stringify({ type: 'said-answer' }));
+      await settle(a, b, picker);
+      await c.nextMessage();
+
+      // Судейство с ведущим (c) — решает сразу, без ожидания таймера.
+      // 'vote' по протоколу не несёт participantId — сервер берёт настоящего
+      // отправителя сам из connections.get(ws) (тот же паттерн, что и у
+      // adjust-score/cancel-question).
+      c.ws.send(JSON.stringify({ type: 'vote', correct: true }));
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+      // Reveal-таймер должен истечь, чтобы партия перешла в final-elim —
+      // единственный раунд пакета исчерпан на этом единственном вопросе.
+      let remaining = REVEAL_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterFinalStart = (await Promise.all([
+        a.nextMessage(),
+        b.nextMessage(),
+        c.nextMessage(),
+      ])) as { game: { phase: string; finalElimParticipantId: string } }[];
+      expect(afterFinalStart[0].game.phase).toBe('final-elim');
+      // other ответил 0 раз/меньше очков, чем picker (получил +100) — ходит первым.
+      expect(afterFinalStart[0].game.finalElimParticipantId).toBe(
+        other.participantId,
+      );
+
+      other.ws.send(
+        JSON.stringify({ type: 'eliminate-final-theme', themeIndex: 0 }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+      // other пришёл к финалу с 0 очков (не ответил в базовом раунде) — движок
+      // зажимает ставку до max(0, score) (engine.ts, handleSubmitWager), так
+      // что ставка больше 0 без этого была бы молча обнулена, а не
+      // содержательным тестом проигрыша. Панель ведущего (adjust-score) уже
+      // проверена в базовом раунде — переиспользуем её, чтобы задать other
+      // очки, на которые реально можно поставить.
+      c.ws.send(
+        JSON.stringify({
+          type: 'adjust-score',
+          participantId: other.participantId,
+          delta: 100,
+        }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+      picker.ws.send(JSON.stringify({ type: 'submit-wager', amount: 50 }));
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+      other.ws.send(JSON.stringify({ type: 'submit-wager', amount: 30 }));
+      const afterWagers = (await Promise.all([
+        a.nextMessage(),
+        b.nextMessage(),
+        c.nextMessage(),
+      ])) as { game: { phase: string } }[];
+      expect(afterWagers[0].game.phase).toBe('final-answer');
+
+      picker.ws.send(
+        JSON.stringify({ type: 'submit-final-answer', text: 'ответ picker' }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+      other.ws.send(
+        JSON.stringify({ type: 'submit-final-answer', text: 'ответ other' }),
+      );
+      const afterAnswers = (await Promise.all([
+        a.nextMessage(),
+        b.nextMessage(),
+        c.nextMessage(),
+      ])) as { game: { phase: string } }[];
+      expect(afterAnswers[0].game.phase).toBe('final-judging');
+
+      c.ws.send(
+        JSON.stringify({
+          type: 'final-vote',
+          participantId: picker.participantId,
+          correct: true,
+        }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+      c.ws.send(
+        JSON.stringify({
+          type: 'final-vote',
+          participantId: other.participantId,
+          correct: false,
+        }),
+      );
+      const afterReveal = (await Promise.all([
+        a.nextMessage(),
+        b.nextMessage(),
+        c.nextMessage(),
+      ])) as {
+        game: {
+          phase: string;
+          scores: { participantId: string; score: number }[];
+        };
+      }[];
+      expect(afterReveal[0].game.phase).toBe('final-reveal');
+      expect(afterReveal[0].game.scores).toEqual(
+        expect.arrayContaining([
+          { participantId: picker.participantId, score: 150 },
+          { participantId: other.participantId, score: 70 },
+        ]),
+      );
+
+      a.ws.close();
+      b.ws.close();
+      c.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

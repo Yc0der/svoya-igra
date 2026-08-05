@@ -237,6 +237,38 @@ export function createServer(options: CreateServerOptions): GameServer {
           room.cancelQuestion(participantId);
         }
       }
+
+      if (message.type === 'eliminate-final-theme') {
+        const participantId = connections.get(ws);
+        if (participantId && typeof message.themeIndex === 'number') {
+          room.eliminateFinalTheme(participantId, message.themeIndex);
+        }
+      }
+
+      if (message.type === 'submit-wager') {
+        const participantId = connections.get(ws);
+        if (participantId && typeof message.amount === 'number') {
+          room.submitWager(participantId, message.amount);
+        }
+      }
+
+      if (message.type === 'submit-final-answer') {
+        const participantId = connections.get(ws);
+        if (participantId && typeof message.text === 'string') {
+          room.submitFinalAnswer(participantId, message.text);
+        }
+      }
+
+      if (message.type === 'final-vote') {
+        const participantId = connections.get(ws);
+        if (
+          participantId &&
+          typeof message.participantId === 'string' &&
+          typeof message.correct === 'boolean'
+        ) {
+          room.finalVote(participantId, message.participantId, message.correct);
+        }
+      }
     });
 
     ws.on('error', (err) => {
