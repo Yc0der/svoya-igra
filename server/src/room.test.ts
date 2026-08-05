@@ -401,7 +401,73 @@ describe('Room.startGame', () => {
     );
   });
 
-  it('re-admits the excluded answerer once the 10s grace period expires', () => {
+  it('reopens the question immediately on a wrong verdict — no separate pause before the question timer resumes', () => {
+    // 2026-08-05, второй заход: раньше здесь была отдельная 10-секундная
+    // пауза («грейс») ПЕРЕД тем, как отсчёт вопроса возобновлялся — то есть
+    // на вопрос реально уходило больше времени, чем должно было. По фидбэку
+    // с живой проверки это переделано: отсчёт вопроса возобновляется
+    // мгновенно в момент неверного вердикта, а временная блокировка того,
+    // кто ошибся, идёт ПАРАЛЛЕЛЬНО ему, а не перед ним.
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame();
+      const picker = room.toGameStateView(petya)!.turnParticipantId;
+      const answerer = picker === vanya ? vanya : katya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      room.buzz(answerer);
+      room.saidAnswer(answerer);
+      room.vote(petya, false);
+
+      // Никакого advanceTimersByTime между вердиктом и проверкой — фаза
+      // обязана быть 'question-open' сразу же.
+      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
+      expect(room.toGameStateView(petya)?.graceExcludedParticipantId).toBe(
+        answerer,
+      );
+      expect(room.toGameStateView(petya)?.graceExcludedUntil).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('blocks only the just-wrong answerer for 5s (in parallel with the resumed question timer), lets everyone else buzz right away', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame();
+      const picker = room.toGameStateView(petya)!.turnParticipantId;
+      const answerer = picker === vanya ? vanya : katya;
+      const other = answerer === vanya ? katya : vanya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      room.buzz(answerer);
+      room.saidAnswer(answerer);
+      room.vote(petya, false);
+
+      // Тот, кто только что ошибся — блокирован, фаза не меняется.
+      expect(room.buzz(answerer)).toBe('ok');
+      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
+
+      // Кто угодно другой — жмёт сразу же, без ожидания.
+      expect(room.buzz(other)).toBe('ok');
+      expect(room.toGameStateView(petya)?.phase).toBe('buzzed');
+      expect(room.toGameStateView(petya)?.buzzedParticipantId).toBe(other);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-admits the excluded answerer once the 5s block expires', () => {
     vi.useFakeTimers();
     try {
       const room = new Room(undefined, TEST_PACK);
@@ -420,15 +486,12 @@ describe('Room.startGame', () => {
       expect(room.toGameStateView(petya)?.graceExcludedParticipantId).toBe(
         answerer,
       );
-      // Пока грейс не истёк, повторное нажатие того же счётчика ни к чему не
-      // приводит — фаза не меняется.
-      expect(room.buzz(answerer)).toBe('ok');
-      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
 
-      vi.advanceTimersByTime(10_000); // REOPEN_GRACE_MS
+      vi.advanceTimersByTime(5_000); // GRACE_EXCLUSION_MS
       expect(
         room.toGameStateView(petya)?.graceExcludedParticipantId,
       ).toBeNull();
+      expect(room.toGameStateView(petya)?.graceExcludedUntil).toBeNull();
 
       expect(room.buzz(answerer)).toBe('ok');
       expect(room.toGameStateView(petya)?.phase).toBe('buzzed');
@@ -438,7 +501,7 @@ describe('Room.startGame', () => {
     }
   });
 
-  it('reopens the question with the time remaining when it was buzzed, not a fresh 25s, after the grace period', () => {
+  it('reopens the question with the time remaining when it was buzzed, not a fresh 30s', () => {
     vi.useFakeTimers();
     try {
       const room = new Room(undefined, TEST_PACK);
@@ -451,66 +514,18 @@ describe('Room.startGame', () => {
       const answerer = picker === vanya ? vanya : katya;
 
       room.selectQuestion(picker, 0, 'q1');
-      vi.advanceTimersByTime(20_000); // 20s of the 25s question timer pass
-      room.buzz(answerer); // ~5s of open-question budget left, captured here
+      vi.advanceTimersByTime(20_000); // 20s of the 30s question timer pass
+      room.buzz(answerer); // ~10s of open-question budget left, captured here
       room.saidAnswer(answerer);
-      room.vote(petya, false); // wrong — grace(10s) starts
+      room.vote(petya, false); // wrong — reopens immediately with ~10s left
 
-      vi.advanceTimersByTime(10_000); // grace ends, reopened 'question' timer starts
-      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
-      expect(
-        room.toGameStateView(petya)?.graceExcludedParticipantId,
-      ).toBeNull();
-
-      // Should have ~5s left, not a fresh 25s: advancing just short of 5s
+      // Should have ~10s left, not a fresh 30s: advancing just short of 10s
       // must not have timed out yet...
-      vi.advanceTimersByTime(4_900);
+      vi.advanceTimersByTime(9_900);
       expect(room.toGameStateView(petya)?.phase).toBe('question-open');
 
-      // ...but crossing the ~5s mark should reveal with no answerer, exactly
+      // ...but crossing the ~10s mark should reveal with no answerer, exactly
       // like the original question genuinely ran out of time.
-      vi.advanceTimersByTime(200);
-      expect(room.toGameStateView(petya)?.phase).toBe('reveal');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('does not corrupt the saved remaining time when someone else buzzes during the grace period itself', () => {
-    // Регрессия: buzz() раньше захватывал "остаток времени" по одному
-    // условию — что фаза 'question-open' — а грейс-период ТОЖЕ идёт в фазе
-    // 'question-open' (просто с активным таймером 'reopen-grace', а не
-    // 'question'). Без различения этих двух случаев нажатие ВО ВРЕМЯ грейса
-    // затирало бы сохранённый остаток вопроса остатком самого грейса.
-    vi.useFakeTimers();
-    try {
-      const room = new Room(undefined, TEST_PACK);
-      const vanya = joinedId(room, 'Ваня');
-      const katya = joinedId(room, 'Катя');
-      const petya = joinedId(room, 'Петя');
-      room.toggleHost(petya);
-      room.startGame();
-      const picker = room.toGameStateView(petya)!.turnParticipantId;
-      const answerer = picker === vanya ? vanya : katya;
-      const other = answerer === vanya ? katya : vanya;
-
-      room.selectQuestion(picker, 0, 'q1');
-      vi.advanceTimersByTime(20_000); // ~5s of the question's 25s left
-      room.buzz(answerer);
-      room.saidAnswer(answerer);
-      room.vote(petya, false); // wrong — grace(10s) starts, 'other' is free to buzz
-
-      vi.advanceTimersByTime(2_000); // 2s into the grace period
-      room.buzz(other); // buzzes while the *grace* timer, not 'question', is active
-      room.saidAnswer(other);
-      room.vote(petya, false); // also wrong — grace(10s) starts again
-
-      vi.advanceTimersByTime(10_000); // this grace ends, reopened 'question' starts
-      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
-
-      // Still the original ~5s, not corrupted by 'other's buzz during grace.
-      vi.advanceTimersByTime(4_900);
-      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
       vi.advanceTimersByTime(200);
       expect(room.toGameStateView(petya)?.phase).toBe('reveal');
     } finally {
@@ -528,7 +543,7 @@ describe('Room.startGame', () => {
     vi.useFakeTimers();
     try {
       room.selectQuestion(picker, 0, 'q1');
-      vi.advanceTimersByTime(25_000); // question timer -> reveal
+      vi.advanceTimersByTime(QUESTION_TIMER_MS); // question timer -> reveal
       vi.advanceTimersByTime(4_000); // reveal timer -> game-end (only round, only question)
       expect(room.toGameStateView()?.phase).toBe('game-end');
 
@@ -593,7 +608,7 @@ describe('Room game flow', () => {
       room.selectQuestion(picker, 0, 'q1');
       expect(room.toGameStateView()?.phase).toBe('question-open');
 
-      vi.advanceTimersByTime(25_000);
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
       expect(room.toGameStateView()?.phase).toBe('reveal');
 
       vi.advanceTimersByTime(4_000);
@@ -615,7 +630,7 @@ describe('Room game flow', () => {
       const { room, picker } = startedRoom();
       room.selectQuestion(picker, 0, 'q1');
 
-      vi.advanceTimersByTime(25_000); // question timer expires -> reveal
+      vi.advanceTimersByTime(QUESTION_TIMER_MS); // question timer expires -> reveal
       expect(room.toGameStateView()?.phase).toBe('reveal');
       expect(room.toGameStateView()?.timerDeadline).not.toBeNull();
 
@@ -637,7 +652,7 @@ describe('Room game flow', () => {
       const picker = room.toGameStateView()!.turnParticipantId;
 
       room.selectQuestion(picker, 0, 'q1');
-      vi.advanceTimersByTime(25_000); // question timer expires -> reveal
+      vi.advanceTimersByTime(QUESTION_TIMER_MS); // question timer expires -> reveal
       expect(room.toGameStateView()?.phase).toBe('reveal');
       expect(room.toGameStateView()?.timerDeadline).not.toBeNull();
 
@@ -704,7 +719,7 @@ describe('Room game flow', () => {
       expect(restored.toGameStateView()?.phase).toBe('question-open');
       expect([vanya, katya]).toContain(picker);
 
-      vi.advanceTimersByTime(25_000); // QUESTION_TIMER_MS
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
       expect(restored.toGameStateView()?.phase).toBe('reveal');
     } finally {
       vi.useRealTimers();

@@ -25,6 +25,7 @@ export interface GameStateView {
   buzzedParticipantId: string | null;
   correctAnswer: { text: string; comment?: string } | null;
   graceExcludedParticipantId: string | null;
+  graceExcludedUntil: number | null;
   timerDeadline: number | null;
   scores: { participantId: string; score: number }[];
 }

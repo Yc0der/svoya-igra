@@ -104,9 +104,11 @@ test('board and two players play two questions end to end', async ({
     // на экране на этом шаге, так что совпадение однозначно.
     await expect(board.getByText(/\?/)).toBeVisible();
 
-    // Оба видят кнопку «Жать», но нажимает picker, чтобы сценарий был
+    // Оба видят кнопку «Ответ», но нажимает picker, чтобы сценарий был
     // детерминированным (не зависел от того, кто физически быстрее).
-    await picker.getByRole('button', { name: 'Жать!' }).click();
+    // exact: true — иначе «Ответ» матчится как подстрока внутри «Я
+    // ответил» (тот же класс проблемы, что и с «Зачёт»/«Незачёт» ниже).
+    await picker.getByRole('button', { name: 'Ответ', exact: true }).click();
     await picker.getByRole('button', { name: 'Я ответил' }).click();
 
     // exact: true — иначе getByRole матчит по подстроке без учёта регистра,

@@ -8,7 +8,6 @@ import {
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
   ROUND_END_TIMER_MS,
-  REOPEN_GRACE_MS,
   type EngineState,
   type EngineEvent,
   type Effect,
@@ -64,6 +63,14 @@ const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   'round-end': { timer: 'round-end', ms: ROUND_END_TIMER_MS },
 };
 
+// Сколько секунд ответивший неверно не может нажать повторно — не игровое
+// правило движка (тот вообще не знает, кто и когда переоткрыл вопрос), а
+// транспортное ограничение Комнаты, тем же паттерном, что и фальстарт
+// (design.md, «Комната», «СУДЕЙСТВО», 2026-08-05). Идёт **параллельно** с
+// возобновившимся отсчётом вопроса, а не перед ним — общее время на вопрос
+// от этого не растёт.
+const GRACE_EXCLUSION_MS = 5_000;
+
 export class Room {
   private participants: Participant[];
   private pack: Pack | undefined;
@@ -72,26 +79,28 @@ export class Room {
   private gameTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
   private gameTimerDeadline: number | null = null;
   // Сколько реального времени оставалось на вопрос в момент, когда по нему в
-  // последний раз нажали — используется, чтобы после грейс-периода (см.
-  // resolveVote в движке) вопрос переоткрывался с ОСТАВШИМСЯ временем, а не
-  // с полным свежим таймером: движок сам не знает часов и эмитит одинаковый
-  // start-timer в обоих случаях (первый выбор вопроса и переоткрытие после
-  // грейса выглядят для него одинаково), различить их и подставить остаток
-  // может только Комната — она и так уже единственная, кто вообще знает
-  // текущее время (design.md, «Комната»: «вся сетевая грязь и все настоящие
-  // таймеры живут здесь»). questionId в паре — защита от применения остатка
-  // к таймеру уже ДРУГОГО вопроса, если что-то в последовательности событий
+  // последний раз нажали — используется, чтобы после неверного ответа с
+  // ведущим вопрос переоткрывался с ОСТАВШИМСЯ временем, а не с полным
+  // свежим таймером: движок сам не знает часов и эмитит одинаковый
+  // start-timer в обоих случаях (первый выбор вопроса и переоткрытие
+  // выглядят для него одинаково), различить их и подставить остаток может
+  // только Комната — она и так уже единственная, кто вообще знает текущее
+  // время (design.md, «Комната»: «вся сетевая грязь и все настоящие таймеры
+  // живут здесь»). questionId в паре — защита от применения остатка к
+  // таймеру уже ДРУГОГО вопроса, если что-то в последовательности событий
   // пойдёт не так, как ожидается.
   private pendingReopenBudget: {
     questionId: string;
     remainingMs: number;
   } | null = null;
-  // Какой именно таймер сейчас тикает — gameTimerDeadline сам по себе не
-  // говорит, чей он: во время грейс-периода активен 'reopen-grace', а фаза
-  // при этом всё равно 'question-open' (design.md, «СУДЕЙСТВО»). Без этого
-  // buzz() не отличил бы «жмут во время грейса» от «жмут по-настоящему
-  // открытому вопросу» и захватил бы остаток грейса вместо остатка вопроса.
-  private activeTimerName: TimerName | null = null;
+  // Кто временно (GRACE_EXCLUSION_MS) не может жать «Ответ» после
+  // собственной неверной попытки — не состояние движка (design.md,
+  // «СУДЕЙСТВО», 2026-08-05: это транспортное ограничение, как фальстарт, а
+  // не игровое правило), поэтому живёт только здесь и не переживает
+  // перезапуск сервера — цена этого приемлема (максимум несколько секунд
+  // одной короткой блокировки, не влияющих на исход партии).
+  private graceExcludedCounterId: string | null = null;
+  private graceExcludedUntil: number | null = null;
   private listeners = new Set<(state: RoomState) => void>();
 
   constructor(initial?: RoomState, pack?: Pack) {
@@ -102,14 +111,7 @@ export class Room {
     this.game = initial?.game ? { ...initial.game } : null;
     this.hostParticipantId = initial?.hostParticipantId ?? null;
     if (this.game) {
-      // 'question-open' с непустым graceExcludedCounterId — это грейс-период
-      // (design.md, «СУДЕЙСТВО»), а не по-настоящему открытый вопрос; общий
-      // PHASE_TIMER этого не различает (там одна запись на всю фазу), иначе
-      // перезапуск после падения сервера посреди грейса тихо впустил бы
-      // только что исключённого раньше положенного.
-      const restart = this.game.graceExcludedCounterId
-        ? { timer: 'reopen-grace' as const, ms: REOPEN_GRACE_MS }
-        : PHASE_TIMER[this.game.phase];
+      const restart = PHASE_TIMER[this.game.phase];
       if (restart) {
         this.applyEffects([{ type: 'start-timer', ...restart }]);
       }
@@ -249,17 +251,26 @@ export class Room {
     if (!this.game || this.game.phase !== 'question-open') {
       return 'falsestart';
     }
+    // Тот же паттерн, что и фальстарт (design.md, «Комната») — временное
+    // исключение после своей же неверной попытки не игровое правило, до
+    // движка это нажатие вообще не доходит. Не 'falsestart' в ответе
+    // намеренно: это не тот же случай (не включает клиентскую блокировку на
+    // 2с) — клиент уже знает про свой отсчёт из общего состояния
+    // (graceExcludedParticipantId/graceExcludedUntil).
+    if (
+      this.graceExcludedCounterId === participantId &&
+      this.stillGraceExcluded()
+    ) {
+      return 'ok';
+    }
     // Захватываем остаток времени ДО диспатча — именно в этот момент вопрос
     // «ставится на паузу» с точки зрения игрока (движок сейчас погасит
     // текущий 'question'-таймер эффектом cancel-timer). Если после этого
     // нажатия ответ окажется неверным и вопрос честно переоткроется (режим
-    // с ведущим, после грейс-периода), досмотреть его должны с тем же
-    // остатком, а не с чистого листа.
-    if (
-      this.activeTimerName === 'question' &&
-      this.game.currentQuestion &&
-      this.gameTimerDeadline !== null
-    ) {
+    // с ведущим), досмотреть его должны с тем же остатком, а не с чистого
+    // листа — и сразу же, без какой-либо паузы (design.md, «СУДЕЙСТВО»,
+    // 2026-08-05).
+    if (this.game.currentQuestion && this.gameTimerDeadline !== null) {
       this.pendingReopenBudget = {
         questionId: this.game.currentQuestion.questionId,
         remainingMs: Math.max(0, this.gameTimerDeadline - Date.now()),
@@ -343,7 +354,15 @@ export class Room {
         ? { text: currentQuestionData.text, price: currentQuestionData.price }
         : null,
       buzzedParticipantId: game.buzzedCounterId,
-      graceExcludedParticipantId: game.graceExcludedCounterId,
+      // Не поле движка — Room-состояние, лениво «истекает» по сравнению с
+      // Date.now() здесь же, без отдельного сброса по таймеру (см. поля
+      // класса выше).
+      graceExcludedParticipantId: this.stillGraceExcluded()
+        ? this.graceExcludedCounterId
+        : null,
+      graceExcludedUntil: this.stillGraceExcluded()
+        ? this.graceExcludedUntil
+        : null,
       correctAnswer:
         showAnswer && currentQuestionData
           ? {
@@ -364,10 +383,38 @@ export class Room {
     return () => this.listeners.delete(listener);
   }
 
+  private stillGraceExcluded(): boolean {
+    return (
+      this.graceExcludedUntil !== null && Date.now() < this.graceExcludedUntil
+    );
+  }
+
   private dispatch(event: EngineEvent): void {
     if (!this.game) return;
+    const buzzedBefore = this.game.buzzedCounterId;
+    const phaseBefore = this.game.phase;
     const { state, effects } = reduce(this.game, event);
     this.game = state;
+
+    // Обнаруживаем честный реопен после «Незачёт» в режиме с ведущим по
+    // самому переходу состояния, а не по типу события — 'vote' может прийти
+    // и явным сообщением от ведущего, и по истечении VOTE_TIMER_MS
+    // (handleTimerExpired), и в обоих случаях распознаётся одинаково:
+    // buzzedCounterId был кем-то и стал null, а фаза при этом вернулась в
+    // 'question-open' (не 'reveal', как при верном ответе). Больше никакой
+    // переход состояния в этой комбинации не встречается. Персональное
+    // исключение — не забота движка (design.md, «СУДЕЙСТВО», 2026-08-05),
+    // поэтому заводится здесь, а не читается из EngineState.
+    if (
+      buzzedBefore &&
+      phaseBefore === 'judging' &&
+      state.phase === 'question-open' &&
+      state.buzzedCounterId === null
+    ) {
+      this.graceExcludedCounterId = buzzedBefore;
+      this.graceExcludedUntil = Date.now() + GRACE_EXCLUSION_MS;
+    }
+
     this.applyEffects(effects, event.type === 'timer-expired');
     this.notify();
   }
@@ -402,16 +449,16 @@ export class Room {
       clearTimeout(this.gameTimeoutHandle);
       this.gameTimeoutHandle = null;
       this.gameTimerDeadline = null;
-      this.activeTimerName = null;
     }
     for (const effect of effects) {
       if (effect.type === 'start-timer') {
         // Движок эмитит один и тот же { timer: 'question', ms:
         // QUESTION_TIMER_MS } что для только что выбранного вопроса, что для
-        // переоткрытия после грейс-периода — с его стороны это неотличимые
-        // случаи, часов у него нет. Отличить их может только Комната, по
-        // тому, совпадает ли текущий вопрос с тем, для которого остаток был
-        // захвачен в buzz(). Совпал — досматриваем с остатком, а не заново.
+        // переоткрытия после неверного ответа — с его стороны это
+        // неотличимые случаи, часов у него нет. Отличить их может только
+        // Комната, по тому, совпадает ли текущий вопрос с тем, для которого
+        // остаток был захвачен в buzz(). Совпал — досматриваем с остатком, а
+        // не заново.
         let ms = effect.ms;
         if (
           effect.timer === 'question' &&
@@ -422,7 +469,6 @@ export class Room {
           ms = this.pendingReopenBudget.remainingMs;
           this.pendingReopenBudget = null;
         }
-        this.activeTimerName = effect.timer;
         this.gameTimerDeadline = Date.now() + ms;
         this.gameTimeoutHandle = setTimeout(() => {
           this.dispatch({ type: 'timer-expired', timer: effect.timer });

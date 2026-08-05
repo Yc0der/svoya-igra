@@ -21,6 +21,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     buzzedParticipantId: null,
     correctAnswer: null,
     graceExcludedParticipantId: null,
+    graceExcludedUntil: null,
     timerDeadline: null,
     scores: [],
     ...overrides,
@@ -204,7 +205,9 @@ describe('Player', () => {
       connection({ game: baseGame({ phase: 'question-open' }) }),
     );
     render(<Player />);
-    expect(screen.getByRole('button', { name: /жать/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /^ответ$/i }),
+    ).toBeInTheDocument();
   });
 
   it('shows a countdown while the question is open', () => {
@@ -231,25 +234,32 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(
-      screen.queryByRole('button', { name: /жать/i }),
+      screen.queryByRole('button', { name: /^ответ$/i }),
     ).not.toBeInTheDocument();
     expect(screen.getByText(/ждём, кто нажмёт/i)).toBeInTheDocument();
   });
 
-  it('disables the buzz button and explains why for the just-excluded answerer during reopen grace', () => {
+  it('disables the buzz button and explains why for the just-excluded answerer during reopen grace, using its own countdown', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'me',
         game: baseGame({
           phase: 'question-open',
           graceExcludedParticipantId: 'me',
-          timerDeadline: Date.now() + 7000,
+          // Два независимых дедлайна: общий отсчёт вопроса (уже
+          // возобновившийся, идёт параллельно) и личная блокировка — они
+          // намеренно разные числа здесь, чтобы тест не мог случайно
+          // пройти при перепутанном дедлайне.
+          timerDeadline: Date.now() + 20_000,
+          graceExcludedUntil: Date.now() + 4_000,
         }),
       }),
     );
     render(<Player />);
-    expect(screen.getByRole('button', { name: /жать/i })).toBeDisabled();
-    expect(screen.getByText(/уже пробовал/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^ответ$/i })).toBeDisabled();
+    expect(screen.getByText(/уже пробовал.*4с/i)).toBeInTheDocument();
+    // Общий отсчёт вопроса тоже показан, отдельно и с другим числом.
+    expect(screen.getByText('20с')).toBeInTheDocument();
   });
 
   it('keeps the buzz button enabled for everyone else during another player’s reopen grace', () => {
@@ -263,7 +273,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
-    expect(screen.getByRole('button', { name: /жать/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^ответ$/i })).toBeEnabled();
   });
 
   it('disables the buzz button for 2 seconds after a falsestart', () => {
@@ -274,7 +284,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
-    expect(screen.getByRole('button', { name: /жать/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^ответ$/i })).toBeDisabled();
   });
 
   it('prompts the buzzed player to say the answer aloud and confirm', async () => {

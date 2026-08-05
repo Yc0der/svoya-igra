@@ -20,6 +20,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     buzzedParticipantId: null,
     correctAnswer: null,
     graceExcludedParticipantId: null,
+    graceExcludedUntil: null,
     timerDeadline: null,
     scores: [],
     ...overrides,

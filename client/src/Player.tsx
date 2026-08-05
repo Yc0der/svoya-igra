@@ -37,6 +37,11 @@ export function Player() {
   const [name, setName] = useState('');
   const [myVote, setMyVote] = useState<boolean | null>(null);
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
+  // Отдельный от remainingSeconds счётчик: временная блокировка после своей
+  // неверной попытки идёт параллельно с уже возобновившимся отсчётом
+  // вопроса, а не вместо него — это два разных дедлайна (design.md,
+  // «СУДЕЙСТВО», 2026-08-05).
+  const graceRemainingSeconds = useCountdown(game?.graceExcludedUntil ?? null);
 
   useEffect(() => {
     if (game?.phase !== 'judging') setMyVote(null);
@@ -227,17 +232,18 @@ export function Player() {
               onClick={buzz}
               disabled={falsestart || iAmExcluded}
             >
-              Жать!
+              Ответ
             </button>
-            {iAmExcluded ? (
+            {/* Общий отсчёт вопроса виден всегда, независимо от того, кто
+                временно заблокирован — он идёт параллельно, не вместо. */}
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
+            {iAmExcluded && (
               <p className="player-timer">
                 Ты уже пробовал(а) — жди
-                {remainingSeconds !== null && ` ${remainingSeconds}с`}
+                {graceRemainingSeconds !== null && ` ${graceRemainingSeconds}с`}
               </p>
-            ) : (
-              remainingSeconds !== null && (
-                <p className="player-timer">{remainingSeconds}с</p>
-              )
             )}
           </div>
         );

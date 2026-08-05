@@ -10,14 +10,13 @@ export type Phase =
   | 'game-end';
 
 export type TimerName =
-  'question' | 'said-answer' | 'vote' | 'reveal' | 'round-end' | 'reopen-grace';
+  'question' | 'said-answer' | 'vote' | 'reveal' | 'round-end';
 
-export const QUESTION_TIMER_MS = 25_000;
+export const QUESTION_TIMER_MS = 30_000;
 export const SAID_ANSWER_TIMER_MS = 10_000;
 export const VOTE_TIMER_MS = 10_000;
 export const REVEAL_TIMER_MS = 4_000;
 export const ROUND_END_TIMER_MS = 5_000;
-export const REOPEN_GRACE_MS = 10_000;
 
 // Плоские массивы/объекты, а не Set/Map — EngineState целиком проходит через
 // JSON.stringify в снапшоте комнаты (Task 4), а Map/Set сериализуются в '{}'.
@@ -29,12 +28,6 @@ export interface EngineState {
   turnCounterId: string;
   currentQuestion: { themeIndex: number; questionId: string } | null;
   buzzedCounterId: string | null;
-  // Кто временно (10с, REOPEN_GRACE_MS) не может жать «Жать!» — только
-  // последний ответивший неверно в режиме с ведущим. В любой момент исключён
-  // максимум один человек, поэтому список не нужен (design.md, «СУДЕЙСТВО»,
-  // 2026-08-05). В открытом режиме (hostId === null) переоткрытия не бывает
-  // вообще, поле остаётся пустым.
-  graceExcludedCounterId: string | null;
   votes: Record<string, boolean>;
   scores: Record<string, number>;
   lastCorrectCounterId: string | null;
@@ -89,7 +82,6 @@ export function createInitialState(
     turnCounterId: counterIds[Math.floor(Math.random() * counterIds.length)],
     currentQuestion: null,
     buzzedCounterId: null,
-    graceExcludedCounterId: null,
     votes: {},
     scores,
     lastCorrectCounterId: null,
@@ -166,7 +158,6 @@ function handleSelectQuestion(
         themeIndex: event.themeIndex,
         questionId: event.questionId,
       },
-      graceExcludedCounterId: null,
     },
     effects: [
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
@@ -178,11 +169,7 @@ function handleBuzz(
   state: EngineState,
   event: Extract<EngineEvent, { type: 'buzz' }>,
 ): Result {
-  if (
-    state.phase !== 'question-open' ||
-    event.counterId === state.graceExcludedCounterId ||
-    !(event.counterId in state.scores)
-  ) {
+  if (state.phase !== 'question-open' || !(event.counterId in state.scores)) {
     return unchanged(state);
   }
   return {
@@ -305,23 +292,7 @@ function handleTimerExpired(
       return afterReveal(state);
     case 'round-end':
       return startNextRound(state);
-    case 'reopen-grace':
-      return endGrace(state);
   }
-}
-
-// Грейс истёк — временно исключённый снова может жать наравне со всеми.
-// Свежий полный `question`-таймер, а не «остаток»: тот же принцип, что и у
-// самого переоткрытия (см. «Отклонения от исходной спеки», по обеим
-// причинам сразу — движок не знает часов, и щедрее никогда не бывает
-// нечестно).
-function endGrace(state: EngineState): Result {
-  return {
-    state: { ...state, graceExcludedCounterId: null },
-    effects: [
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
-    ],
-  };
 }
 
 function resolveVote(state: EngineState): Result {
@@ -359,24 +330,23 @@ function resolveVote(state: EngineState): Result {
   }
 
   // Судейство с ведущим: ответ никому, кроме ведущего, не показывался —
-  // переоткрыть честно и сразу, но ответившего на 10 секунд исключить
-  // (design.md, «СУДЕЙСТВО», 2026-08-05: штраф уже списан, отдельного
-  // постоянного запрета сверх него не нужно — только короткая фора
-  // остальным). Счётчиков всегда ⩾ 2 (минимум партии), значит хотя бы один
-  // не исключённый есть всегда — в отличие от старого списка
-  // `triedCounterIds`, «доска мертва, некому больше жать» здесь в принципе
-  // невозможна, и отдельная проверка на этот случай не нужна.
+  // переоткрыть честно и сразу же, тем же 'question'-таймером, с которого
+  // всё начиналось (Комната подставит в него не полные QUESTION_TIMER_MS, а
+  // реально оставшееся время — см. Room.buzz()/applyEffects — движок этого
+  // различия не видит и не должен). Никакой отдельной паузы движок здесь не
+  // вводит: кто именно и на сколько временно не может жать повторно — не
+  // игровое правило, а транспортное ограничение Комнаты, тем же паттерном,
+  // что и фальстарт (design.md, «Комната»; «СУДЕЙСТВО», 2026-08-05).
   return {
     state: {
       ...state,
       phase: 'question-open',
       buzzedCounterId: null,
       votes: {},
-      graceExcludedCounterId: buzzedCounterId,
       scores: penalizedScores,
     },
     effects: [
-      { type: 'start-timer', timer: 'reopen-grace', ms: REOPEN_GRACE_MS },
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ],
   };
 }

@@ -20,9 +20,15 @@ export interface GameStateView {
   // hostParticipantId === null — для всех (двое, открытое судейство), иначе
   // — только для сокета с этим participantId (см. Room.toGameStateView).
   correctAnswer: { text: string; comment?: string } | null;
-  // Не секрет ни от кого (в отличие от correctAnswer) — прямая копия
-  // EngineState.graceExcludedCounterId, одинакова для всех получателей.
+  // Не секрет ни от кого (в отличие от correctAnswer), одинаковы для всех
+  // получателей. Не поле движка — Room-состояние (design.md, «СУДЕЙСТВО»,
+  // 2026-08-05: временное исключение после неверного ответа — транспортное
+  // ограничение, как фальстарт, не игровое правило). graceExcludedUntil —
+  // ОТДЕЛЬНЫЙ от timerDeadline дедлайн: исключение идёт параллельно с уже
+  // возобновившимся отсчётом вопроса, а не вместо него, поэтому у них разные
+  // числа и client должен показывать оба независимо.
   graceExcludedParticipantId: string | null;
+  graceExcludedUntil: number | null;
   timerDeadline: number | null;
   scores: { participantId: string; score: number }[];
 }

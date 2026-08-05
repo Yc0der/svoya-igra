@@ -7,7 +7,6 @@ import {
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
   ROUND_END_TIMER_MS,
-  REOPEN_GRACE_MS,
   type EngineState,
 } from './engine.js';
 import type { Pack } from './pack.js';
@@ -381,7 +380,14 @@ describe('timer-expired: vote — incorrect, open mode (two counters, no host)',
 });
 
 describe('vote — incorrect, host mode (three or more counters)', () => {
-  it('penalizes the answerer and reopens the question immediately, starting a 10s grace timer', () => {
+  // Кто именно временно не может жать повторно — с 2026-08-05 не забота
+  // движка вообще (design.md, «СУДЕЙСТВО»): это транспортное ограничение
+  // Комнаты, тем же паттерном, что и фальстарт (Room.test.ts проверяет его
+  // отдельно). Движок здесь отвечает только за то, что вопрос честно
+  // переоткрывается сразу же — без какой-либо промежуточной паузы —
+  // тем же именованным таймером 'question', с которого начинался (Комната
+  // сама решает, сколько миллисекунд туда реально подставить).
+  it('penalizes the answerer and reopens the question immediately with a question-timer effect', () => {
     const judging = toJudging(
       createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
     );
@@ -395,38 +401,12 @@ describe('vote — incorrect, host mode (three or more counters)', () => {
     expect(next.scores.p1).toBe(-100);
     expect(next.answeredQuestionIds).toEqual([]);
     expect(next.buzzedCounterId).toBeNull();
-    expect(next.graceExcludedCounterId).toBe('p1');
     expect(effects).toEqual([
-      { type: 'start-timer', timer: 'reopen-grace', ms: REOPEN_GRACE_MS },
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ]);
   });
 
-  it('blocks a buzz from the just-excluded answerer during the grace period, but lets everyone else through', () => {
-    const judging = toJudging(
-      createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
-    );
-    const { state: reopened } = reduce(judging, {
-      type: 'vote',
-      counterId: 'judge',
-      correct: false,
-    });
-
-    const { state: blocked, effects: blockedEffects } = reduce(reopened, {
-      type: 'buzz',
-      counterId: 'p1',
-    });
-    expect(blocked.phase).toBe('question-open');
-    expect(blockedEffects).toEqual([]);
-
-    const { state: admitted } = reduce(reopened, {
-      type: 'buzz',
-      counterId: 'p2',
-    });
-    expect(admitted.phase).toBe('buzzed');
-    expect(admitted.buzzedCounterId).toBe('p2');
-  });
-
-  it('re-admits the excluded answerer once the grace period expires, with a fresh full question timer', () => {
+  it('lets anyone, including the counter who just answered wrong, buzz again — the engine itself excludes nobody', () => {
     const judging = toJudging(
       createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge'),
     );
@@ -436,17 +416,7 @@ describe('vote — incorrect, host mode (three or more counters)', () => {
       correct: false,
     }).state;
 
-    const { state: graceOver, effects } = reduce(reopened, {
-      type: 'timer-expired',
-      timer: 'reopen-grace',
-    });
-    expect(graceOver.phase).toBe('question-open');
-    expect(graceOver.graceExcludedCounterId).toBeNull();
-    expect(effects).toEqual([
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
-    ]);
-
-    const { state: next } = reduce(graceOver, {
+    const { state: next } = reduce(reopened, {
       type: 'buzz',
       counterId: 'p1',
     });
