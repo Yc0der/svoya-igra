@@ -340,6 +340,7 @@ export class Room {
 
     return {
       phase: game.phase,
+      hostId: game.hostId,
       roundIndex: game.roundIndex,
       grid: round.themes.map((theme) => ({
         themeName: theme.name,

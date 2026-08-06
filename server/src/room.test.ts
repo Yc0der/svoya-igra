@@ -336,6 +336,34 @@ describe('Room.startGame', () => {
     expect(room.startGame()).toEqual({ error: 'host-required' });
   });
 
+  it('exposes the frozen game hostId separately from the lobby hostParticipantId, even when they diverge', () => {
+    // Тот же манёвр, что и в 'ignores a stale host marking...' выше, но с
+    // ровно двумя другими счётчиками — ведущий тут не обязателен, так что
+    // startGame() не отказывает, а просто стартует БЕЗ ведущего (hostId:
+    // null), при этом лобби-флаг hostParticipantId остаётся указывать на
+    // уже отключившегося Петю (toggleHost во время партии заблокирован —
+    // расходиться этим двум значениям больше некуда, партия зафиксирована).
+    // toGameStateView() обязан отдавать именно замороженный game.hostId, а
+    // не лобби-флаг — иначе клиент Пети (если он переподключится) увидит
+    // себя «ведущим» и получит панель, ни одна кнопка на которой не работает
+    // (движок сверяет requesterId с уже зафиксированным hostId === null).
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.disconnect(petya);
+
+    expect(room.startGame()).toEqual({ ok: true });
+
+    expect(room.getState().hostParticipantId).toBe(petya);
+    const view = room.toGameStateView(vanya);
+    expect(view?.hostId).toBeNull();
+    expect(view?.scores.map((s) => s.participantId).sort()).toEqual(
+      [vanya, katya].sort(),
+    );
+  });
+
   it('toggleHost is idempotent (marking and unmarking the same participant)', () => {
     const room = new Room(undefined, TEST_PACK);
     const vanya = joinedId(room, 'Ваня');

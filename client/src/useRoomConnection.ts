@@ -15,6 +15,10 @@ export interface GameStateView {
     | 'reveal'
     | 'round-end'
     | 'game-end';
+  // Замороженный на время партии ведущий — НЕ то же самое, что лобби-флаг
+  // hostParticipantId из 'state' (см. server/src/protocol.ts). isHost ниже
+  // обязан доверять именно этому полю, пока партия идёт.
+  hostId: string | null;
   roundIndex: number;
   grid: {
     themeName: string;
@@ -218,7 +222,13 @@ export function useRoomConnection(
     game,
     falsestart,
     hostParticipantId,
-    isHost: selfId !== null && selfId === hostParticipantId,
+    // Пока партия не началась (game === null), верного источника кроме
+    // лобби-флага нет — им и пользуемся. Как только партия идёт, роль
+    // ведущего зафиксирована в game.hostId и может расходиться с
+    // hostParticipantId (см. комментарий у GameStateView.hostId) — доверяем
+    // только замороженному значению.
+    isHost:
+      selfId !== null && selfId === (game ? game.hostId : hostParticipantId),
     startGameError,
     join,
     startGame: () => send({ type: 'start-game' }),

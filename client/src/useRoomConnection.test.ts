@@ -214,6 +214,65 @@ describe('useRoomConnection', () => {
     expect(result.current.game).toEqual(gameView);
   });
 
+  it('computes isHost from the frozen game hostId once a game exists, not the stale lobby hostParticipantId', () => {
+    // Лобби-флаг hostParticipantId может ещё указывать на того, кто был
+    // отмечен ведущим в лобби, но на момент реального старта партии не
+    // прошёл проверку (например, оказался отключён — Room.startGame()) —
+    // тогда сама партия стартует с EngineState.hostId: null, а лобби-флаг
+    // остаётся как есть (toggleHost блокирован, пока партия идёт). Клиент
+    // не должен считать себя ведущим по устаревшему лобби-флагу, пока
+    // фактическая партия говорит другое — иначе рисуется панель ведущего,
+    // ни одна кнопка которой не пройдёт проверку на сервере.
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() =>
+      socket.emitMessage({
+        type: 'joined',
+        participantId: 'p1',
+        token: 'tok-1',
+        name: 'Ваня',
+      }),
+    );
+    act(() =>
+      socket.emitMessage({
+        type: 'state',
+        participants: [],
+        hostParticipantId: 'p1',
+        game: null,
+      }),
+    );
+
+    // Ещё в лобби, партия не началась — доверяем лобби-флагу.
+    expect(result.current.isHost).toBe(true);
+
+    act(() =>
+      socket.emitMessage({
+        type: 'state',
+        participants: [],
+        hostParticipantId: 'p1',
+        game: {
+          phase: 'selecting',
+          hostId: null,
+          roundIndex: 0,
+          grid: [],
+          turnParticipantId: 'p2',
+          currentQuestion: null,
+          buzzedParticipantId: null,
+          correctAnswer: null,
+          graceExcludedParticipantId: null,
+          graceExcludedUntil: null,
+          timerDeadline: null,
+          scores: [],
+        },
+      }),
+    );
+
+    // Партия уже идёт с hostId: null — лобби-флаг устарел, я не ведущий.
+    expect(result.current.isHost).toBe(false);
+  });
+
   it('sends start-game/select-question/buzz/said-answer/vote as the matching client messages', () => {
     const { result } = renderHook(() => useRoomConnection(factory));
     const socket = FakeWebSocket.instances[0];
