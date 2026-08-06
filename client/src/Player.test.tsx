@@ -391,6 +391,30 @@ describe('Player', () => {
     expect(vote).toHaveBeenCalledWith(true);
   });
 
+  it("highlights the host's own verdict during host-mode judging, so a click is visibly registered", async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        vote: vi.fn(),
+        game: baseGame({
+          phase: 'judging',
+          buzzedParticipantId: 'other',
+          correctAnswer: { text: 'Ответ' },
+        }),
+      }),
+    );
+    render(<Player />);
+    const yes = screen.getByRole('button', { name: /^зачёт/i });
+    const no = screen.getByRole('button', { name: /^незачёт/i });
+    expect(yes).not.toHaveClass('is-selected');
+
+    await userEvent.click(yes);
+    expect(yes).toHaveClass('is-selected');
+    expect(no).not.toHaveClass('is-selected');
+  });
+
   it('shows a waiting-for-host message, without the answer, to non-host players during host-mode judging', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
@@ -747,6 +771,44 @@ describe('Player', () => {
     const yesButtons = screen.getAllByText('Верно');
     await userEvent.click(yesButtons[0]);
     expect(finalVote).toHaveBeenCalledWith('p1', true);
+  });
+
+  it("final-judging: highlights each counter's own verdict independently, so a click is visibly registered", async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host',
+        isHost: true,
+        hostParticipantId: 'host',
+        finalVote: vi.fn(),
+        participants: [
+          { id: 'p1', name: 'Ваня', connected: true },
+          { id: 'p2', name: 'Катя', connected: true },
+        ],
+        game: baseGame({
+          phase: 'final-judging',
+          finalWagers: [
+            { participantId: 'p1', amount: 50 },
+            { participantId: 'p2', amount: 20 },
+          ],
+          finalAnswers: [
+            { participantId: 'p1', text: 'ответ 1' },
+            { participantId: 'p2', text: 'ответ 2' },
+          ],
+        }),
+      }),
+    );
+    render(<Player />);
+    const yesButtons = screen.getAllByRole('button', { name: /^верно/i });
+    const noButtons = screen.getAllByRole('button', { name: /^неверно/i });
+
+    // Отмечаем p1 верно, p2 неверно — каждая отметка независима от другой.
+    await userEvent.click(yesButtons[0]);
+    await userEvent.click(noButtons[1]);
+
+    expect(yesButtons[0]).toHaveClass('is-selected');
+    expect(noButtons[0]).not.toHaveClass('is-selected');
+    expect(yesButtons[1]).not.toHaveClass('is-selected');
+    expect(noButtons[1]).toHaveClass('is-selected');
   });
 
   it('final-judging: non-host waits, with a countdown', () => {

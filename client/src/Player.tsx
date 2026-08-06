@@ -40,6 +40,12 @@ export function Player() {
   } = useRoomConnection();
   const [name, setName] = useState('');
   const [myVote, setMyVote] = useState<boolean | null>(null);
+  // Ведущий в финале судит нескольких счётчиков по очереди в любом порядке —
+  // одного myVote (как в base-round judging) не хватает, нужна отметка на
+  // каждого отдельно, чтобы было видно, кого уже отметили.
+  const [myFinalVerdicts, setMyFinalVerdicts] = useState<
+    Record<string, boolean>
+  >({});
   const [wagerInput, setWagerInput] = useState('');
   const [answerInput, setAnswerInput] = useState('');
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
@@ -51,6 +57,10 @@ export function Player() {
 
   useEffect(() => {
     if (game?.phase !== 'judging') setMyVote(null);
+  }, [game?.phase]);
+
+  useEffect(() => {
+    if (game?.phase !== 'final-judging') setMyFinalVerdicts({});
   }, [game?.phase]);
 
   useEffect(() => {
@@ -288,16 +298,22 @@ export function Player() {
                 )}
                 <div className="player-vote">
                   <button
-                    className="button button--yes"
-                    onClick={() => vote(true)}
+                    className={`button button--yes${myVote === true ? ' is-selected' : ''}`}
+                    onClick={() => {
+                      setMyVote(true);
+                      vote(true);
+                    }}
                   >
-                    Зачёт
+                    Зачёт{myVote === true && ' ✓'}
                   </button>
                   <button
-                    className="button button--no"
-                    onClick={() => vote(false)}
+                    className={`button button--no${myVote === false ? ' is-selected' : ''}`}
+                    onClick={() => {
+                      setMyVote(false);
+                      vote(false);
+                    }}
                   >
-                    Незачёт
+                    Незачёт{myVote === false && ' ✓'}
                   </button>
                 </div>
               </div>
@@ -549,16 +565,30 @@ export function Player() {
                       <span className="final-judging-wager">{wager}</span>
                       <span className="final-judging-answer">{a.text}</span>
                       <button
-                        className="button button--yes"
-                        onClick={() => finalVote(a.participantId, true)}
+                        className={`button button--yes${myFinalVerdicts[a.participantId] === true ? ' is-selected' : ''}`}
+                        onClick={() => {
+                          setMyFinalVerdicts((v) => ({
+                            ...v,
+                            [a.participantId]: true,
+                          }));
+                          finalVote(a.participantId, true);
+                        }}
                       >
                         Верно
+                        {myFinalVerdicts[a.participantId] === true && ' ✓'}
                       </button>
                       <button
-                        className="button button--no"
-                        onClick={() => finalVote(a.participantId, false)}
+                        className={`button button--no${myFinalVerdicts[a.participantId] === false ? ' is-selected' : ''}`}
+                        onClick={() => {
+                          setMyFinalVerdicts((v) => ({
+                            ...v,
+                            [a.participantId]: false,
+                          }));
+                          finalVote(a.participantId, false);
+                        }}
                       >
                         Неверно
+                        {myFinalVerdicts[a.participantId] === false && ' ✓'}
                       </button>
                     </li>
                   );
