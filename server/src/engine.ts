@@ -553,7 +553,8 @@ function handleSubmitWager(
     return unchanged(state);
   }
   const max = Math.max(0, state.scores[event.counterId]);
-  const amount = Math.min(max, Math.max(0, event.amount));
+  const rawAmount = Number.isFinite(event.amount) ? event.amount : 0;
+  const amount = Math.min(max, Math.max(0, rawAmount));
   const wagers = { ...state.finalWagers, [event.counterId]: amount };
   if (Object.keys(wagers).length < Object.keys(state.scores).length) {
     return unchanged({ ...state, finalWagers: wagers });

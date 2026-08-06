@@ -1056,6 +1056,32 @@ describe('submit-wager', () => {
     });
     expect(next).toEqual(state);
   });
+
+  // M1 (финальное ревью 2026-08-05): движок «не доверяет клиентскому числу»
+  // — но Math.min(max, Math.max(0, NaN)) === NaN, так что не-конечное число
+  // раньше проходило клэмп невредимым и оседало в scores. Не достижимо через
+  // собственный UI проекта (protocol.ts гарантирует typeof === 'number' на
+  // границе), но engine.ts не должен полагаться на это — это его собственный
+  // заявленный контракт.
+  it('treats a non-finite amount (NaN) as 0 instead of letting it through the clamp', () => {
+    const state = finalWagerState({ p1: 300, p2: 0 });
+    const { state: next } = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p1',
+      amount: NaN,
+    });
+    expect(next.finalWagers.p1).toBe(0);
+  });
+
+  it('treats a non-finite amount (Infinity) as 0 instead of letting it through the clamp', () => {
+    const state = finalWagerState({ p1: 300, p2: 0 });
+    const { state: next } = reduce(state, {
+      type: 'submit-wager',
+      counterId: 'p1',
+      amount: Infinity,
+    });
+    expect(next.finalWagers.p1).toBe(0);
+  });
 });
 
 describe('timer-expired: final-wager', () => {
