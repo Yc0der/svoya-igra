@@ -101,6 +101,13 @@ export class Room {
   // одной короткой блокировки, не влияющих на исход партии).
   private graceExcludedCounterId: string | null = null;
   private graceExcludedUntil: number | null = null;
+  // Ничто в игре не обязано произойти в течение этих 5 секунд — если никто
+  // не жмёт и ведущий бездействует, единственный способ, которым исключённый
+  // игрок узнает о снятии блокировки, это отдельная рассылка именно на этот
+  // случай (toGameStateView() сам по себе ничего не шлёт, он лишь лениво
+  // отдаёт актуальное значение при следующем вызове — а следующего вызова
+  // может не быть очень долго).
+  private graceNotifyHandle: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<(state: RoomState) => void>();
 
   constructor(initial?: RoomState, pack?: Pack) {
@@ -413,6 +420,17 @@ export class Room {
     ) {
       this.graceExcludedCounterId = buzzedBefore;
       this.graceExcludedUntil = Date.now() + GRACE_EXCLUSION_MS;
+      // См. комментарий у graceNotifyHandle — без этого клиент исключённого
+      // игрока не узнаёт о снятии блокировки, пока в комнате не произойдёт
+      // что-то ещё, а обещанные на экране 5 секунд к тому моменту давно
+      // истекли с его точки зрения.
+      if (this.graceNotifyHandle) {
+        clearTimeout(this.graceNotifyHandle);
+      }
+      this.graceNotifyHandle = setTimeout(() => {
+        this.graceNotifyHandle = null;
+        this.notify();
+      }, GRACE_EXCLUSION_MS);
     }
 
     this.applyEffects(effects, event.type === 'timer-expired');

@@ -501,6 +501,41 @@ describe('Room.startGame', () => {
     }
   });
 
+  it('broadcasts on its own once the 5s block expires, even with nobody else acting in the room', () => {
+    // graceExcludedParticipantId/graceExcludedUntil are computed lazily off
+    // Date.now() inside toGameStateView() — that alone doesn't put a fresh
+    // 'state' message on the wire. Without a dedicated broadcast, the
+    // excluded player's own client never learns the block lifted until some
+    // UNRELATED room event happens to trigger the next notify() — which can
+    // be the rest of the (up to 25s) question timer away. The client-side
+    // countdown reaches 0 on its own regardless, so the "Ответ" button would
+    // sit disabled well past what the on-screen timer promises.
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame();
+      const picker = room.toGameStateView(petya)!.turnParticipantId;
+      const answerer = picker === vanya ? vanya : katya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      room.buzz(answerer);
+      room.saidAnswer(answerer);
+      room.vote(petya, false);
+
+      const listener = vi.fn();
+      room.onChange(listener);
+      vi.advanceTimersByTime(5_000); // GRACE_EXCLUSION_MS, nothing else happens
+
+      expect(listener).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reopens the question with the time remaining when it was buzzed, not a fresh 30s', () => {
     vi.useFakeTimers();
     try {
