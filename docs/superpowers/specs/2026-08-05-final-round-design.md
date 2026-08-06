@@ -225,6 +225,9 @@ finalQuestion: { text: string } | null; // видно с final-answer (на fina
 finalWagers: { participantId: string; amount: number }[] | null;
 finalAnswers: { participantId: string; text: string }[] | null;
 finalVerdicts: { participantId: string; correct: boolean }[] | null;
+// Тем же паттерном, что и correctAnswer в базовом раунде: видно ведущему на final-judging (чтобы
+// было с чем сверять свободные ответы), видно всем на final-reveal; иначе null.
+finalCorrectAnswer: { text: string; comment?: string } | null;
 ```
 
 ## Клиенты

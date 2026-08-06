@@ -911,6 +911,52 @@ describe('Room final round', () => {
     vi.useRealTimers();
   });
 
+  it('toGameStateView shows finalCorrectAnswer only to the host on final-judging and to everyone on final-reveal', () => {
+    vi.useFakeTimers();
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [a, b, host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame();
+    const { picker, other } = driveToFinalWager(room, a, b, host);
+    room.submitWager(picker, 50);
+    room.submitWager(other, 20);
+    room.submitFinalAnswer(picker, 'ответ picker');
+    room.submitFinalAnswer(other, 'ответ other');
+
+    expect(room.getState().game?.phase).toBe('final-judging');
+    const themeIndex = room.getState().game!.finalThemeIndex!;
+    const expectedAnswer = FINAL_PACK.final!.themes[themeIndex].question.answer;
+
+    expect(room.toGameStateView(host)?.finalCorrectAnswer).toEqual({
+      text: expectedAnswer,
+      comment: undefined,
+    });
+    expect(room.toGameStateView(picker)?.finalCorrectAnswer).toBeNull();
+    expect(room.toGameStateView(other)?.finalCorrectAnswer).toBeNull();
+
+    room.finalVote(host, picker, true);
+    room.finalVote(host, other, true);
+    expect(room.getState().game?.phase).toBe('final-reveal');
+
+    expect(room.toGameStateView(picker)?.finalCorrectAnswer).toEqual({
+      text: expectedAnswer,
+      comment: undefined,
+    });
+    expect(room.toGameStateView(other)?.finalCorrectAnswer).toEqual({
+      text: expectedAnswer,
+      comment: undefined,
+    });
+    expect(room.toGameStateView(null)?.finalCorrectAnswer).toEqual({
+      text: expectedAnswer,
+      comment: undefined,
+    });
+
+    vi.useRealTimers();
+  });
+
   it('restores the final-elim timer after restoring from a snapshot mid-final', () => {
     vi.useFakeTimers();
     const room = new Room(undefined, FINAL_PACK);

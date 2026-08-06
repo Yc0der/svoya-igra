@@ -463,6 +463,15 @@ export class Room {
               .filter(() => showAllFinal)
               .map(([participantId, correct]) => ({ participantId, correct }))
           : null,
+      finalCorrectAnswer:
+        showAllFinal && game.finalThemeIndex !== null
+          ? {
+              text: game.pack.final!.themes[game.finalThemeIndex].question
+                .answer,
+              comment:
+                game.pack.final!.themes[game.finalThemeIndex].question.comment,
+            }
+          : null,
     };
   }
 

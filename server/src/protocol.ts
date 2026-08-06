@@ -40,6 +40,9 @@ export interface GameStateView {
   finalWagers: { participantId: string; amount: number }[] | null;
   finalAnswers: { participantId: string; text: string }[] | null;
   finalVerdicts: { participantId: string; correct: boolean }[] | null;
+  // Тот же принцип видимости, что и у showAllFinal (см. finalWagers выше):
+  // ведущему на final-judging, всем на final-reveal, иначе null.
+  finalCorrectAnswer: { text: string; comment?: string } | null;
 }
 
 export type ClientMessage =
