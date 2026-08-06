@@ -109,6 +109,33 @@ describe('useRoomConnection', () => {
     expect(localStorage.getItem('svoya-igra-token')).toBeNull();
   });
 
+  it('ignores a stray name-taken reply that arrives after a successful join', () => {
+    // Two rapid clicks/taps on "Войти" can each fire join() before the first
+    // reply comes back (readyState is already OPEN on the second click, so
+    // join() sends immediately both times). The server processes them in
+    // order: the first succeeds ('joined'), the second is now a genuine
+    // duplicate of the just-created name and gets 'name-taken'. That second,
+    // stale reply must not undo the first, successful join.
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => result.current.join('Ваня'));
+    act(() =>
+      socket.emitMessage({
+        type: 'joined',
+        participantId: 'p1',
+        token: 'tok-1',
+        name: 'Ваня',
+      }),
+    );
+    act(() => socket.emitMessage({ type: 'name-taken' }));
+
+    expect(result.current.status).toBe('joined');
+    expect(result.current.selfId).toBe('p1');
+    expect(localStorage.getItem('svoya-igra-token')).toBe('tok-1');
+  });
+
   it('sends a reconnect message on open when a token is already stored', () => {
     localStorage.setItem('svoya-igra-token', 'tok-1');
     renderHook(() => useRoomConnection(factory));
