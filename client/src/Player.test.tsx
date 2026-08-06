@@ -30,6 +30,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     finalWagers: null,
     finalAnswers: null,
     finalVerdicts: null,
+    finalCorrectAnswer: null,
     ...overrides,
   };
 }
@@ -573,6 +574,22 @@ describe('Player', () => {
     expect(eliminateFinalTheme).toHaveBeenCalledWith(0);
   });
 
+  it('final-elim: shows a countdown', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        game: baseGame({
+          phase: 'final-elim',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+          finalElimParticipantId: 'other',
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
   it('final-elim: shows whose turn it is when it is not mine', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
@@ -608,6 +625,26 @@ describe('Player', () => {
     expect(submitWager).toHaveBeenCalledWith(150);
   });
 
+  it('final-wager: shows a confirmation instead of the form once my own wager is already submitted', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        game: baseGame({
+          phase: 'final-wager',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+          finalWagers: [{ participantId: 'self', amount: 150 }],
+          timerDeadline: Date.now() + 8000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByLabelText('Ставка')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/ставка принята.*150.*ждём остальных/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
   it('final-wager: the host sees a waiting message, not a wager form', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
@@ -641,6 +678,24 @@ describe('Player', () => {
     await userEvent.type(screen.getByLabelText('Ответ'), 'мой ответ');
     await userEvent.click(screen.getByText('Готово'));
     expect(submitFinalAnswer).toHaveBeenCalledWith('мой ответ');
+  });
+
+  it('final-answer: shows a confirmation instead of the form once my own answer is already submitted', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        game: baseGame({
+          phase: 'final-answer',
+          finalQuestion: { text: 'Вопрос финала?' },
+          finalAnswers: [{ participantId: 'self', text: 'мой ответ' }],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByLabelText('Ответ')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/ответ принят.*ждём остальных/i),
+    ).toBeInTheDocument();
   });
 
   it('final-answer: the host sees a waiting message, not an answer form', () => {
@@ -682,28 +737,52 @@ describe('Player', () => {
             { participantId: 'p1', text: 'ответ 1' },
             { participantId: 'p2', text: 'ответ 2' },
           ],
+          finalCorrectAnswer: { text: 'Правильный ответ', comment: 'Коммент' },
         }),
       }),
     );
     render(<Player />);
+    expect(screen.getByText('Правильный ответ')).toBeInTheDocument();
+    expect(screen.getByText('Коммент')).toBeInTheDocument();
     const yesButtons = screen.getAllByText('Верно');
     await userEvent.click(yesButtons[0]);
     expect(finalVote).toHaveBeenCalledWith('p1', true);
   });
 
-  it('final-judging: non-host waits', () => {
+  it('final-judging: non-host waits, with a countdown', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'p1',
         hostParticipantId: 'host',
-        game: baseGame({ phase: 'final-judging' }),
+        game: baseGame({
+          phase: 'final-judging',
+          timerDeadline: Date.now() + 12000,
+        }),
       }),
     );
     render(<Player />);
     expect(screen.getByText(/Ведущий проверяет/)).toBeInTheDocument();
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
   });
 
-  it('final-reveal: shows wagers, answers, verdicts and updated scores', () => {
+  it('final-reveal: does not show a countdown — it is a passive pause, not a timed decision', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'p1',
+        game: baseGame({
+          phase: 'final-reveal',
+          finalWagers: [],
+          finalAnswers: [],
+          finalVerdicts: [],
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByText(/^\d+с$/)).not.toBeInTheDocument();
+  });
+
+  it('final-reveal: shows wagers, answers, verdicts, the correct answer, and updated scores', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'p1',
@@ -713,6 +792,7 @@ describe('Player', () => {
           finalWagers: [{ participantId: 'p1', amount: 50 }],
           finalAnswers: [{ participantId: 'p1', text: 'ответ 1' }],
           finalVerdicts: [{ participantId: 'p1', correct: true }],
+          finalCorrectAnswer: { text: 'Правильный ответ', comment: 'Коммент' },
           scores: [{ participantId: 'p1', score: 150 }],
         }),
       }),
@@ -720,5 +800,7 @@ describe('Player', () => {
     render(<Player />);
     expect(screen.getByText('ответ 1')).toBeInTheDocument();
     expect(screen.getByText('150')).toBeInTheDocument();
+    expect(screen.getByText('Правильный ответ')).toBeInTheDocument();
+    expect(screen.getByText('Коммент')).toBeInTheDocument();
   });
 });

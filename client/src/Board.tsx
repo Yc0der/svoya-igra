@@ -64,6 +64,9 @@ export function Board() {
           Сейчас выбирает{' '}
           <strong>{nameOf(game.finalElimParticipantId ?? '')}</strong>
         </p>
+        {remainingSeconds !== null && (
+          <p className="board-timer">{remainingSeconds}с</p>
+        )}
         <ul className="final-theme-list">
           {game.finalThemes?.map((theme) => (
             <li
@@ -95,6 +98,9 @@ export function Board() {
         {game.phase === 'final-judging' && (
           <p className="board-status">Ведущий проверяет ответы…</p>
         )}
+        {remainingSeconds !== null && (
+          <p className="board-timer">{remainingSeconds}с</p>
+        )}
       </div>
     );
   }
@@ -103,6 +109,14 @@ export function Board() {
     return (
       <div className="board">
         <h1>Финал — итог</h1>
+        {game.finalCorrectAnswer && (
+          <div className="board-answer">
+            <p>{game.finalCorrectAnswer.text}</p>
+            {game.finalCorrectAnswer.comment && (
+              <p>{game.finalCorrectAnswer.comment}</p>
+            )}
+          </div>
+        )}
         <ul className="final-judging-list">
           {game.finalAnswers?.map((a) => {
             const wager = game.finalWagers?.find(

@@ -383,6 +383,9 @@ export function Player() {
         return (
           <div className="player">
             <h2>Финал — выбор темы</h2>
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
             {!isMyElimTurn && (
               <p>Сейчас выбирает {nameOf(game.finalElimParticipantId)}</p>
             )}
@@ -418,6 +421,23 @@ export function Player() {
             <div className="player player--center">
               <h2>Финал — ставка</h2>
               <p>Игроки делают ставки…</p>
+              {remainingSeconds !== null && (
+                <p className="player-timer">{remainingSeconds}с</p>
+              )}
+            </div>
+          );
+        }
+        const myWager = game.finalWagers?.find(
+          (w) => w.participantId === selfId,
+        );
+        if (myWager) {
+          return (
+            <div className="player player--center">
+              <h2>Финал — ставка</h2>
+              <p>Ставка принята: {myWager.amount}. Ждём остальных…</p>
+              {remainingSeconds !== null && (
+                <p className="player-timer">{remainingSeconds}с</p>
+              )}
             </div>
           );
         }
@@ -445,17 +465,37 @@ export function Player() {
             >
               Готово
             </button>
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
           </div>
         );
       }
 
-      case 'final-answer':
+      case 'final-answer': {
         if (isHost) {
           return (
             <div className="player player--center">
               <h2>Финал — ответ</h2>
               <p className="board-question">{game.finalQuestion?.text}</p>
               <p>Игроки пишут ответы…</p>
+              {remainingSeconds !== null && (
+                <p className="player-timer">{remainingSeconds}с</p>
+              )}
+            </div>
+          );
+        }
+        const myAnswer = game.finalAnswers?.find(
+          (a) => a.participantId === selfId,
+        );
+        if (myAnswer) {
+          return (
+            <div className="player player--center">
+              <h2>Финал — ответ</h2>
+              <p>Ответ принят. Ждём остальных…</p>
+              {remainingSeconds !== null && (
+                <p className="player-timer">{remainingSeconds}с</p>
+              )}
             </div>
           );
         }
@@ -475,14 +515,27 @@ export function Player() {
             >
               Готово
             </button>
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
           </div>
         );
+      }
 
       case 'final-judging':
         if (isHost) {
           return (
             <div className="player">
               <h2>Финал — проверка ответов</h2>
+              {remainingSeconds !== null && (
+                <p className="player-timer">{remainingSeconds}с</p>
+              )}
+              <p className="player-answer">{game.finalCorrectAnswer?.text}</p>
+              {game.finalCorrectAnswer?.comment && (
+                <p className="player-comment">
+                  {game.finalCorrectAnswer.comment}
+                </p>
+              )}
               <ul className="final-judging-list">
                 {game.finalAnswers?.map((a) => {
                   const wager = game.finalWagers?.find(
@@ -517,6 +570,9 @@ export function Player() {
         return (
           <div className="player player--center">
             <p>Ведущий проверяет ответы…</p>
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
           </div>
         );
 
@@ -524,6 +580,12 @@ export function Player() {
         return (
           <div className="player">
             <h2>Финал — итог</h2>
+            <p className="player-answer">{game.finalCorrectAnswer?.text}</p>
+            {game.finalCorrectAnswer?.comment && (
+              <p className="player-comment">
+                {game.finalCorrectAnswer.comment}
+              </p>
+            )}
             <ul className="final-judging-list">
               {game.finalAnswers?.map((a) => {
                 const wager = game.finalWagers?.find(

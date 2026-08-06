@@ -39,6 +39,7 @@ export interface GameStateView {
   finalWagers: { participantId: string; amount: number }[] | null;
   finalAnswers: { participantId: string; text: string }[] | null;
   finalVerdicts: { participantId: string; correct: boolean }[] | null;
+  finalCorrectAnswer: { text: string; comment?: string } | null;
 }
 
 export type StartGameErrorReason =
