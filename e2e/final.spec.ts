@@ -81,10 +81,19 @@ test('board, two players and a host play through the final round', async ({
   // раунда, не финальная фаза (Player.tsx, hostAdminPanel скрыта только в
   // final-*). Пользуемся тем же путём (±очки), что уже проверен в базовом
   // раунде, чтобы дать other очки, на которые реально можно поставить.
+  // Скоуп на .host-admin-scores обязателен: во время reveal на странице
+  // ведущего одновременно есть и обычный scoreboard (тот же phaseContent), и
+  // панель ведущего — оба списки содержат <li> с именем other, и голый
+  // getByRole('listitem').filter({ hasText }) ловит оба сразу (strict mode
+  // violation). Кнопка +100 всё равно существует только в host-admin-scores.
   await expect(
-    c.getByRole('listitem').filter({ hasText: otherName }),
+    c
+      .locator('.host-admin-scores')
+      .getByRole('listitem')
+      .filter({ hasText: otherName }),
   ).toBeVisible();
   await c
+    .locator('.host-admin-scores')
     .getByRole('listitem')
     .filter({ hasText: otherName })
     .getByRole('button', { name: '+100', exact: true })
