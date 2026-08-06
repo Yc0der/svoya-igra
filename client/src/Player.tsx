@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   useRoomConnection,
   type GameStateView,
@@ -12,6 +12,7 @@ const START_GAME_ERROR_TEXT: Record<StartGameErrorReason, string> = {
   'game-in-progress': 'Партия уже идёт.',
   'host-required':
     'Нужен ведущий, чтобы играть втроём и больше — кто-то должен нажать «Стать ведущим».',
+  'host-only': 'Начать игру может только ведущий.',
 };
 
 export function Player() {
@@ -33,6 +34,8 @@ export function Player() {
     vote,
     adjustScore,
     cancelQuestion,
+    resetGame,
+    skipToFinal,
     eliminateFinalTheme,
     submitWager,
     submitFinalAnswer,
@@ -48,6 +51,23 @@ export function Player() {
   >({});
   const [wagerInput, setWagerInput] = useState('');
   const [answerInput, setAnswerInput] = useState('');
+  // Один раз за подключение ведущий решает, продолжать ли партию, найденную
+  // на сервере при заходе (например, восстановленную из снапшота после
+  // перезапуска), или отбросить её и начать заново — см. блок ниже
+  // «Незавершённая партия».
+  const [resumeChoiceMade, setResumeChoiceMade] = useState(false);
+  // Партия, которую мы видим уже идущей ещё до того, как хоть раз увидели
+  // пустое лобби (game === null) — сигнал, что она появилась независимо от
+  // нас (например, восстановлена на сервере из снапшота после перезапуска),
+  // а не запущена нами самими прямо сейчас в этом же подключении. Именно
+  // такую партию и должен спросить выбор «Продолжить»/«Новая игра» ниже —
+  // партию, начатую собственной кнопкой «Начать игру», он прерывать не должен.
+  const sawEmptyLobbyRef = useRef(false);
+  useEffect(() => {
+    if (status === 'joined' && game === null) {
+      sawEmptyLobbyRef.current = true;
+    }
+  }, [status, game]);
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
   // Отдельный от remainingSeconds счётчик: временная блокировка после своей
   // неверной попытки идёт параллельно с уже возобновившимся отсчётом
@@ -143,15 +163,52 @@ export function Player() {
             {START_GAME_ERROR_TEXT[startGameError]}
           </p>
         )}
-        <button className="button button--primary" onClick={startGame}>
-          Начать игру
-        </button>
+        {(!hostParticipantId || isHost) && (
+          <button className="button button--primary" onClick={startGame}>
+            Начать игру
+          </button>
+        )}
       </div>
     );
   }
 
   const isMyTurn = game.turnParticipantId === selfId;
   const isBuzzedByMe = game.buzzedParticipantId === selfId;
+
+  // Незавершённая партия, найденная на сервере при заходе (например,
+  // восстановленная из снапшота после перезапуска) — ведущий решает один раз
+  // за подключение, продолжать её или отбросить и начать заново, вместо того
+  // чтобы вручную чистить снапшот и перезапускать сервер. Остальным
+  // участникам этот выбор не показывается — сбросить партию не может никто,
+  // кроме ведущего.
+  if (
+    isHost &&
+    game.phase !== 'game-end' &&
+    !sawEmptyLobbyRef.current &&
+    !resumeChoiceMade
+  ) {
+    return (
+      <div className="player">
+        <h2>Незавершённая партия</h2>
+        <p>Продолжить с того места, где остановились, или начать заново?</p>
+        <button
+          className="button button--primary"
+          onClick={() => setResumeChoiceMade(true)}
+        >
+          Продолжить
+        </button>
+        <button
+          className="button"
+          onClick={() => {
+            resetGame();
+            setResumeChoiceMade(true);
+          }}
+        >
+          Новая игра
+        </button>
+      </div>
+    );
+  }
 
   // Панель ведущего — ±очки и отмена вопроса. Постоянная, а не привязанная
   // к одной фазе (например, только к судейству): ошибку в счёте естественно
@@ -191,6 +248,12 @@ export function Player() {
             Отменить вопрос
           </button>
         )}
+        {/* ВРЕМЕННО, для ручного тестирования финала — см. комментарий у
+            EngineEvent.skip-to-final в server/src/engine.ts. Убрать вместе
+            с остальными skip-to-final местами после живой проверки финала. */}
+        <button className="button" onClick={skipToFinal}>
+          Перейти к финалу (тест)
+        </button>
       </div>
     );
   }
@@ -391,6 +454,11 @@ export function Player() {
           <div className="player">
             <h2>Итог</h2>
             {scoreboard(game.scores)}
+            {(!game.hostId || isHost) && (
+              <button className="button button--primary" onClick={startGame}>
+                Новая игра
+              </button>
+            )}
           </div>
         );
 

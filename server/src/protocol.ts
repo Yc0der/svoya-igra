@@ -8,6 +8,9 @@ export interface ParticipantView {
 
 export interface GameStateView {
   phase: Phase;
+  // Замороженный на время партии ведущий, НЕ то же самое, что лобби-флаг
+  // StateMessage.hostParticipantId (см. Room.toGameStateView).
+  hostId: string | null;
   roundIndex: number;
   grid: {
     themeName: string;
@@ -58,13 +61,21 @@ export type ClientMessage =
   // клиентскому participantId в поле не доверяет.
   | { type: 'adjust-score'; participantId: string; delta: number }
   | { type: 'cancel-question' }
+  // Сбрасывает текущую партию в пустое лобби — см. Room.resetGame().
+  | { type: 'reset-game' }
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  | { type: 'skip-to-final' }
   | { type: 'eliminate-final-theme'; themeIndex: number }
   | { type: 'submit-wager'; amount: number }
   | { type: 'submit-final-answer'; text: string }
   | { type: 'final-vote'; participantId: string; correct: boolean };
 
 export type StartGameErrorReason =
-  'not-enough-players' | 'no-pack' | 'game-in-progress' | 'host-required';
+  | 'not-enough-players'
+  | 'no-pack'
+  | 'game-in-progress'
+  | 'host-required'
+  | 'host-only';
 
 export type ServerMessage =
   | { type: 'hello'; lanUrl: string }

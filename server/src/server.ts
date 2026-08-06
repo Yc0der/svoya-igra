@@ -170,10 +170,17 @@ export function createServer(options: CreateServerOptions): GameServer {
       if (message.type === 'start-game') {
         const participantId = connections.get(ws);
         if (participantId) {
-          const result = room.startGame();
+          const result = room.startGame(participantId);
           if ('error' in result) {
             send(ws, { type: 'start-game-error', reason: result.error });
           }
+        }
+      }
+
+      if (message.type === 'reset-game') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.resetGame(participantId);
         }
       }
 
@@ -235,6 +242,14 @@ export function createServer(options: CreateServerOptions): GameServer {
         const participantId = connections.get(ws);
         if (participantId) {
           room.cancelQuestion(participantId);
+        }
+      }
+
+      // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+      if (message.type === 'skip-to-final') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.skipToFinal(participantId);
         }
       }
 

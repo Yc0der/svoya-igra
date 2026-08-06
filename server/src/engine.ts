@@ -82,6 +82,10 @@ export type EngineEvent =
       delta: number;
     }
   | { type: 'cancel-question'; requesterId: string }
+  // ВРЕМЕННО — для ручного тестирования финала без прохождения всех
+  // раундов пакета. Не часть спеки, убрать вместе с кнопкой в Player.tsx,
+  // когда финал будет проверен вживую.
+  | { type: 'skip-to-final'; requesterId: string }
   | { type: 'eliminate-final-theme'; counterId: string; themeIndex: number }
   | { type: 'submit-wager'; counterId: string; amount: number }
   | { type: 'submit-final-answer'; counterId: string; text: string }
@@ -171,6 +175,8 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
       return handleAdjustScore(state, event);
     case 'cancel-question':
       return handleCancelQuestion(state, event);
+    case 'skip-to-final':
+      return handleSkipToFinal(state, event);
     case 'eliminate-final-theme':
       return handleEliminateFinalTheme(state, event);
     case 'submit-wager':
@@ -323,6 +329,34 @@ function handleCancelQuestion(
     return unchanged(state);
   }
   return revealQuestion(state, null);
+}
+
+// ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final. Форсирует переход
+// в финал из любой фазы обычного раунда, тем же путём (startFinalOrEnd), что
+// и естественное завершение последнего раунда — не отдельная ветка правил.
+function handleSkipToFinal(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'skip-to-final' }>,
+): Result {
+  if (state.hostId === null || event.requesterId !== state.hostId) {
+    return unchanged(state);
+  }
+  if (
+    state.phase === 'final-elim' ||
+    state.phase === 'final-wager' ||
+    state.phase === 'final-answer' ||
+    state.phase === 'final-judging' ||
+    state.phase === 'final-reveal' ||
+    state.phase === 'game-end'
+  ) {
+    return unchanged(state);
+  }
+  return startFinalOrEnd({
+    ...state,
+    currentQuestion: null,
+    buzzedCounterId: null,
+    votes: {},
+  });
 }
 
 function handleTimerExpired(

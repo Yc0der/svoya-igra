@@ -184,14 +184,16 @@ describe('Room.startGame', () => {
   it('fails with not-enough-players when fewer than two have joined', () => {
     const room = new Room(undefined, TEST_PACK);
     joinedId(room, 'Ваня');
-    expect(room.startGame()).toEqual({ error: 'not-enough-players' });
+    expect(room.startGame('requester')).toEqual({
+      error: 'not-enough-players',
+    });
   });
 
   it('fails with no-pack when the room was built without one', () => {
     const room = new Room();
     joinedId(room, 'Ваня');
     joinedId(room, 'Катя');
-    expect(room.startGame()).toEqual({ error: 'no-pack' });
+    expect(room.startGame('requester')).toEqual({ error: 'no-pack' });
   });
 
   it('starts the game and exposes a game state view once two have joined', () => {
@@ -199,7 +201,7 @@ describe('Room.startGame', () => {
     const vanya = joinedId(room, 'Ваня');
     const katya = joinedId(room, 'Катя');
 
-    expect(room.startGame()).toEqual({ ok: true });
+    expect(room.startGame('requester')).toEqual({ ok: true });
 
     const view = room.toGameStateView();
     expect(view).not.toBeNull();
@@ -232,10 +234,12 @@ describe('Room.startGame', () => {
     room.disconnect(vanya);
 
     // Осталась только Катя реально подключённой — меньше двух.
-    expect(room.startGame()).toEqual({ error: 'not-enough-players' });
+    expect(room.startGame('requester')).toEqual({
+      error: 'not-enough-players',
+    });
 
     const petya = joinedId(room, 'Петя');
-    expect(room.startGame()).toEqual({ ok: true });
+    expect(room.startGame('requester')).toEqual({ ok: true });
 
     const view = room.toGameStateView();
     expect(view?.scores.map((s) => s.participantId)).not.toContain(vanya);
@@ -248,7 +252,7 @@ describe('Room.startGame', () => {
     joinedId(room, 'Катя');
     const listener = vi.fn();
     room.onChange(listener);
-    room.startGame();
+    room.startGame('requester');
     expect(listener).toHaveBeenCalledOnce();
   });
 
@@ -256,13 +260,13 @@ describe('Room.startGame', () => {
     const room = new Room(undefined, TEST_PACK);
     joinedId(room, 'Ваня');
     joinedId(room, 'Катя');
-    room.startGame();
+    room.startGame('requester');
     const before = room.toGameStateView();
     // Any phase other than 'game-end' counts as "in progress" — 'selecting'
     // right after start is enough to exercise the guard.
     expect(before?.phase).toBe('selecting');
 
-    expect(room.startGame()).toEqual({ error: 'game-in-progress' });
+    expect(room.startGame('requester')).toEqual({ error: 'game-in-progress' });
     expect(room.toGameStateView()).toEqual(before);
   });
 
@@ -278,7 +282,7 @@ describe('Room.startGame', () => {
     const room = new Room(undefined, TEST_PACK);
     joinedId(room, 'Ваня');
     joinedId(room, 'Катя');
-    room.startGame();
+    room.startGame('requester');
     const picker = room.toGameStateView()!.turnParticipantId;
 
     vi.useFakeTimers();
@@ -288,7 +292,9 @@ describe('Room.startGame', () => {
       expect(before?.phase).toBe('question-open');
       expect(before?.timerDeadline).not.toBeNull();
 
-      expect(room.startGame()).toEqual({ error: 'game-in-progress' });
+      expect(room.startGame('requester')).toEqual({
+        error: 'game-in-progress',
+      });
 
       const afterReject = room.toGameStateView();
       expect(afterReject?.timerDeadline).toBe(before?.timerDeadline);
@@ -305,7 +311,7 @@ describe('Room.startGame', () => {
     joinedId(room, 'Ваня');
     joinedId(room, 'Катя');
     joinedId(room, 'Петя');
-    expect(room.startGame()).toEqual({ error: 'host-required' });
+    expect(room.startGame('requester')).toEqual({ error: 'host-required' });
   });
 
   it('starts with a host once someone is marked host, excluding the host from counters and scores', () => {
@@ -315,13 +321,23 @@ describe('Room.startGame', () => {
     const petya = joinedId(room, 'Петя');
     room.toggleHost(petya);
 
-    expect(room.startGame()).toEqual({ ok: true });
+    expect(room.startGame(petya)).toEqual({ ok: true });
 
     const view = room.toGameStateView(petya);
     expect(view?.scores.map((s) => s.participantId).sort()).toEqual(
       [vanya, katya].sort(),
     );
     expect(view?.turnParticipantId).not.toBe(petya);
+  });
+
+  it('rejects a start attempt from someone other than the marked host, leaving the lobby untouched', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.toggleHost(katya);
+
+    expect(room.startGame(vanya)).toEqual({ error: 'host-only' });
+    expect(room.getState().game).toBeNull();
   });
 
   it('ignores a stale host marking for someone who disconnected before start', () => {
@@ -333,7 +349,7 @@ describe('Room.startGame', () => {
     room.toggleHost(dasha);
     room.disconnect(dasha);
 
-    expect(room.startGame()).toEqual({ error: 'host-required' });
+    expect(room.startGame('requester')).toEqual({ error: 'host-required' });
   });
 
   it('toggleHost is idempotent (marking and unmarking the same participant)', () => {
@@ -353,7 +369,7 @@ describe('Room.startGame', () => {
     const katya = joinedId(room, 'Катя');
     const petya = joinedId(room, 'Петя');
     room.toggleHost(petya);
-    room.startGame();
+    room.startGame(petya);
     const picker = room.toGameStateView(petya)!.turnParticipantId;
     const answerer = picker === vanya ? vanya : katya;
 
@@ -373,7 +389,7 @@ describe('Room.startGame', () => {
     const open = new Room(undefined, TEST_PACK);
     const v1 = joinedId(open, 'Ваня');
     const k1 = joinedId(open, 'Катя');
-    open.startGame();
+    open.startGame('requester');
     const picker1 = open.toGameStateView()!.turnParticipantId;
     const other1 = picker1 === v1 ? k1 : v1;
     open.selectQuestion(picker1, 0, 'q1');
@@ -388,7 +404,7 @@ describe('Room.startGame', () => {
     const k2 = joinedId(hosted, 'Катя');
     const p2 = joinedId(hosted, 'Петя');
     hosted.toggleHost(p2);
-    hosted.startGame();
+    hosted.startGame(p2);
     const picker2 = hosted.toGameStateView(p2)!.turnParticipantId;
     const answerer2 = picker2 === v2 ? v2 : k2;
     hosted.selectQuestion(picker2, 0, 'q1');
@@ -415,7 +431,7 @@ describe('Room.startGame', () => {
       const katya = joinedId(room, 'Катя');
       const petya = joinedId(room, 'Петя');
       room.toggleHost(petya);
-      room.startGame();
+      room.startGame(petya);
       const picker = room.toGameStateView(petya)!.turnParticipantId;
       const answerer = picker === vanya ? vanya : katya;
 
@@ -444,7 +460,7 @@ describe('Room.startGame', () => {
       const katya = joinedId(room, 'Катя');
       const petya = joinedId(room, 'Петя');
       room.toggleHost(petya);
-      room.startGame();
+      room.startGame(petya);
       const picker = room.toGameStateView(petya)!.turnParticipantId;
       const answerer = picker === vanya ? vanya : katya;
       const other = answerer === vanya ? katya : vanya;
@@ -475,7 +491,7 @@ describe('Room.startGame', () => {
       const katya = joinedId(room, 'Катя');
       const petya = joinedId(room, 'Петя');
       room.toggleHost(petya);
-      room.startGame();
+      room.startGame(petya);
       const picker = room.toGameStateView(petya)!.turnParticipantId;
       const answerer = picker === vanya ? vanya : katya;
 
@@ -509,7 +525,7 @@ describe('Room.startGame', () => {
       const katya = joinedId(room, 'Катя');
       const petya = joinedId(room, 'Петя');
       room.toggleHost(petya);
-      room.startGame();
+      room.startGame(petya);
       const picker = room.toGameStateView(petya)!.turnParticipantId;
       const answerer = picker === vanya ? vanya : katya;
 
@@ -537,7 +553,7 @@ describe('Room.startGame', () => {
     const room = new Room(undefined, ONE_QUESTION_PACK);
     const vanya = joinedId(room, 'Ваня');
     const katya = joinedId(room, 'Катя');
-    room.startGame();
+    room.startGame('requester');
     const picker = room.toGameStateView()!.turnParticipantId;
 
     vi.useFakeTimers();
@@ -547,10 +563,90 @@ describe('Room.startGame', () => {
       vi.advanceTimersByTime(4_000); // reveal timer -> game-end (only round, only question)
       expect(room.toGameStateView()?.phase).toBe('game-end');
 
-      expect(room.startGame()).toEqual({ ok: true });
+      expect(room.startGame('requester')).toEqual({ ok: true });
       const view = room.toGameStateView();
       expect(view?.phase).toBe('selecting');
       expect([vanya, katya]).toContain(view?.turnParticipantId);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Room.resetGame', () => {
+  it('clears an in-progress game back to an empty lobby', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame(vanya);
+    expect(room.getState().game).not.toBeNull();
+
+    room.resetGame(vanya);
+    expect(room.getState().game).toBeNull();
+  });
+
+  it('notifies listeners on reset', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame(vanya);
+    const listener = vi.fn();
+    room.onChange(listener);
+
+    room.resetGame(vanya);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it('does nothing when there is no game to reset', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const listener = vi.fn();
+    room.onChange(listener);
+
+    room.resetGame(vanya);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('is restricted to the marked host, same as startGame', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame(petya);
+
+    room.resetGame(vanya); // не ведущий — игнорируется
+    expect(room.getState().game).not.toBeNull();
+
+    room.resetGame(petya);
+    expect(room.getState().game).toBeNull();
+  });
+
+  it('lets a fresh game be started again after a reset', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame(vanya);
+
+    room.resetGame(vanya);
+    expect(room.startGame(vanya)).toEqual({ ok: true });
+  });
+
+  it('kills any live timer of the reset game so it cannot resurrect it', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame(vanya);
+      const picker = room.toGameStateView()!.turnParticipantId;
+      room.selectQuestion(picker, 0, 'q1'); // взводит таймер вопроса
+
+      room.resetGame(vanya);
+      expect(room.getState().game).toBeNull();
+
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
+      expect(room.getState().game).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -561,7 +657,7 @@ function startedRoom(): { room: Room; picker: string; other: string } {
   const room = new Room(undefined, TEST_PACK);
   const vanya = joinedId(room, 'Ваня');
   const katya = joinedId(room, 'Катя');
-  room.startGame();
+  room.startGame('requester');
   const view = room.toGameStateView()!;
   const picker = view.turnParticipantId;
   const other = picker === vanya ? katya : vanya;
@@ -648,7 +744,7 @@ describe('Room game flow', () => {
       const room = new Room(undefined, ONE_QUESTION_PACK);
       joinedId(room, 'Ваня');
       joinedId(room, 'Катя');
-      room.startGame();
+      room.startGame('requester');
       const picker = room.toGameStateView()!.turnParticipantId;
 
       room.selectQuestion(picker, 0, 'q1');
@@ -701,7 +797,7 @@ describe('Room game flow', () => {
     const first = new Room(undefined, TEST_PACK);
     const vanya = joinedId(first, 'Ваня');
     const katya = joinedId(first, 'Катя');
-    first.startGame();
+    first.startGame('requester');
     const picker = first.toGameStateView()!.turnParticipantId;
     first.selectQuestion(picker, 0, 'q1');
     expect(first.toGameStateView()?.phase).toBe('question-open');
@@ -792,7 +888,7 @@ describe('Room final round', () => {
     room.join('C');
     const [a, b, host] = room.getState().participants.map((p) => p.id);
     room.toggleHost(host);
-    room.startGame();
+    room.startGame(host);
     const { picker, other } = driveToFinalWager(room, a, b, host);
 
     expect(room.getState().game?.phase).toBe('final-wager');
@@ -815,7 +911,7 @@ describe('Room final round', () => {
     room.join('C');
     const [a, b, host] = room.getState().participants.map((p) => p.id);
     room.toggleHost(host);
-    room.startGame();
+    room.startGame(host);
     const { picker, other } = driveToFinalWager(room, a, b, host);
     room.submitWager(picker, 50);
     room.submitWager(other, 0);
@@ -835,7 +931,7 @@ describe('Room final round', () => {
     room.join('C');
     const [a, b, host] = room.getState().participants.map((p) => p.id);
     room.toggleHost(host);
-    room.startGame();
+    room.startGame(host);
     const { picker, other } = driveToFinalWager(room, a, b, host);
     room.submitWager(picker, 50);
     room.submitWager(other, 0);
@@ -861,7 +957,7 @@ describe('Room final round', () => {
     room.join('C');
     const [a, b, host] = room.getState().participants.map((p) => p.id);
     room.toggleHost(host);
-    room.startGame();
+    room.startGame(host);
     const { picker, other } = driveToFinalWager(room, a, b, host);
     room.submitWager(picker, 50);
     room.submitWager(other, 0);
@@ -882,7 +978,7 @@ describe('Room final round', () => {
     room.join('C');
     const [a, b, host] = room.getState().participants.map((p) => p.id);
     room.toggleHost(host);
-    room.startGame();
+    room.startGame(host);
     const { picker, other } = driveToFinalWager(room, a, b, host);
     room.submitWager(picker, 50);
     room.submitWager(other, 20);
@@ -919,7 +1015,7 @@ describe('Room final round', () => {
     room.join('C');
     const [a, b, host] = room.getState().participants.map((p) => p.id);
     room.toggleHost(host);
-    room.startGame();
+    room.startGame(host);
     const { picker, other } = driveToFinalWager(room, a, b, host);
     room.submitWager(picker, 50);
     room.submitWager(other, 20);
@@ -965,7 +1061,7 @@ describe('Room final round', () => {
     room.join('C');
     const [a, b, host] = room.getState().participants.map((p) => p.id);
     room.toggleHost(host);
-    room.startGame();
+    room.startGame(host);
     const picker = room.getState().game?.turnCounterId === a ? a : b;
     const other = picker === a ? b : a;
     room.selectQuestion(picker, 0, 'q1');

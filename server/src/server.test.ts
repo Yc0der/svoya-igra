@@ -882,7 +882,7 @@ describe('createServer host mode', () => {
       (cAfterToggle as { hostParticipantId: string }).hostParticipantId,
     ).toBe(c.participantId);
 
-    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    c.ws.send(JSON.stringify({ type: 'start-game' }));
     const aState = (await settle(a, b, a)) as {
       game: { phase: string; turnParticipantId: string };
     };
@@ -944,7 +944,7 @@ describe('createServer host mode', () => {
     c.ws.send(JSON.stringify({ type: 'toggle-host' }));
     await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
 
-    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    c.ws.send(JSON.stringify({ type: 'start-game' }));
     const aState = (await settle(a, b, a)) as {
       game: { turnParticipantId: string };
     };
@@ -1055,7 +1055,7 @@ describe('createServer final round', () => {
       c.ws.send(JSON.stringify({ type: 'toggle-host' }));
       await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
 
-      a.ws.send(JSON.stringify({ type: 'start-game' }));
+      c.ws.send(JSON.stringify({ type: 'start-game' }));
       const aState = (await settle(a, b, a)) as {
         game: { turnParticipantId: string };
       };

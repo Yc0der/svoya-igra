@@ -47,7 +47,11 @@ export type StartGameResult =
   | { ok: true }
   | {
       error:
-        'not-enough-players' | 'no-pack' | 'game-in-progress' | 'host-required';
+        | 'not-enough-players'
+        | 'no-pack'
+        | 'game-in-progress'
+        | 'host-required'
+        | 'host-only';
     };
 
 function normalizeName(name: string): string {
@@ -179,7 +183,7 @@ export class Room {
     this.notify();
   }
 
-  startGame(): StartGameResult {
+  startGame(requesterId: string): StartGameResult {
     if (!this.pack) {
       return { error: 'no-pack' };
     }
@@ -215,6 +219,13 @@ export class Room {
       present.some((p) => p.id === this.hostParticipantId)
         ? this.hostParticipantId
         : null;
+    // Стартовать партию может кто угодно, пока никто не взял на себя роль
+    // ведущего (design.md не требует ведущего вдвоём) — но как только он
+    // назначен, запуск (и повторный запуск после game-end) — его решение,
+    // не любого игрока за столом.
+    if (hostId !== null && requesterId !== hostId) {
+      return { error: 'host-only' };
+    }
     const counters = present.filter((p) => p.id !== hostId);
     if (counters.length < 2) {
       return { error: 'not-enough-players' };
@@ -239,6 +250,28 @@ export class Room {
     this.game = createInitialState(this.pack, counterIds, hostId);
     this.notify();
     return { ok: true };
+  }
+
+  // Отбрасывает текущую партию (в том числе восстановленную из снапшота
+  // после перезапуска процесса) и возвращает комнату в пустое лобби — без
+  // этого единственным способом сбросить состояние было вручную удалить файл
+  // снапшота и перезапустить сервер. Та же авторизация, что и у startGame():
+  // пока ведущий назначен, решение отбросить партию — его, не любого игрока.
+  resetGame(requesterId: string): void {
+    if (!this.game) return;
+    if (
+      this.hostParticipantId !== null &&
+      requesterId !== this.hostParticipantId
+    ) {
+      return;
+    }
+    if (this.gameTimeoutHandle) {
+      clearTimeout(this.gameTimeoutHandle);
+      this.gameTimeoutHandle = null;
+      this.gameTimerDeadline = null;
+    }
+    this.game = null;
+    this.notify();
   }
 
   selectQuestion(
@@ -318,6 +351,11 @@ export class Room {
     this.dispatch({ type: 'cancel-question', requesterId });
   }
 
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  skipToFinal(requesterId: string): void {
+    this.dispatch({ type: 'skip-to-final', requesterId });
+  }
+
   eliminateFinalTheme(participantId: string, themeIndex: number): void {
     this.dispatch({
       type: 'eliminate-final-theme',
@@ -394,6 +432,13 @@ export class Room {
 
     return {
       phase: game.phase,
+      // Замороженный на время партии ведущий — НЕ то же самое, что
+      // лобби-флаг hostParticipantId, который может ещё указывать на
+      // кого-то, кто был отмечен ведущим, но на момент старта партии
+      // оказался отключён (design.md, «Ведущий»: «во время партии роль
+      // зафиксирована»). Клиент обязан считать себя ведущим по этому полю,
+      // пока партия идёт, а не по лобби-флагу.
+      hostId: game.hostId,
       roundIndex: game.roundIndex,
       grid: round.themes.map((theme) => ({
         themeName: theme.name,

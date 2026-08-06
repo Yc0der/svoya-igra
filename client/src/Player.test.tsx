@@ -14,6 +14,7 @@ const mockedUseRoomConnection = vi.mocked(useRoomConnection);
 function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
   return {
     phase: 'selecting',
+    hostId: null,
     roundIndex: 0,
     grid: [],
     turnParticipantId: '',
@@ -55,6 +56,8 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     vote: vi.fn(),
     adjustScore: vi.fn(),
     cancelQuestion: vi.fn(),
+    resetGame: vi.fn(),
+    skipToFinal: vi.fn(),
     eliminateFinalTheme: vi.fn(),
     submitWager: vi.fn(),
     submitFinalAnswer: vi.fn(),
@@ -150,6 +153,38 @@ describe('Player', () => {
     expect(screen.getByText(/ведущий: Петя/i)).toBeInTheDocument();
   });
 
+  it('hides the start-game button from anyone but the marked host once a host is designated', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: null,
+        selfId: 'me',
+        isHost: false,
+        participants: [{ id: 'host-id', name: 'Петя', connected: true }],
+        hostParticipantId: 'host-id',
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /начать игру/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('still shows the start-game button to the marked host once one is designated', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: null,
+        selfId: 'host-id',
+        isHost: true,
+        participants: [{ id: 'host-id', name: 'Петя', connected: true }],
+        hostParticipantId: 'host-id',
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByRole('button', { name: /начать игру/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a translated error and doesn't crash when start-game fails", () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({ game: null, startGameError: 'host-required' }),
@@ -234,7 +269,7 @@ describe('Player', () => {
     expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
   });
 
-  it('does not show a buzz button to the host while the question is open — the host is not a counter', () => {
+  it('does not show a buzz button to the host while the question is open — the host is not a counter', async () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'host-id',
@@ -244,6 +279,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
       screen.queryByRole('button', { name: /^ответ$/i }),
     ).not.toBeInTheDocument();
@@ -386,6 +422,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(screen.getByText('Ответ')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /^зачёт$/i }));
     expect(vote).toHaveBeenCalledWith(true);
@@ -406,6 +443,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     const yes = screen.getByRole('button', { name: /^зачёт/i });
     const no = screen.getByRole('button', { name: /^незачёт/i });
     expect(yes).not.toHaveClass('is-selected');
@@ -494,6 +532,47 @@ describe('Player', () => {
     expect(screen.queryByText('me')).not.toBeInTheDocument();
   });
 
+  it('offers a "new game" button at game-end that restarts, when nobody was marked host', async () => {
+    const startGame = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        startGame,
+        game: baseGame({ phase: 'game-end', scores: [] }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: /новая игра/i }));
+    expect(startGame).toHaveBeenCalledOnce();
+  });
+
+  it('hides the "new game" button at game-end from anyone but the marked host', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'other',
+        isHost: false,
+        game: baseGame({ phase: 'game-end', hostId: 'host-id', scores: [] }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /новая игра/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the "new game" button at game-end to the marked host', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        game: baseGame({ phase: 'game-end', hostId: 'host-id', scores: [] }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByRole('button', { name: /новая игра/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows the host admin panel with per-player score buttons, on top of the phase's own screen", async () => {
     const adjustScore = vi.fn();
     mockedUseRoomConnection.mockReturnValue(
@@ -517,6 +596,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     // Фазовый экран (не мой ход) остаётся на месте.
     expect(screen.getByText(/сейчас выбирает Ваня/i)).toBeInTheDocument();
     // ...и панель управления показана поверх него.
@@ -557,6 +637,7 @@ describe('Player', () => {
       }),
     );
     const { rerender } = render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
       screen.queryByRole('button', { name: /отменить вопрос/i }),
     ).not.toBeInTheDocument();
@@ -669,7 +750,7 @@ describe('Player', () => {
     expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
   });
 
-  it('final-wager: the host sees a waiting message, not a wager form', () => {
+  it('final-wager: the host sees a waiting message, not a wager form', async () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'host',
@@ -682,6 +763,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(screen.queryByLabelText('Ставка')).not.toBeInTheDocument();
     expect(screen.getByText(/Игроки делают ставки/)).toBeInTheDocument();
   });
@@ -722,7 +804,7 @@ describe('Player', () => {
     ).toBeInTheDocument();
   });
 
-  it('final-answer: the host sees a waiting message, not an answer form', () => {
+  it('final-answer: the host sees a waiting message, not an answer form', async () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'host',
@@ -735,6 +817,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(screen.queryByLabelText('Ответ')).not.toBeInTheDocument();
     expect(screen.getByText(/Игроки пишут ответы/)).toBeInTheDocument();
   });
@@ -766,6 +849,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(screen.getByText('Правильный ответ')).toBeInTheDocument();
     expect(screen.getByText('Коммент')).toBeInTheDocument();
     const yesButtons = screen.getAllByText('Верно');
@@ -798,6 +882,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     const yesButtons = screen.getAllByRole('button', { name: /^верно/i });
     const noButtons = screen.getAllByRole('button', { name: /^неверно/i });
 
@@ -864,5 +949,101 @@ describe('Player', () => {
     expect(screen.getByText('150')).toBeInTheDocument();
     expect(screen.getByText('Правильный ответ')).toBeInTheDocument();
     expect(screen.getByText('Коммент')).toBeInTheDocument();
+  });
+
+  describe('resume-choice prompt (avoids manually clearing server state to test)', () => {
+    it('shows the host a resume-choice prompt when a game is already in progress on first render, e.g. restored from a snapshot after a restart', () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+        }),
+      );
+      render(<Player />);
+      expect(screen.getByText('Незавершённая партия')).toBeInTheDocument();
+      expect(screen.queryByText(/сейчас выбирает/i)).not.toBeInTheDocument();
+    });
+
+    it('does not show the prompt to non-host participants, even with a game already in progress', () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'me',
+          isHost: false,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'me' }),
+        }),
+      );
+      render(<Player />);
+      expect(
+        screen.queryByText('Незавершённая партия'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not show the prompt for a game the host just started themselves in this same session', () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({ selfId: 'host-id', isHost: true, game: null }),
+      );
+      const { rerender } = render(<Player />);
+
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+        }),
+      );
+      rerender(<Player />);
+
+      expect(
+        screen.queryByText('Незавершённая партия'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/сейчас выбирает/i)).toBeInTheDocument();
+    });
+
+    it('dismisses the prompt and shows the game once "Продолжить" is clicked', async () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+        }),
+      );
+      render(<Player />);
+      await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+      expect(
+        screen.queryByText('Незавершённая партия'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/сейчас выбирает/i)).toBeInTheDocument();
+    });
+
+    it('resets the game on the server when "Новая игра" is clicked', async () => {
+      const resetGame = vi.fn();
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          resetGame,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+        }),
+      );
+      render(<Player />);
+      await userEvent.click(screen.getByRole('button', { name: 'Новая игра' }));
+      expect(resetGame).toHaveBeenCalledOnce();
+    });
+
+    it('does not show the prompt once the game has reached game-end — that screen offers its own "new game" button instead', () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          game: baseGame({ phase: 'game-end', scores: [] }),
+        }),
+      );
+      render(<Player />);
+      expect(
+        screen.queryByText('Незавершённая партия'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/итог/i)).toBeInTheDocument();
+    });
   });
 });

@@ -13,6 +13,7 @@ const mockedUseRoomConnection = vi.mocked(useRoomConnection);
 function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
   return {
     phase: 'selecting',
+    hostId: null,
     roundIndex: 0,
     grid: [],
     turnParticipantId: '',
@@ -54,6 +55,8 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     vote: vi.fn(),
     adjustScore: vi.fn(),
     cancelQuestion: vi.fn(),
+    resetGame: vi.fn(),
+    skipToFinal: vi.fn(),
     eliminateFinalTheme: vi.fn(),
     submitWager: vi.fn(),
     submitFinalAnswer: vi.fn(),

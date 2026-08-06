@@ -20,6 +20,10 @@ export interface GameStateView {
     | 'final-judging'
     | 'final-reveal'
     | 'game-end';
+  // Замороженный на время партии ведущий, НЕ то же самое, что лобби-флаг
+  // hostParticipantId — isHost ниже обязан доверять этому полю, пока
+  // партия идёт.
+  hostId: string | null;
   roundIndex: number;
   grid: {
     themeName: string;
@@ -43,7 +47,11 @@ export interface GameStateView {
 }
 
 export type StartGameErrorReason =
-  'not-enough-players' | 'no-pack' | 'game-in-progress' | 'host-required';
+  | 'not-enough-players'
+  | 'no-pack'
+  | 'game-in-progress'
+  | 'host-required'
+  | 'host-only';
 
 type ServerMessage =
   | { type: 'hello'; lanUrl: string }
@@ -70,6 +78,9 @@ type ClientMessage =
   | { type: 'vote'; correct: boolean }
   | { type: 'adjust-score'; participantId: string; delta: number }
   | { type: 'cancel-question' }
+  | { type: 'reset-game' }
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  | { type: 'skip-to-final' }
   | { type: 'eliminate-final-theme'; themeIndex: number }
   | { type: 'submit-wager'; amount: number }
   | { type: 'submit-final-answer'; text: string }
@@ -97,6 +108,9 @@ export interface RoomConnection {
   vote(correct: boolean): void;
   adjustScore(participantId: string, delta: number): void;
   cancelQuestion(): void;
+  resetGame(): void;
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  skipToFinal(): void;
   eliminateFinalTheme(themeIndex: number): void;
   submitWager(amount: number): void;
   submitFinalAnswer(text: string): void;
@@ -238,7 +252,8 @@ export function useRoomConnection(
     game,
     falsestart,
     hostParticipantId,
-    isHost: selfId !== null && selfId === hostParticipantId,
+    isHost:
+      selfId !== null && selfId === (game ? game.hostId : hostParticipantId),
     startGameError,
     join,
     startGame: () => send({ type: 'start-game' }),
@@ -251,6 +266,8 @@ export function useRoomConnection(
     adjustScore: (participantId, delta) =>
       send({ type: 'adjust-score', participantId, delta }),
     cancelQuestion: () => send({ type: 'cancel-question' }),
+    resetGame: () => send({ type: 'reset-game' }),
+    skipToFinal: () => send({ type: 'skip-to-final' }),
     eliminateFinalTheme: (themeIndex) =>
       send({ type: 'eliminate-final-theme', themeIndex }),
     submitWager: (amount) => send({ type: 'submit-wager', amount }),
