@@ -9,7 +9,6 @@ export default defineConfig({
   // игру. e2e/final.spec.ts на это не завязан (отдельный сервер/порт/комната),
   // но общий workers: 1 не создаёт для него проблемы — только чуть медленнее.
   workers: 1,
-  globalSetup: './e2e/global-setup.ts',
   webServer: [
     {
       command: 'node e2e/reset-snapshot.mjs && pnpm run start',
