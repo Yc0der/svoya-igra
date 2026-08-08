@@ -1,19 +1,7 @@
 import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
-import {
-  useRoomConnection,
-  type GameStateView,
-  type StartGameErrorReason,
-} from './useRoomConnection';
+import { useRoomConnection, type GameStateView } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
-
-const START_GAME_ERROR_TEXT: Record<StartGameErrorReason, string> = {
-  'not-enough-players': 'Нужно минимум два игрока.',
-  'no-pack': 'На сервере нет пакета вопросов.',
-  'game-in-progress': 'Партия уже идёт.',
-  'host-required':
-    'Нужен ведущий, чтобы играть втроём и больше — кто-то должен нажать «Стать ведущим».',
-  'host-only': 'Начать игру может только ведущий.',
-};
+import { START_GAME_ERROR_TEXT } from './errorText';
 
 export function Player() {
   const {
@@ -449,18 +437,29 @@ export function Player() {
           </div>
         );
 
-      case 'game-end':
+      case 'game-end': {
+        // Не game.hostId/isHost — тот заморожен от УЖЕ ЗАКОНЧИВШЕЙСЯ партии и
+        // не двигается, даже если тот участник давно отключился. На
+        // game-end toggleHost() снова разрешён (room.ts: «'game-end' —
+        // исключение»), и именно живой лобби-флаг hostParticipantId — то, что
+        // реально проверяет сервер при повторном startGame() (room.ts,
+        // startGame(): hostId считается заново из this.hostParticipantId, а
+        // не из this.game.hostId). Кнопка обязана смотреть на то же поле,
+        // иначе она может быть скрыта от единственного, кто реально способен
+        // сейчас перезапустить партию.
+        const canRestart = !hostParticipantId || selfId === hostParticipantId;
         return (
           <div className="player">
             <h2>Итог</h2>
             {scoreboard(game.scores)}
-            {(!game.hostId || isHost) && (
+            {canRestart && (
               <button className="button button--primary" onClick={startGame}>
                 Новая игра
               </button>
             )}
           </div>
         );
+      }
 
       case 'final-elim': {
         const isMyElimTurn = game.finalElimParticipantId === selfId;

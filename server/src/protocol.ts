@@ -68,7 +68,16 @@ export type ClientMessage =
   | { type: 'eliminate-final-theme'; themeIndex: number }
   | { type: 'submit-wager'; amount: number }
   | { type: 'submit-final-answer'; text: string }
-  | { type: 'final-vote'; participantId: string; correct: boolean };
+  | { type: 'final-vote'; participantId: string; correct: boolean }
+  // Админ-панель (design.md, «Админ-панель») — отдельный тип сообщений, не
+  // привязанный к участнику: сокет админки не присоединяется к комнате
+  // (никогда не шлёт 'join'), поэтому эти сообщения сервер обрабатывает без
+  // поиска в connections/participants, в отличие от всего выше.
+  | { type: 'admin-start-game' }
+  | { type: 'admin-reset-game' }
+  | { type: 'admin-reset-room' }
+  | { type: 'admin-kick'; participantId: string }
+  | { type: 'admin-set-host'; participantId: string | null };
 
 export type StartGameErrorReason =
   | 'not-enough-players'

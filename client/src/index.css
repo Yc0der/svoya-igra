@@ -494,3 +494,78 @@ code {
   flex: 1;
   text-align: left;
 }
+
+/* Админ-панель (Admin.tsx, design.md «Админ-панель») — служебная страница
+   для того, кто держит сервер, не для игры за столом: раскладка блоками
+   слева направо, а не по центру, как у board/player. */
+
+.admin {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px 16px 48px;
+  max-width: 700px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.admin-status {
+  font-family: var(--mono);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.admin-section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.admin-section h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.admin-participants {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-participants li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.admin-participants .is-disconnected {
+  opacity: 0.5;
+}
+
+.admin-participant-name {
+  min-width: 100px;
+  font-weight: 600;
+}
+
+.admin-participant-status {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text);
+  min-width: 56px;
+}
+
+.admin-participant-role {
+  flex: 1;
+  min-width: 120px;
+  color: var(--text);
+}

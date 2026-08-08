@@ -284,6 +284,48 @@ export function createServer(options: CreateServerOptions): GameServer {
           room.finalVote(participantId, message.participantId, message.correct);
         }
       }
+
+      // Админ-панель (design.md, «Админ-панель») — сокет админки никогда не
+      // шлёт 'join', поэтому в отличие от всего выше эти сообщения не ищут
+      // отправителя в connections: авторизация не по личности отправителя,
+      // а по самому факту, что сообщение админского типа.
+      if (message.type === 'admin-start-game') {
+        const result = room.startGame(null);
+        if ('error' in result) {
+          send(ws, { type: 'start-game-error', reason: result.error });
+        }
+      }
+
+      if (message.type === 'admin-reset-game') {
+        room.resetGame(null);
+      }
+
+      if (message.type === 'admin-reset-room') {
+        room.resetRoom();
+      }
+
+      if (
+        message.type === 'admin-kick' &&
+        typeof message.participantId === 'string'
+      ) {
+        room.kickParticipant(message.participantId);
+        // Кикнутый мог быть подключён прямо сейчас — рвём его сокет, чтобы
+        // клиент увидел invalid-token и вернулся на экран входа, а не завис
+        // с мёртвым participantId. Штатный обработчик 'close' ниже сам
+        // разберётся с owners/connections для этого сокета.
+        const ownerWs = owners.get(message.participantId);
+        if (ownerWs) {
+          ownerWs.terminate();
+        }
+      }
+
+      if (
+        message.type === 'admin-set-host' &&
+        (message.participantId === null ||
+          typeof message.participantId === 'string')
+      ) {
+        room.setHost(message.participantId);
+      }
     });
 
     ws.on('error', (err) => {

@@ -545,11 +545,12 @@ describe('Player', () => {
     expect(startGame).toHaveBeenCalledOnce();
   });
 
-  it('hides the "new game" button at game-end from anyone but the marked host', () => {
+  it('hides the "new game" button at game-end from anyone but the currently marked host', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'other',
         isHost: false,
+        hostParticipantId: 'host-id',
         game: baseGame({ phase: 'game-end', hostId: 'host-id', scores: [] }),
       }),
     );
@@ -559,12 +560,38 @@ describe('Player', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows the "new game" button at game-end to the marked host', () => {
+  it('shows the "new game" button at game-end to the currently marked host', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'host-id',
         isHost: true,
+        hostParticipantId: 'host-id',
         game: baseGame({ phase: 'game-end', hostId: 'host-id', scores: [] }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByRole('button', { name: /новая игра/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("uses the LIVE lobby host flag, not the game's frozen hostId, so the button stays reachable even if the original host disconnected", () => {
+    // Regression: room.startGame()'s authorization is based on the live
+    // hostParticipantId lobby flag, which toggleHost() may still change even
+    // at game-end (room.ts: «'game-end' — исключение»). A button gated on
+    // the frozen game.hostId instead can end up hidden from literally
+    // everyone currently connected, with no way to restart short of an
+    // admin-panel reset.
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'someone-else',
+        isHost: false, // isHost is derived from the frozen game.hostId
+        hostParticipantId: 'someone-else', // but the lobby flag has moved on
+        game: baseGame({
+          phase: 'game-end',
+          hostId: 'original-host-who-left',
+          scores: [],
+        }),
       }),
     );
     render(<Player />);

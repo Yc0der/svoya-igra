@@ -13,4 +13,8 @@ describe('pageForPath', () => {
   it('picks player for any other unknown path', () => {
     expect(pageForPath('/whatever')).toBe('player');
   });
+
+  it('picks admin for /admin', () => {
+    expect(pageForPath('/admin')).toBe('admin');
+  });
 });

@@ -340,6 +340,16 @@ describe('Room.startGame', () => {
     expect(room.getState().game).toBeNull();
   });
 
+  it('null requesterId bypasses the host-only check — admin-panel start (design.md, «Админ-панель»)', () => {
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+
+    expect(room.startGame(null)).toEqual({ ok: true });
+  });
+
   it('ignores a stale host marking for someone who disconnected before start', () => {
     const room = new Room(undefined, TEST_PACK);
     joinedId(room, 'Ваня');
@@ -517,6 +527,85 @@ describe('Room.startGame', () => {
     }
   });
 
+  it('proactively notifies listeners the moment the 5s block expires, not only lazily on the next unrelated broadcast', () => {
+    // Regression (живая проверка 2026-08-06): toGameStateView() честно
+    // пересчитывает graceExcludedParticipantId по Date.now(), но без
+    // настоящего таймера здесь клиент узнаёт об этом только со СЛЕДУЮЩЕЙ
+    // рассылкой — а если после исключения больше ничего не происходит
+    // (никто больше не жмёт), рассылки не будет вообще, и кнопка «Ответ» у
+    // исключённого остаётся задизейбленной вечно, хотя счётчик на экране уже
+    // показывает 0с.
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame(petya);
+      const picker = room.toGameStateView(petya)!.turnParticipantId;
+      const answerer = picker === vanya ? vanya : katya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      room.buzz(answerer);
+      room.saidAnswer(answerer);
+      room.vote(petya, false);
+
+      const listener = vi.fn();
+      room.onChange(listener);
+      // Единственное, что происходит между исключением и проверкой —
+      // течение времени. Никакого нового события от игроков.
+      vi.advanceTimersByTime(5_000); // GRACE_EXCLUSION_MS
+
+      expect(listener).toHaveBeenCalledOnce();
+      const notifiedState = listener.mock.calls[0][0];
+      expect(notifiedState.game.phase).toBe('question-open'); // партия не сломалась заодно
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a pending grace-exclusion timer instead of letting it later clear the NEXT one, when a second wrong answer excludes someone else first', () => {
+    // Regression guard: graceExcludedCounterId/Until are scalar (one per
+    // room, not per game/participant) — an unclosed earlier setTimeout would
+    // eventually fire and null out whoever is excluded NOW, even though it
+    // was scheduled for someone else's exclusion window.
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame(petya);
+      const picker = room.toGameStateView(petya)!.turnParticipantId;
+      const first = picker === vanya ? vanya : katya;
+      const second = first === vanya ? katya : vanya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      room.buzz(first);
+      room.saidAnswer(first);
+      room.vote(petya, false); // excludes `first`, schedules a 5s timer for them
+
+      vi.advanceTimersByTime(3_000); // partway through `first`'s exclusion window
+      room.buzz(second);
+      room.saidAnswer(second);
+      room.vote(petya, false); // excludes `second` instead, should cancel first's timer
+      expect(room.toGameStateView(petya)?.graceExcludedParticipantId).toBe(
+        second,
+      );
+
+      // If `first`'s stale timer (due 2s from here) weren't cancelled, it
+      // would fire now and null out `second`'s still-active exclusion.
+      vi.advanceTimersByTime(2_000);
+      expect(room.toGameStateView(petya)?.graceExcludedParticipantId).toBe(
+        second,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reopens the question with the time remaining when it was buzzed, not a fresh 30s', () => {
     vi.useFakeTimers();
     try {
@@ -622,6 +711,18 @@ describe('Room.resetGame', () => {
     expect(room.getState().game).toBeNull();
   });
 
+  it('null requesterId bypasses the host-only check — admin-panel reset (design.md, «Админ-панель»)', () => {
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame(petya);
+
+    room.resetGame(null);
+    expect(room.getState().game).toBeNull();
+  });
+
   it('lets a fresh game be started again after a reset', () => {
     const room = new Room(undefined, TEST_PACK);
     const vanya = joinedId(room, 'Ваня');
@@ -650,6 +751,228 @@ describe('Room.resetGame', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('kills a pending grace-exclusion timer too, so it cannot fire against the NEXT game', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      room.startGame(vanya);
+      const picker = room.toGameStateView()!.turnParticipantId;
+      const answerer = picker === vanya ? vanya : katya;
+      const other = answerer === vanya ? katya : vanya;
+
+      room.selectQuestion(picker, 0, 'q1');
+      room.buzz(answerer);
+      room.saidAnswer(answerer);
+      room.vote(other, false); // excludes `answerer`, schedules a 5s timer
+
+      room.resetGame(vanya);
+      const listener = vi.fn();
+      room.onChange(listener);
+
+      // If the old timer weren't cancelled, it would fire here and call
+      // notify() against a room that has moved on entirely.
+      vi.advanceTimersByTime(5_000);
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// Три метода ниже — только для админ-панели (design.md, «Админ-панель»):
+// никакой авторизации по личности вызывающего у них нет вообще, в отличие
+// от startGame/resetGame выше. Они существуют именно на случай, когда
+// обычная авторизация зашла в тупик (осиротевший ведущий, мусорные
+// участники), поэтому её здесь и не проверяют.
+describe('Room.resetRoom', () => {
+  it('wipes participants, host and game back to a genuinely empty room', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame(vanya);
+    expect(room.getState().game).not.toBeNull();
+
+    room.resetRoom();
+
+    expect(room.getState()).toEqual({
+      participants: [],
+      hostParticipantId: null,
+      game: null,
+    });
+  });
+
+  it('notifies listeners even when the room was already empty', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const listener = vi.fn();
+    room.onChange(listener);
+
+    room.resetRoom();
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it('kills any live timer so a wiped game cannot resurrect', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame(vanya);
+      const picker = room.toGameStateView()!.turnParticipantId;
+      room.selectQuestion(picker, 0, 'q1');
+
+      room.resetRoom();
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
+
+      expect(room.getState().game).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets a brand new game be started with newly joined participants afterwards', () => {
+    const room = new Room(undefined, TEST_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.resetRoom();
+
+    const vanya2 = joinedId(room, 'Ваня');
+    const katya2 = joinedId(room, 'Катя');
+    expect(room.startGame(vanya2)).toEqual({ ok: true });
+    expect([vanya2, katya2]).toContain(
+      room.toGameStateView()!.turnParticipantId,
+    );
+  });
+});
+
+describe('Room.kickParticipant', () => {
+  it('removes the participant from the room entirely, not just marking them disconnected', () => {
+    const room = new Room();
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+
+    expect(room.kickParticipant(vanya)).toBe('ok');
+    expect(room.getState().participants.map((p) => p.id)).not.toContain(vanya);
+  });
+
+  it('reports not-found for an unknown id and leaves the room untouched', () => {
+    const room = new Room();
+    joinedId(room, 'Ваня');
+    const listener = vi.fn();
+    room.onChange(listener);
+
+    expect(room.kickParticipant('unknown-id')).toBe('not-found');
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('invalidates their reconnect token — kicked means gone, not disconnected', () => {
+    const room = new Room();
+    const vanya = joinedId(room, 'Ваня');
+    const joined = room.getState().participants[0];
+    room.kickParticipant(vanya);
+
+    expect(room.reconnect(joined.token)).toEqual({ error: 'invalid-token' });
+  });
+
+  it('clears the lobby host flag when the kicked participant was marked host', () => {
+    const room = new Room();
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.toggleHost(vanya);
+
+    room.kickParticipant(vanya);
+    expect(room.getState().hostParticipantId).toBeNull();
+  });
+
+  it('leaves an unrelated bystander kick without touching an in-progress game', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame(vanya);
+    const bystander = joinedId(room, 'Опоздавший'); // joined after start, never a counter
+
+    room.kickParticipant(bystander);
+
+    expect(room.getState().game).not.toBeNull();
+    expect(room.getState().participants.map((p) => p.id)).toEqual(
+      expect.arrayContaining([vanya, katya]),
+    );
+  });
+
+  it('resets the game when kicking a counter who is actually part of it, rather than leaving dangling references', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame(vanya);
+    expect(room.getState().game).not.toBeNull();
+
+    room.kickParticipant(katya);
+
+    expect(room.getState().game).toBeNull();
+    expect(room.getState().participants.map((p) => p.id)).toEqual([vanya]);
+  });
+
+  it('resets the game when kicking the frozen game host', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame(petya);
+    expect(room.getState().game).not.toBeNull();
+
+    room.kickParticipant(petya);
+
+    expect(room.getState().game).toBeNull();
+    expect(room.getState().participants.map((p) => p.id)).toEqual([
+      vanya,
+      katya,
+    ]);
+  });
+});
+
+describe('Room.setHost', () => {
+  it('assigns the host flag directly, without needing the target to click anything themselves', () => {
+    const room = new Room();
+    const vanya = joinedId(room, 'Ваня');
+
+    expect(room.setHost(vanya)).toBe('ok');
+    expect(room.getState().hostParticipantId).toBe(vanya);
+  });
+
+  it('clears the host flag when given null', () => {
+    const room = new Room();
+    const vanya = joinedId(room, 'Ваня');
+    room.setHost(vanya);
+
+    expect(room.setHost(null)).toBe('ok');
+    expect(room.getState().hostParticipantId).toBeNull();
+  });
+
+  it('reports not-found for an unknown id and leaves the host flag untouched', () => {
+    const room = new Room();
+    const vanya = joinedId(room, 'Ваня');
+    room.setHost(vanya);
+
+    expect(room.setHost('unknown-id')).toBe('not-found');
+    expect(room.getState().hostParticipantId).toBe(vanya);
+  });
+
+  it('works even while a game is in progress — unlike toggleHost, which is locked out then', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame(vanya);
+    expect(room.getState().game?.phase).toBe('selecting');
+
+    expect(room.setHost(katya)).toBe('ok');
+    expect(room.getState().hostParticipantId).toBe(katya);
+    // Замороженный ведущий уже идущей партии не меняется задним числом —
+    // это влияет только на СЛЕДУЮЩИЙ запуск.
+    expect(room.getState().game?.hostId).toBeNull();
   });
 });
 

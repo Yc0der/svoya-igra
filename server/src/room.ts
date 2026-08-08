@@ -115,6 +115,15 @@ export class Room {
   // одной короткой блокировки, не влияющих на исход партии).
   private graceExcludedCounterId: string | null = null;
   private graceExcludedUntil: number | null = null;
+  // Настоящий таймер (тот же принцип, что и gameTimeoutHandle) — без него
+  // graceExcludedParticipantId технически "истекает" в toGameStateView()
+  // (stillGraceExcluded() честно сравнивает с Date.now()), но клиенты узнают
+  // об этом только со СЛЕДУЮЩЕЙ рассылкой состояния. Если до неё ничего не
+  // происходит (никто больше не жмёт, вопрос просто ждёт), у исключённого
+  // кнопка «Ответ» так и останется задизейбленной вечно, хотя счётчик на
+  // экране уже показывает 0с — баг, пойманный на живой проверке 2026-08-06.
+  private graceExclusionTimeoutHandle: ReturnType<typeof setTimeout> | null =
+    null;
   private listeners = new Set<(state: RoomState) => void>();
 
   constructor(initial?: RoomState, pack?: Pack) {
@@ -183,7 +192,11 @@ export class Room {
     this.notify();
   }
 
-  startGame(requesterId: string): StartGameResult {
+  // requesterId === null — обход авторизации для админ-панели (design.md,
+  // «Админ-панель»): у нештатной комнаты (осиротевший ведущий, токен
+  // которого ни у кого из присутствующих нет) иначе нет способа сдвинуть
+  // партию с места вообще ничем, кроме удаления файла снапшота руками.
+  startGame(requesterId: string | null): StartGameResult {
     if (!this.pack) {
       return { error: 'no-pack' };
     }
@@ -223,7 +236,7 @@ export class Room {
     // ведущего (design.md не требует ведущего вдвоём) — но как только он
     // назначен, запуск (и повторный запуск после game-end) — его решение,
     // не любого игрока за столом.
-    if (hostId !== null && requesterId !== hostId) {
+    if (requesterId !== null && hostId !== null && requesterId !== hostId) {
       return { error: 'host-only' };
     }
     const counters = present.filter((p) => p.id !== hostId);
@@ -241,11 +254,8 @@ export class Room {
     // 'game-end', у которого таймера и так нет, но на всякий случай) не
     // должен продолжать тикать против нового this.game — тот же паттерн, что
     // и в applyEffects.
-    if (this.gameTimeoutHandle) {
-      clearTimeout(this.gameTimeoutHandle);
-      this.gameTimeoutHandle = null;
-      this.gameTimerDeadline = null;
-    }
+    this.clearGameTimer();
+    this.clearGraceExclusion();
     const counterIds = counters.map((p) => p.id);
     this.game = createInitialState(this.pack, counterIds, hostId);
     this.notify();
@@ -255,23 +265,105 @@ export class Room {
   // Отбрасывает текущую партию (в том числе восстановленную из снапшота
   // после перезапуска процесса) и возвращает комнату в пустое лобби — без
   // этого единственным способом сбросить состояние было вручную удалить файл
-  // снапшота и перезапустить сервер. Та же авторизация, что и у startGame():
-  // пока ведущий назначен, решение отбросить партию — его, не любого игрока.
-  resetGame(requesterId: string): void {
+  // снапшота и перезапустить сервер. Та же авторизация, что и у startGame()
+  // (requesterId === null — обход для админ-панели): пока ведущий назначен,
+  // решение отбросить партию — его, не любого игрока.
+  resetGame(requesterId: string | null): void {
     if (!this.game) return;
     if (
+      requesterId !== null &&
       this.hostParticipantId !== null &&
       requesterId !== this.hostParticipantId
     ) {
       return;
     }
+    this.clearGameTimer();
+    this.clearGraceExclusion();
+    this.game = null;
+    this.notify();
+  }
+
+  // Полный сброс комнаты — участники, ведущий и партия одновременно, как при
+  // ручном удалении room-snapshot.json и перезапуске процесса, но без
+  // перезапуска. Только для админ-панели (design.md, «Админ-панель»):
+  // никакого понятия «кто вправе» тут нет — это единственное действие,
+  // которое разгребает по-настоящему нештатную комнату (осиротевший
+  // ведущий, мусорные тестовые участники и т.п.), когда ни у кого из
+  // реально присутствующих нет токена, чтобы исправить это игровыми
+  // средствами.
+  resetRoom(): void {
+    this.clearGameTimer();
+    this.clearGraceExclusion();
+    this.participants = [];
+    this.hostParticipantId = null;
+    this.game = null;
+    this.notify();
+  }
+
+  // Только для админ-панели. Убирает участника из комнаты насовсем (не то
+  // же самое, что disconnect() — тот лишь помечает временное отсутствие,
+  // сохраняя место и токен для reconnect). Если участник участвует в
+  // текущей партии (ведущий или счётчик — то есть присутствует в
+  // game.scores), партия сбрасывается вместе с ним: движок не умеет
+  // вычеркнуть счётчика из уже идущей партии, не оставив висячих ссылок
+  // (turnCounterId, голоса и т.д.), а частично исправленное состояние хуже
+  // явного возврата в лобби.
+  kickParticipant(participantId: string): 'ok' | 'not-found' {
+    const index = this.participants.findIndex((p) => p.id === participantId);
+    if (index === -1) return 'not-found';
+    this.participants.splice(index, 1);
+    if (this.hostParticipantId === participantId) {
+      this.hostParticipantId = null;
+    }
+    if (
+      this.game &&
+      (this.game.hostId === participantId || participantId in this.game.scores)
+    ) {
+      this.clearGameTimer();
+      this.clearGraceExclusion();
+      this.game = null;
+    }
+    this.notify();
+    return 'ok';
+  }
+
+  // Только для админ-панели — прямое назначение/снятие ведущего в лобби, в
+  // обход toggleHost()'а (тот требует реального клика САМОГО назначаемого и
+  // не срабатывает во время идущей партии). Нужен именно для нештатного
+  // случая: роль ведущего застряла на токене, которого ни у кого из
+  // присутствующих сейчас нет под рукой.
+  setHost(participantId: string | null): 'ok' | 'not-found' {
+    if (
+      participantId !== null &&
+      !this.participants.some((p) => p.id === participantId)
+    ) {
+      return 'not-found';
+    }
+    this.hostParticipantId = participantId;
+    this.notify();
+    return 'ok';
+  }
+
+  private clearGameTimer(): void {
     if (this.gameTimeoutHandle) {
       clearTimeout(this.gameTimeoutHandle);
       this.gameTimeoutHandle = null;
       this.gameTimerDeadline = null;
     }
-    this.game = null;
-    this.notify();
+  }
+
+  // Гасит и таймер, и сами поля — вызывается везде, где this.game исчезает
+  // или перезаписывается (тот же список мест, что и clearGameTimer()), иначе
+  // таймер от СТАРОЙ партии рано или поздно сработает и обнулит
+  // исключение уже НОВОЙ (graceExcludedCounterId скалярное — одно на
+  // комнату, не привязано к конкретной партии).
+  private clearGraceExclusion(): void {
+    if (this.graceExclusionTimeoutHandle) {
+      clearTimeout(this.graceExclusionTimeoutHandle);
+      this.graceExclusionTimeoutHandle = null;
+    }
+    this.graceExcludedCounterId = null;
+    this.graceExcludedUntil = null;
   }
 
   selectQuestion(
@@ -553,8 +645,26 @@ export class Room {
       state.phase === 'question-open' &&
       state.buzzedCounterId === null
     ) {
+      // Гасим предыдущий таймер исключения (если кто-то другой уже был им
+      // временно связан) ПЕРЕД тем, как завести новый — иначе более ранний
+      // таймер рано или поздно сработает и обнулит только что заведённое здесь
+      // исключение чужим callback'ом.
+      this.clearGraceExclusion();
       this.graceExcludedCounterId = buzzedBefore;
       this.graceExcludedUntil = Date.now() + GRACE_EXCLUSION_MS;
+      // Без настоящего таймера здесь исключение технически истекает в
+      // toGameStateView() (stillGraceExcluded() честно сравнивает с
+      // Date.now()), но клиенты узнают об этом только со СЛЕДУЮЩЕЙ рассылкой.
+      // Если до неё ничего не происходит, кнопка «Ответ» у исключённого
+      // остаётся задизейбленной вечно, хотя счётчик на экране уже показывает
+      // 0с (живая проверка, 2026-08-06) — этот таймер и есть недостающая
+      // рассылка ровно в момент, когда исключение реально кончается.
+      this.graceExclusionTimeoutHandle = setTimeout(() => {
+        this.graceExclusionTimeoutHandle = null;
+        this.graceExcludedCounterId = null;
+        this.graceExcludedUntil = null;
+        this.notify();
+      }, GRACE_EXCLUSION_MS);
     }
 
     this.applyEffects(effects, event.type === 'timer-expired');
