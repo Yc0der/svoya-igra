@@ -182,7 +182,15 @@ export function useRoomConnection(
           setStatus('joined');
         }
         if (message.type === 'name-taken') {
-          setStatus('name-taken');
+          // Гонка двух подряд join() (например, двойной тап): второй запрос
+          // мог уйти до того, как пришёл ответ на первый, и получить
+          // 'name-taken' уже ПОСЛЕ того, как первый успешно завершился
+          // 'joined'. Это устаревший ответ не на тот запрос, что определяет
+          // текущий статус — применять его, затирая уже случившийся успех,
+          // нельзя.
+          setStatus((current) =>
+            current === 'joined' ? current : 'name-taken',
+          );
         }
         if (message.type === 'invalid-token') {
           localStorage.removeItem(TOKEN_KEY);
