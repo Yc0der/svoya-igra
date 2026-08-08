@@ -8,6 +8,11 @@ import {
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
   ROUND_END_TIMER_MS,
+  FINAL_ELIM_TIMER_MS,
+  FINAL_WAGER_TIMER_MS,
+  FINAL_ANSWER_TIMER_MS,
+  FINAL_JUDGING_TIMER_MS,
+  FINAL_REVEAL_TIMER_MS,
   type EngineState,
   type EngineEvent,
   type Effect,
@@ -42,7 +47,11 @@ export type StartGameResult =
   | { ok: true }
   | {
       error:
-        'not-enough-players' | 'no-pack' | 'game-in-progress' | 'host-required';
+        | 'not-enough-players'
+        | 'no-pack'
+        | 'game-in-progress'
+        | 'host-required'
+        | 'host-only';
     };
 
 function normalizeName(name: string): string {
@@ -61,6 +70,11 @@ const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   judging: { timer: 'vote', ms: VOTE_TIMER_MS },
   reveal: { timer: 'reveal', ms: REVEAL_TIMER_MS },
   'round-end': { timer: 'round-end', ms: ROUND_END_TIMER_MS },
+  'final-elim': { timer: 'final-elim', ms: FINAL_ELIM_TIMER_MS },
+  'final-wager': { timer: 'final-wager', ms: FINAL_WAGER_TIMER_MS },
+  'final-answer': { timer: 'final-answer', ms: FINAL_ANSWER_TIMER_MS },
+  'final-judging': { timer: 'final-judging', ms: FINAL_JUDGING_TIMER_MS },
+  'final-reveal': { timer: 'final-reveal', ms: FINAL_REVEAL_TIMER_MS },
 };
 
 // Сколько секунд ответивший неверно не может нажать повторно — не игровое
@@ -101,6 +115,15 @@ export class Room {
   // одной короткой блокировки, не влияющих на исход партии).
   private graceExcludedCounterId: string | null = null;
   private graceExcludedUntil: number | null = null;
+  // Настоящий таймер (тот же принцип, что и gameTimeoutHandle) — без него
+  // graceExcludedParticipantId технически "истекает" в toGameStateView()
+  // (stillGraceExcluded() честно сравнивает с Date.now()), но клиенты узнают
+  // об этом только со СЛЕДУЮЩЕЙ рассылкой состояния. Если до неё ничего не
+  // происходит (никто больше не жмёт, вопрос просто ждёт), у исключённого
+  // кнопка «Ответ» так и останется задизейбленной вечно, хотя счётчик на
+  // экране уже показывает 0с — баг, пойманный на живой проверке 2026-08-06.
+  private graceExclusionTimeoutHandle: ReturnType<typeof setTimeout> | null =
+    null;
   private listeners = new Set<(state: RoomState) => void>();
 
   constructor(initial?: RoomState, pack?: Pack) {
@@ -169,7 +192,11 @@ export class Room {
     this.notify();
   }
 
-  startGame(): StartGameResult {
+  // requesterId === null — обход авторизации для админ-панели (design.md,
+  // «Админ-панель»): у нештатной комнаты (осиротевший ведущий, токен
+  // которого ни у кого из присутствующих нет) иначе нет способа сдвинуть
+  // партию с места вообще ничем, кроме удаления файла снапшота руками.
+  startGame(requesterId: string | null): StartGameResult {
     if (!this.pack) {
       return { error: 'no-pack' };
     }
@@ -205,6 +232,13 @@ export class Room {
       present.some((p) => p.id === this.hostParticipantId)
         ? this.hostParticipantId
         : null;
+    // Стартовать партию может кто угодно, пока никто не взял на себя роль
+    // ведущего (design.md не требует ведущего вдвоём) — но как только он
+    // назначен, запуск (и повторный запуск после game-end) — его решение,
+    // не любого игрока за столом.
+    if (requesterId !== null && hostId !== null && requesterId !== hostId) {
+      return { error: 'host-only' };
+    }
     const counters = present.filter((p) => p.id !== hostId);
     if (counters.length < 2) {
       return { error: 'not-enough-players' };
@@ -220,15 +254,116 @@ export class Room {
     // 'game-end', у которого таймера и так нет, но на всякий случай) не
     // должен продолжать тикать против нового this.game — тот же паттерн, что
     // и в applyEffects.
+    this.clearGameTimer();
+    this.clearGraceExclusion();
+    const counterIds = counters.map((p) => p.id);
+    this.game = createInitialState(this.pack, counterIds, hostId);
+    this.notify();
+    return { ok: true };
+  }
+
+  // Отбрасывает текущую партию (в том числе восстановленную из снапшота
+  // после перезапуска процесса) и возвращает комнату в пустое лобби — без
+  // этого единственным способом сбросить состояние было вручную удалить файл
+  // снапшота и перезапустить сервер. Та же авторизация, что и у startGame()
+  // (requesterId === null — обход для админ-панели): пока ведущий назначен,
+  // решение отбросить партию — его, не любого игрока.
+  resetGame(requesterId: string | null): void {
+    if (!this.game) return;
+    if (
+      requesterId !== null &&
+      this.hostParticipantId !== null &&
+      requesterId !== this.hostParticipantId
+    ) {
+      return;
+    }
+    this.clearGameTimer();
+    this.clearGraceExclusion();
+    this.game = null;
+    this.notify();
+  }
+
+  // Полный сброс комнаты — участники, ведущий и партия одновременно, как при
+  // ручном удалении room-snapshot.json и перезапуске процесса, но без
+  // перезапуска. Только для админ-панели (design.md, «Админ-панель»):
+  // никакого понятия «кто вправе» тут нет — это единственное действие,
+  // которое разгребает по-настоящему нештатную комнату (осиротевший
+  // ведущий, мусорные тестовые участники и т.п.), когда ни у кого из
+  // реально присутствующих нет токена, чтобы исправить это игровыми
+  // средствами.
+  resetRoom(): void {
+    this.clearGameTimer();
+    this.clearGraceExclusion();
+    this.participants = [];
+    this.hostParticipantId = null;
+    this.game = null;
+    this.notify();
+  }
+
+  // Только для админ-панели. Убирает участника из комнаты насовсем (не то
+  // же самое, что disconnect() — тот лишь помечает временное отсутствие,
+  // сохраняя место и токен для reconnect). Если участник участвует в
+  // текущей партии (ведущий или счётчик — то есть присутствует в
+  // game.scores), партия сбрасывается вместе с ним: движок не умеет
+  // вычеркнуть счётчика из уже идущей партии, не оставив висячих ссылок
+  // (turnCounterId, голоса и т.д.), а частично исправленное состояние хуже
+  // явного возврата в лобби.
+  kickParticipant(participantId: string): 'ok' | 'not-found' {
+    const index = this.participants.findIndex((p) => p.id === participantId);
+    if (index === -1) return 'not-found';
+    this.participants.splice(index, 1);
+    if (this.hostParticipantId === participantId) {
+      this.hostParticipantId = null;
+    }
+    if (
+      this.game &&
+      (this.game.hostId === participantId || participantId in this.game.scores)
+    ) {
+      this.clearGameTimer();
+      this.clearGraceExclusion();
+      this.game = null;
+    }
+    this.notify();
+    return 'ok';
+  }
+
+  // Только для админ-панели — прямое назначение/снятие ведущего в лобби, в
+  // обход toggleHost()'а (тот требует реального клика САМОГО назначаемого и
+  // не срабатывает во время идущей партии). Нужен именно для нештатного
+  // случая: роль ведущего застряла на токене, которого ни у кого из
+  // присутствующих сейчас нет под рукой.
+  setHost(participantId: string | null): 'ok' | 'not-found' {
+    if (
+      participantId !== null &&
+      !this.participants.some((p) => p.id === participantId)
+    ) {
+      return 'not-found';
+    }
+    this.hostParticipantId = participantId;
+    this.notify();
+    return 'ok';
+  }
+
+  private clearGameTimer(): void {
     if (this.gameTimeoutHandle) {
       clearTimeout(this.gameTimeoutHandle);
       this.gameTimeoutHandle = null;
       this.gameTimerDeadline = null;
     }
-    const counterIds = counters.map((p) => p.id);
-    this.game = createInitialState(this.pack, counterIds, hostId);
-    this.notify();
-    return { ok: true };
+  }
+
+  // Гасит и таймер, и сами поля — вызывается везде, где this.game исчезает
+  // или перезаписывается (тот же список мест, что и clearGameTimer()), иначе
+  // таймер от СТАРОЙ партии рано или поздно сработает и обнулит
+  // исключение уже НОВОЙ (graceExcludedCounterId скалярное — одно на
+  // комнату, не привязано к конкретной партии).
+  private clearGraceExclusion(): void {
+    if (this.graceExclusionTimeoutHandle) {
+      clearTimeout(this.graceExclusionTimeoutHandle);
+      this.graceExclusionTimeoutHandle = null;
+    }
+    this.graceExcludedCounterId = null;
+    this.graceExcludedUntil = null;
   }
 
   selectQuestion(
@@ -308,6 +443,47 @@ export class Room {
     this.dispatch({ type: 'cancel-question', requesterId });
   }
 
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  skipToFinal(requesterId: string): void {
+    this.dispatch({ type: 'skip-to-final', requesterId });
+  }
+
+  eliminateFinalTheme(participantId: string, themeIndex: number): void {
+    this.dispatch({
+      type: 'eliminate-final-theme',
+      counterId: participantId,
+      themeIndex,
+    });
+  }
+
+  submitWager(participantId: string, amount: number): void {
+    this.dispatch({ type: 'submit-wager', counterId: participantId, amount });
+  }
+
+  submitFinalAnswer(participantId: string, text: string): void {
+    this.dispatch({
+      type: 'submit-final-answer',
+      counterId: participantId,
+      text,
+    });
+  }
+
+  // Панель ведущего в финале — тем же паттерном, что adjustScore/
+  // cancelQuestion: requesterId настоящий отправитель, не то, что клиент о
+  // себе заявляет; движок сам сверяет requesterId === hostId.
+  finalVote(
+    requesterId: string,
+    targetParticipantId: string,
+    correct: boolean,
+  ): void {
+    this.dispatch({
+      type: 'final-vote',
+      requesterId,
+      counterId: targetParticipantId,
+      correct,
+    });
+  }
+
   getState(): RoomState {
     return {
       participants: this.participants.map((p) => ({ ...p })),
@@ -338,8 +514,23 @@ export class Room {
       (game.phase === 'judging' &&
         (game.hostId === null || viewerId === game.hostId));
 
+    // Ведущему на final-judging нужно видеть ставки/ответы всех, чтобы
+    // судить (design.md, финал-спека, «Комната») — та же причина, по которой
+    // на judging только ему виден correctAnswer. На final-reveal видно всем,
+    // ставка/ответ соперника уже не секрет — партия окончена.
+    const showAllFinal =
+      game.phase === 'final-reveal' ||
+      (game.phase === 'final-judging' && viewerId === game.hostId);
+
     return {
       phase: game.phase,
+      // Замороженный на время партии ведущий — НЕ то же самое, что
+      // лобби-флаг hostParticipantId, который может ещё указывать на
+      // кого-то, кто был отмечен ведущим, но на момент старта партии
+      // оказался отключён (design.md, «Ведущий»: «во время партии роль
+      // зафиксирована»). Клиент обязан считать себя ведущим по этому полю,
+      // пока партия идёт, а не по лобби-флагу.
+      hostId: game.hostId,
       roundIndex: game.roundIndex,
       grid: round.themes.map((theme) => ({
         themeName: theme.name,
@@ -375,6 +566,49 @@ export class Room {
         participantId,
         score,
       })),
+      finalThemes: game.finalRemainingThemeIndices
+        ? game.pack.final!.themes.map((theme, i) => ({
+            name: theme.name,
+            eliminated: !game.finalRemainingThemeIndices!.includes(i),
+          }))
+        : null,
+      finalElimParticipantId: game.finalElimCounterId,
+      finalQuestion:
+        game.finalThemeIndex !== null &&
+        (game.phase === 'final-answer' ||
+          game.phase === 'final-judging' ||
+          game.phase === 'final-reveal')
+          ? {
+              text: game.pack.final!.themes[game.finalThemeIndex].question.text,
+            }
+          : null,
+      finalWagers:
+        game.finalThemeIndex === null
+          ? null
+          : Object.entries(game.finalWagers)
+              .filter(([counterId]) => showAllFinal || counterId === viewerId)
+              .map(([participantId, amount]) => ({ participantId, amount })),
+      finalAnswers:
+        game.finalThemeIndex === null
+          ? null
+          : Object.entries(game.finalAnswers)
+              .filter(([counterId]) => showAllFinal || counterId === viewerId)
+              .map(([participantId, text]) => ({ participantId, text })),
+      finalVerdicts:
+        game.phase === 'final-judging' || game.phase === 'final-reveal'
+          ? Object.entries(game.finalVerdicts)
+              .filter(() => showAllFinal)
+              .map(([participantId, correct]) => ({ participantId, correct }))
+          : null,
+      finalCorrectAnswer:
+        showAllFinal && game.finalThemeIndex !== null
+          ? {
+              text: game.pack.final!.themes[game.finalThemeIndex].question
+                .answer,
+              comment:
+                game.pack.final!.themes[game.finalThemeIndex].question.comment,
+            }
+          : null,
     };
   }
 
@@ -411,8 +645,26 @@ export class Room {
       state.phase === 'question-open' &&
       state.buzzedCounterId === null
     ) {
+      // Гасим предыдущий таймер исключения (если кто-то другой уже был им
+      // временно связан) ПЕРЕД тем, как завести новый — иначе более ранний
+      // таймер рано или поздно сработает и обнулит только что заведённое здесь
+      // исключение чужим callback'ом.
+      this.clearGraceExclusion();
       this.graceExcludedCounterId = buzzedBefore;
       this.graceExcludedUntil = Date.now() + GRACE_EXCLUSION_MS;
+      // Без настоящего таймера здесь исключение технически истекает в
+      // toGameStateView() (stillGraceExcluded() честно сравнивает с
+      // Date.now()), но клиенты узнают об этом только со СЛЕДУЮЩЕЙ рассылкой.
+      // Если до неё ничего не происходит, кнопка «Ответ» у исключённого
+      // остаётся задизейбленной вечно, хотя счётчик на экране уже показывает
+      // 0с (живая проверка, 2026-08-06) — этот таймер и есть недостающая
+      // рассылка ровно в момент, когда исключение реально кончается.
+      this.graceExclusionTimeoutHandle = setTimeout(() => {
+        this.graceExclusionTimeoutHandle = null;
+        this.graceExcludedCounterId = null;
+        this.graceExcludedUntil = null;
+        this.notify();
+      }, GRACE_EXCLUSION_MS);
     }
 
     this.applyEffects(effects, event.type === 'timer-expired');

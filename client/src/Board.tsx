@@ -56,6 +56,92 @@ export function Board() {
     );
   }
 
+  if (game.phase === 'final-elim') {
+    return (
+      <div className="board">
+        <h1>Финал — выбор темы</h1>
+        <p className="board-status">
+          Сейчас выбирает{' '}
+          <strong>{nameOf(game.finalElimParticipantId ?? '')}</strong>
+        </p>
+        {remainingSeconds !== null && (
+          <p className="board-timer">{remainingSeconds}с</p>
+        )}
+        <ul className="final-theme-list">
+          {game.finalThemes?.map((theme) => (
+            <li
+              key={theme.name}
+              className={theme.eliminated ? 'is-eliminated' : ''}
+            >
+              {theme.name}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  if (
+    game.phase === 'final-wager' ||
+    game.phase === 'final-answer' ||
+    game.phase === 'final-judging'
+  ) {
+    return (
+      <div className="board">
+        <h1>Финал</h1>
+        <p className="board-status">
+          {game.finalThemes?.find((t) => !t.eliminated)?.name}
+        </p>
+        {game.finalQuestion && (
+          <p className="board-question">{game.finalQuestion.text}</p>
+        )}
+        {game.phase === 'final-judging' && (
+          <p className="board-status">Ведущий проверяет ответы…</p>
+        )}
+        {remainingSeconds !== null && (
+          <p className="board-timer">{remainingSeconds}с</p>
+        )}
+      </div>
+    );
+  }
+
+  if (game.phase === 'final-reveal') {
+    return (
+      <div className="board">
+        <h1>Финал — итог</h1>
+        {game.finalCorrectAnswer && (
+          <div className="board-answer">
+            <p>{game.finalCorrectAnswer.text}</p>
+            {game.finalCorrectAnswer.comment && (
+              <p>{game.finalCorrectAnswer.comment}</p>
+            )}
+          </div>
+        )}
+        <ul className="final-judging-list">
+          {game.finalAnswers?.map((a) => {
+            const wager = game.finalWagers?.find(
+              (w) => w.participantId === a.participantId,
+            )?.amount;
+            const correct = game.finalVerdicts?.find(
+              (v) => v.participantId === a.participantId,
+            )?.correct;
+            return (
+              <li key={a.participantId}>
+                <span className="final-judging-name">
+                  {nameOf(a.participantId)}
+                </span>
+                <span className="final-judging-wager">{wager}</span>
+                <span className="final-judging-answer">{a.text}</span>
+                <span>{correct ? '✓' : '✗'}</span>
+              </li>
+            );
+          })}
+        </ul>
+        {scoreboard}
+      </div>
+    );
+  }
+
   return (
     <div className="board">
       {game.phase === 'selecting' && (

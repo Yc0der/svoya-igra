@@ -13,6 +13,7 @@ const mockedUseRoomConnection = vi.mocked(useRoomConnection);
 function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
   return {
     phase: 'selecting',
+    hostId: null,
     roundIndex: 0,
     grid: [],
     turnParticipantId: '',
@@ -23,6 +24,13 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     graceExcludedUntil: null,
     timerDeadline: null,
     scores: [],
+    finalThemes: null,
+    finalElimParticipantId: null,
+    finalQuestion: null,
+    finalWagers: null,
+    finalAnswers: null,
+    finalVerdicts: null,
+    finalCorrectAnswer: null,
     ...overrides,
   };
 }
@@ -47,8 +55,19 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     vote: vi.fn(),
     adjustScore: vi.fn(),
     cancelQuestion: vi.fn(),
+    resetGame: vi.fn(),
+    skipToFinal: vi.fn(),
+    eliminateFinalTheme: vi.fn(),
+    submitWager: vi.fn(),
+    submitFinalAnswer: vi.fn(),
+    finalVote: vi.fn(),
     ...overrides,
   };
+}
+
+function renderBoard(overrides: Partial<RoomConnection> = {}): void {
+  mockedUseRoomConnection.mockReturnValue(connection(overrides));
+  render(<Board />);
 }
 
 describe('Board', () => {
@@ -252,5 +271,95 @@ describe('Board', () => {
     render(<Board />);
     const items = screen.getAllByRole('listitem');
     expect(items[0]).toHaveTextContent('Ваня');
+  });
+
+  it('final-elim: shows the theme list with eliminated ones struck out', () => {
+    renderBoard({
+      game: {
+        ...baseGame(),
+        phase: 'final-elim',
+        finalThemes: [
+          { name: 'Финал A', eliminated: true },
+          { name: 'Финал B', eliminated: false },
+        ],
+        finalElimParticipantId: 'p1',
+      },
+      participants: [{ id: 'p1', name: 'Ваня', connected: true }],
+    });
+    expect(screen.getByText('Финал A')).toHaveClass('is-eliminated');
+    expect(screen.getByText(/Ваня/)).toBeInTheDocument();
+  });
+
+  it('final-wager and final-answer: shows the theme name and question without revealing wagers/answers', () => {
+    renderBoard({
+      game: {
+        ...baseGame(),
+        phase: 'final-answer',
+        finalThemes: [{ name: 'Финал A', eliminated: false }],
+        finalQuestion: { text: 'Вопрос финала?' },
+      },
+    });
+    expect(screen.getByText('Вопрос финала?')).toBeInTheDocument();
+    expect(screen.queryByText(/ответ/)).not.toBeInTheDocument();
+  });
+
+  it('final-reveal: shows the full wager/answer/verdict table, the correct answer, and updated scores', () => {
+    renderBoard({
+      game: {
+        ...baseGame(),
+        phase: 'final-reveal',
+        finalWagers: [{ participantId: 'p1', amount: 50 }],
+        finalAnswers: [{ participantId: 'p1', text: 'ответ 1' }],
+        finalVerdicts: [{ participantId: 'p1', correct: true }],
+        finalCorrectAnswer: { text: 'Правильный ответ', comment: 'Коммент' },
+        scores: [{ participantId: 'p1', score: 150 }],
+      },
+      participants: [{ id: 'p1', name: 'Ваня', connected: true }],
+    });
+    expect(screen.getByText('ответ 1')).toBeInTheDocument();
+    expect(screen.getByText('150')).toBeInTheDocument();
+    expect(screen.getByText('Правильный ответ')).toBeInTheDocument();
+    expect(screen.getByText('Коммент')).toBeInTheDocument();
+  });
+
+  it('final-elim: shows a countdown', () => {
+    renderBoard({
+      game: {
+        ...baseGame(),
+        phase: 'final-elim',
+        finalThemes: [{ name: 'Финал A', eliminated: false }],
+        finalElimParticipantId: 'p1',
+        timerDeadline: Date.now() + 12000,
+      },
+      participants: [{ id: 'p1', name: 'Ваня', connected: true }],
+    });
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
+  it('final-wager/final-answer/final-judging: shows a countdown', () => {
+    renderBoard({
+      game: {
+        ...baseGame(),
+        phase: 'final-answer',
+        finalThemes: [{ name: 'Финал A', eliminated: false }],
+        finalQuestion: { text: 'Вопрос финала?' },
+        timerDeadline: Date.now() + 12000,
+      },
+    });
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
+  it('final-reveal: does not show a countdown — it is a passive pause, not a timed decision', () => {
+    renderBoard({
+      game: {
+        ...baseGame(),
+        phase: 'final-reveal',
+        finalWagers: [],
+        finalAnswers: [],
+        finalVerdicts: [],
+        timerDeadline: Date.now() + 12000,
+      },
+    });
+    expect(screen.queryByText(/^\d+с$/)).not.toBeInTheDocument();
   });
 });

@@ -12,7 +12,7 @@ import {
 } from './server.js';
 import type { ServerMessage } from './protocol.js';
 import type { Pack } from './pack.js';
-import { VOTE_TIMER_MS } from './engine.js';
+import { REVEAL_TIMER_MS, VOTE_TIMER_MS } from './engine.js';
 
 // Attaches a persistent 'message' listener synchronously at socket creation
 // (before any await), so no frame can ever arrive unheard even if the server
@@ -882,7 +882,7 @@ describe('createServer host mode', () => {
       (cAfterToggle as { hostParticipantId: string }).hostParticipantId,
     ).toBe(c.participantId);
 
-    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    c.ws.send(JSON.stringify({ type: 'start-game' }));
     const aState = (await settle(a, b, a)) as {
       game: { phase: string; turnParticipantId: string };
     };
@@ -944,7 +944,7 @@ describe('createServer host mode', () => {
     c.ws.send(JSON.stringify({ type: 'toggle-host' }));
     await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
 
-    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    c.ws.send(JSON.stringify({ type: 'start-game' }));
     const aState = (await settle(a, b, a)) as {
       game: { turnParticipantId: string };
     };
@@ -1008,5 +1008,389 @@ describe('createServer host mode', () => {
     c.ws.close();
     await server.close();
     await rm(dir, { recursive: true, force: true });
+  });
+});
+
+const TEST_PACK_WITH_FINAL: Pack = {
+  ...TEST_PACK,
+  final: {
+    themes: [
+      {
+        name: 'Финал A',
+        question: { id: 'f1', text: 'F1?', answer: 'ответ f1' },
+      },
+      {
+        name: 'Финал B',
+        question: { id: 'f2', text: 'F2?', answer: 'ответ f2' },
+      },
+    ],
+  },
+};
+
+describe('createServer final round', () => {
+  it('wires elimination, wagers, answers and host judging over the real transport', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-final-'));
+      const room = new Room(undefined, TEST_PACK_WITH_FINAL);
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        lanUrl: 'http://192.168.1.1:8080/',
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } =
+        server.httpServer.address() as import('node:net').AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const a = await joinPlayer(url, 'Ваня');
+      const b = await joinPlayer(url, 'Катя');
+      await a.nextMessage();
+      const c = await joinPlayer(url, 'Петя');
+      await a.nextMessage();
+      await b.nextMessage();
+
+      c.ws.send(JSON.stringify({ type: 'toggle-host' }));
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+      c.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(a, b, a)) as {
+        game: { turnParticipantId: string };
+      };
+      await c.nextMessage();
+
+      const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+      const other = picker === a ? b : a;
+
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(a, b, picker);
+      await c.nextMessage();
+
+      picker.ws.send(JSON.stringify({ type: 'buzz' }));
+      await settle(a, b, picker);
+      await c.nextMessage();
+
+      picker.ws.send(JSON.stringify({ type: 'said-answer' }));
+      await settle(a, b, picker);
+      await c.nextMessage();
+
+      // Судейство с ведущим (c) — решает сразу, без ожидания таймера.
+      // 'vote' по протоколу не несёт participantId — сервер берёт настоящего
+      // отправителя сам из connections.get(ws) (тот же паттерн, что и у
+      // adjust-score/cancel-question).
+      c.ws.send(JSON.stringify({ type: 'vote', correct: true }));
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+      // Reveal-таймер должен истечь, чтобы партия перешла в final-elim —
+      // единственный раунд пакета исчерпан на этом единственном вопросе.
+      let remaining = REVEAL_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterFinalStart = (await Promise.all([
+        a.nextMessage(),
+        b.nextMessage(),
+        c.nextMessage(),
+      ])) as { game: { phase: string; finalElimParticipantId: string } }[];
+      expect(afterFinalStart[0].game.phase).toBe('final-elim');
+      // other ответил 0 раз/меньше очков, чем picker (получил +100) — ходит первым.
+      expect(afterFinalStart[0].game.finalElimParticipantId).toBe(
+        other.participantId,
+      );
+
+      other.ws.send(
+        JSON.stringify({ type: 'eliminate-final-theme', themeIndex: 0 }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+      // other пришёл к финалу с 0 очков (не ответил в базовом раунде) — движок
+      // зажимает ставку до max(0, score) (engine.ts, handleSubmitWager), так
+      // что ставка больше 0 без этого была бы молча обнулена, а не
+      // содержательным тестом проигрыша. Панель ведущего (adjust-score) уже
+      // проверена в базовом раунде — переиспользуем её, чтобы задать other
+      // очки, на которые реально можно поставить.
+      c.ws.send(
+        JSON.stringify({
+          type: 'adjust-score',
+          participantId: other.participantId,
+          delta: 100,
+        }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+      picker.ws.send(JSON.stringify({ type: 'submit-wager', amount: 50 }));
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+      other.ws.send(JSON.stringify({ type: 'submit-wager', amount: 30 }));
+      const afterWagers = (await Promise.all([
+        a.nextMessage(),
+        b.nextMessage(),
+        c.nextMessage(),
+      ])) as { game: { phase: string } }[];
+      expect(afterWagers[0].game.phase).toBe('final-answer');
+
+      picker.ws.send(
+        JSON.stringify({ type: 'submit-final-answer', text: 'ответ picker' }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+      other.ws.send(
+        JSON.stringify({ type: 'submit-final-answer', text: 'ответ other' }),
+      );
+      const afterAnswers = (await Promise.all([
+        a.nextMessage(),
+        b.nextMessage(),
+        c.nextMessage(),
+      ])) as { game: { phase: string } }[];
+      expect(afterAnswers[0].game.phase).toBe('final-judging');
+
+      c.ws.send(
+        JSON.stringify({
+          type: 'final-vote',
+          participantId: picker.participantId,
+          correct: true,
+        }),
+      );
+      await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+      c.ws.send(
+        JSON.stringify({
+          type: 'final-vote',
+          participantId: other.participantId,
+          correct: false,
+        }),
+      );
+      const afterReveal = (await Promise.all([
+        a.nextMessage(),
+        b.nextMessage(),
+        c.nextMessage(),
+      ])) as {
+        game: {
+          phase: string;
+          scores: { participantId: string; score: number }[];
+        };
+      }[];
+      expect(afterReveal[0].game.phase).toBe('final-reveal');
+      expect(afterReveal[0].game.scores).toEqual(
+        expect.arrayContaining([
+          { participantId: picker.participantId, score: 150 },
+          { participantId: other.participantId, score: 70 },
+        ]),
+      );
+
+      a.ws.close();
+      b.ws.close();
+      c.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// Админ-панель (design.md, «Админ-панель») — сокет никогда не шлёт 'join',
+// поэтому в отличие от joinPlayer() выше здесь только 'hello' и стартовое
+// 'state', без 'joined'.
+async function connectAdmin(baseUrl: string) {
+  const ws = new WebSocket(baseUrl);
+  const nextMessage = collectMessages(ws);
+  await waitForOpen(ws);
+  await nextMessage(); // hello
+  await nextMessage(); // стартовое state
+  return { ws, nextMessage };
+}
+
+describe('createServer admin panel', () => {
+  let server: GameServer;
+  let dir: string;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-admin-'));
+    const room = new Room(undefined, TEST_PACK);
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      lanUrl: 'http://192.168.1.1:8080/',
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('never appears in the participants list — the admin socket is not a player', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage(); // рассылка после join
+
+    admin.ws.send(JSON.stringify({ type: 'admin-reset-room' }));
+    const state = (await admin.nextMessage()) as {
+      participants: unknown[];
+    };
+    expect(state.participants).toEqual([]);
+
+    admin.ws.close();
+    a.ws.close();
+  });
+
+  it('admin-start-game starts the game with whoever is actually present, bypassing host-only', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage();
+    const b = await joinPlayer(baseUrl, 'Катя');
+    await admin.nextMessage();
+    await a.nextMessage();
+    const c = await joinPlayer(baseUrl, 'Петя');
+    await admin.nextMessage();
+    await a.nextMessage();
+    await b.nextMessage();
+
+    // Петя — назначенный ведущий; обычным путём стартовать могла бы только
+    // она, но у админ-панели нет понятия «не тот отправитель».
+    c.ws.send(JSON.stringify({ type: 'toggle-host' }));
+    await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    const [adminState, aState] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ])) as { game: { phase: string } }[];
+    expect(adminState.game.phase).toBe('selecting');
+    expect(aState.game.phase).toBe('selecting');
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
+    c.ws.close();
+  });
+
+  it('admin-start-game reports the same start-game-error reasons as a normal start, when the room genuinely cannot start', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня'); // only one player — not enough
+    await admin.nextMessage();
+
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    const err = (await admin.nextMessage()) as { reason: string };
+    expect(err).toEqual({
+      type: 'start-game-error',
+      reason: 'not-enough-players',
+    });
+
+    admin.ws.close();
+    a.ws.close();
+  });
+
+  it('admin-reset-game ends the current game and returns to the lobby, keeping participants', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage();
+    const b = await joinPlayer(baseUrl, 'Катя');
+    await admin.nextMessage();
+    await a.nextMessage();
+
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-reset-game' }));
+    const [adminState] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+    ])) as { game: null; participants: unknown[] }[];
+    expect(adminState.game).toBeNull();
+    expect(adminState.participants).toHaveLength(2);
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
+  });
+
+  it('admin-kick removes the participant and forcibly disconnects their live socket', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage();
+
+    const aClosed = new Promise<void>((resolve) => a.ws.once('close', resolve));
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-kick', participantId: a.participantId }),
+    );
+    const state = (await admin.nextMessage()) as { participants: unknown[] };
+    expect(state.participants).toEqual([]);
+    await aClosed;
+
+    admin.ws.close();
+  });
+
+  it('admin-kick invalidates the token — a kicked participant cannot reconnect', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage();
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-kick', participantId: a.participantId }),
+    );
+    await admin.nextMessage();
+
+    const retry = new WebSocket(baseUrl);
+    const nextMessage = collectMessages(retry);
+    await waitForOpen(retry);
+    await nextMessage(); // hello
+    await nextMessage(); // state
+    retry.send(JSON.stringify({ type: 'reconnect', token: a.token }));
+    const result = await nextMessage();
+    expect(result).toEqual({ type: 'invalid-token' });
+
+    admin.ws.close();
+    retry.close();
+  });
+
+  it('admin-set-host assigns and clears the lobby host flag directly', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage();
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-set-host',
+        participantId: a.participantId,
+      }),
+    );
+    const [assigned] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+    ])) as { hostParticipantId: string | null }[];
+    expect(assigned.hostParticipantId).toBe(a.participantId);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-host', participantId: null }),
+    );
+    const [cleared] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+    ])) as { hostParticipantId: string | null }[];
+    expect(cleared.hostParticipantId).toBeNull();
+
+    admin.ws.close();
+    a.ws.close();
   });
 });

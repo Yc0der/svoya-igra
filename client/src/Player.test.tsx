@@ -14,6 +14,7 @@ const mockedUseRoomConnection = vi.mocked(useRoomConnection);
 function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
   return {
     phase: 'selecting',
+    hostId: null,
     roundIndex: 0,
     grid: [],
     turnParticipantId: '',
@@ -24,6 +25,13 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     graceExcludedUntil: null,
     timerDeadline: null,
     scores: [],
+    finalThemes: null,
+    finalElimParticipantId: null,
+    finalQuestion: null,
+    finalWagers: null,
+    finalAnswers: null,
+    finalVerdicts: null,
+    finalCorrectAnswer: null,
     ...overrides,
   };
 }
@@ -48,6 +56,12 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     vote: vi.fn(),
     adjustScore: vi.fn(),
     cancelQuestion: vi.fn(),
+    resetGame: vi.fn(),
+    skipToFinal: vi.fn(),
+    eliminateFinalTheme: vi.fn(),
+    submitWager: vi.fn(),
+    submitFinalAnswer: vi.fn(),
+    finalVote: vi.fn(),
     ...overrides,
   };
 }
@@ -139,6 +153,38 @@ describe('Player', () => {
     expect(screen.getByText(/ведущий: Петя/i)).toBeInTheDocument();
   });
 
+  it('hides the start-game button from anyone but the marked host once a host is designated', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: null,
+        selfId: 'me',
+        isHost: false,
+        participants: [{ id: 'host-id', name: 'Петя', connected: true }],
+        hostParticipantId: 'host-id',
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /начать игру/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('still shows the start-game button to the marked host once one is designated', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: null,
+        selfId: 'host-id',
+        isHost: true,
+        participants: [{ id: 'host-id', name: 'Петя', connected: true }],
+        hostParticipantId: 'host-id',
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByRole('button', { name: /начать игру/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a translated error and doesn't crash when start-game fails", () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({ game: null, startGameError: 'host-required' }),
@@ -223,7 +269,7 @@ describe('Player', () => {
     expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
   });
 
-  it('does not show a buzz button to the host while the question is open — the host is not a counter', () => {
+  it('does not show a buzz button to the host while the question is open — the host is not a counter', async () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'host-id',
@@ -233,6 +279,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
       screen.queryByRole('button', { name: /^ответ$/i }),
     ).not.toBeInTheDocument();
@@ -375,9 +422,35 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(screen.getByText('Ответ')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /^зачёт$/i }));
     expect(vote).toHaveBeenCalledWith(true);
+  });
+
+  it("highlights the host's own verdict during host-mode judging, so a click is visibly registered", async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        vote: vi.fn(),
+        game: baseGame({
+          phase: 'judging',
+          buzzedParticipantId: 'other',
+          correctAnswer: { text: 'Ответ' },
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+    const yes = screen.getByRole('button', { name: /^зачёт/i });
+    const no = screen.getByRole('button', { name: /^незачёт/i });
+    expect(yes).not.toHaveClass('is-selected');
+
+    await userEvent.click(yes);
+    expect(yes).toHaveClass('is-selected');
+    expect(no).not.toHaveClass('is-selected');
   });
 
   it('shows a waiting-for-host message, without the answer, to non-host players during host-mode judging', () => {
@@ -459,6 +532,74 @@ describe('Player', () => {
     expect(screen.queryByText('me')).not.toBeInTheDocument();
   });
 
+  it('offers a "new game" button at game-end that restarts, when nobody was marked host', async () => {
+    const startGame = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        startGame,
+        game: baseGame({ phase: 'game-end', scores: [] }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: /новая игра/i }));
+    expect(startGame).toHaveBeenCalledOnce();
+  });
+
+  it('hides the "new game" button at game-end from anyone but the currently marked host', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'other',
+        isHost: false,
+        hostParticipantId: 'host-id',
+        game: baseGame({ phase: 'game-end', hostId: 'host-id', scores: [] }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /новая игра/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the "new game" button at game-end to the currently marked host', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        game: baseGame({ phase: 'game-end', hostId: 'host-id', scores: [] }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByRole('button', { name: /новая игра/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("uses the LIVE lobby host flag, not the game's frozen hostId, so the button stays reachable even if the original host disconnected", () => {
+    // Regression: room.startGame()'s authorization is based on the live
+    // hostParticipantId lobby flag, which toggleHost() may still change even
+    // at game-end (room.ts: «'game-end' — исключение»). A button gated on
+    // the frozen game.hostId instead can end up hidden from literally
+    // everyone currently connected, with no way to restart short of an
+    // admin-panel reset.
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'someone-else',
+        isHost: false, // isHost is derived from the frozen game.hostId
+        hostParticipantId: 'someone-else', // but the lobby flag has moved on
+        game: baseGame({
+          phase: 'game-end',
+          hostId: 'original-host-who-left',
+          scores: [],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByRole('button', { name: /новая игра/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows the host admin panel with per-player score buttons, on top of the phase's own screen", async () => {
     const adjustScore = vi.fn();
     mockedUseRoomConnection.mockReturnValue(
@@ -482,6 +623,7 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     // Фазовый экран (не мой ход) остаётся на месте.
     expect(screen.getByText(/сейчас выбирает Ваня/i)).toBeInTheDocument();
     // ...и панель управления показана поверх него.
@@ -522,6 +664,7 @@ describe('Player', () => {
       }),
     );
     const { rerender } = render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
       screen.queryByRole('button', { name: /отменить вопрос/i }),
     ).not.toBeInTheDocument();
@@ -540,5 +683,394 @@ describe('Player', () => {
       screen.getByRole('button', { name: /отменить вопрос/i }),
     );
     expect(cancelQuestion).toHaveBeenCalledOnce();
+  });
+
+  it('final-elim: highlights my turn and eliminates a theme on click', async () => {
+    const eliminateFinalTheme = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        eliminateFinalTheme,
+        game: baseGame({
+          phase: 'final-elim',
+          finalThemes: [
+            { name: 'Финал A', eliminated: false },
+            { name: 'Финал B', eliminated: false },
+          ],
+          finalElimParticipantId: 'self',
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByText('Финал A'));
+    expect(eliminateFinalTheme).toHaveBeenCalledWith(0);
+  });
+
+  it('final-elim: shows a countdown', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        game: baseGame({
+          phase: 'final-elim',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+          finalElimParticipantId: 'other',
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
+  it('final-elim: shows whose turn it is when it is not mine', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        participants: [{ id: 'other', name: 'Катя', connected: true }],
+        game: baseGame({
+          phase: 'final-elim',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+          finalElimParticipantId: 'other',
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/Катя/)).toBeInTheDocument();
+  });
+
+  it('final-wager: submits a clamped wager', async () => {
+    const submitWager = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        submitWager,
+        game: baseGame({
+          phase: 'final-wager',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+          scores: [{ participantId: 'self', score: 200 }],
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.type(screen.getByLabelText('Ставка'), '150');
+    await userEvent.click(screen.getByText('Готово'));
+    expect(submitWager).toHaveBeenCalledWith(150);
+  });
+
+  it('final-wager: shows a confirmation instead of the form once my own wager is already submitted', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        game: baseGame({
+          phase: 'final-wager',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+          finalWagers: [{ participantId: 'self', amount: 150 }],
+          timerDeadline: Date.now() + 8000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByLabelText('Ставка')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/ставка принята.*150.*ждём остальных/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
+  it('final-wager: the host sees a waiting message, not a wager form', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host',
+        isHost: true,
+        hostParticipantId: 'host',
+        game: baseGame({
+          phase: 'final-wager',
+          finalThemes: [{ name: 'Финал A', eliminated: false }],
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+    expect(screen.queryByLabelText('Ставка')).not.toBeInTheDocument();
+    expect(screen.getByText(/Игроки делают ставки/)).toBeInTheDocument();
+  });
+
+  it('final-answer: submits the typed answer', async () => {
+    const submitFinalAnswer = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        submitFinalAnswer,
+        game: baseGame({
+          phase: 'final-answer',
+          finalQuestion: { text: 'Вопрос финала?' },
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.type(screen.getByLabelText('Ответ'), 'мой ответ');
+    await userEvent.click(screen.getByText('Готово'));
+    expect(submitFinalAnswer).toHaveBeenCalledWith('мой ответ');
+  });
+
+  it('final-answer: shows a confirmation instead of the form once my own answer is already submitted', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'self',
+        game: baseGame({
+          phase: 'final-answer',
+          finalQuestion: { text: 'Вопрос финала?' },
+          finalAnswers: [{ participantId: 'self', text: 'мой ответ' }],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByLabelText('Ответ')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/ответ принят.*ждём остальных/i),
+    ).toBeInTheDocument();
+  });
+
+  it('final-answer: the host sees a waiting message, not an answer form', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host',
+        isHost: true,
+        hostParticipantId: 'host',
+        game: baseGame({
+          phase: 'final-answer',
+          finalQuestion: { text: 'Вопрос финала?' },
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+    expect(screen.queryByLabelText('Ответ')).not.toBeInTheDocument();
+    expect(screen.getByText(/Игроки пишут ответы/)).toBeInTheDocument();
+  });
+
+  it('final-judging: host sees every wager and answer with verdict buttons', async () => {
+    const finalVote = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host',
+        isHost: true,
+        hostParticipantId: 'host',
+        finalVote,
+        participants: [
+          { id: 'p1', name: 'Ваня', connected: true },
+          { id: 'p2', name: 'Катя', connected: true },
+        ],
+        game: baseGame({
+          phase: 'final-judging',
+          finalWagers: [
+            { participantId: 'p1', amount: 50 },
+            { participantId: 'p2', amount: 20 },
+          ],
+          finalAnswers: [
+            { participantId: 'p1', text: 'ответ 1' },
+            { participantId: 'p2', text: 'ответ 2' },
+          ],
+          finalCorrectAnswer: { text: 'Правильный ответ', comment: 'Коммент' },
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+    expect(screen.getByText('Правильный ответ')).toBeInTheDocument();
+    expect(screen.getByText('Коммент')).toBeInTheDocument();
+    const yesButtons = screen.getAllByText('Верно');
+    await userEvent.click(yesButtons[0]);
+    expect(finalVote).toHaveBeenCalledWith('p1', true);
+  });
+
+  it("final-judging: highlights each counter's own verdict independently, so a click is visibly registered", async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host',
+        isHost: true,
+        hostParticipantId: 'host',
+        finalVote: vi.fn(),
+        participants: [
+          { id: 'p1', name: 'Ваня', connected: true },
+          { id: 'p2', name: 'Катя', connected: true },
+        ],
+        game: baseGame({
+          phase: 'final-judging',
+          finalWagers: [
+            { participantId: 'p1', amount: 50 },
+            { participantId: 'p2', amount: 20 },
+          ],
+          finalAnswers: [
+            { participantId: 'p1', text: 'ответ 1' },
+            { participantId: 'p2', text: 'ответ 2' },
+          ],
+        }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+    const yesButtons = screen.getAllByRole('button', { name: /^верно/i });
+    const noButtons = screen.getAllByRole('button', { name: /^неверно/i });
+
+    // Отмечаем p1 верно, p2 неверно — каждая отметка независима от другой.
+    await userEvent.click(yesButtons[0]);
+    await userEvent.click(noButtons[1]);
+
+    expect(yesButtons[0]).toHaveClass('is-selected');
+    expect(noButtons[0]).not.toHaveClass('is-selected');
+    expect(yesButtons[1]).not.toHaveClass('is-selected');
+    expect(noButtons[1]).toHaveClass('is-selected');
+  });
+
+  it('final-judging: non-host waits, with a countdown', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'p1',
+        hostParticipantId: 'host',
+        game: baseGame({
+          phase: 'final-judging',
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/Ведущий проверяет/)).toBeInTheDocument();
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
+  it('final-reveal: does not show a countdown — it is a passive pause, not a timed decision', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'p1',
+        game: baseGame({
+          phase: 'final-reveal',
+          finalWagers: [],
+          finalAnswers: [],
+          finalVerdicts: [],
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByText(/^\d+с$/)).not.toBeInTheDocument();
+  });
+
+  it('final-reveal: shows wagers, answers, verdicts, the correct answer, and updated scores', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'p1',
+        participants: [{ id: 'p1', name: 'Ваня', connected: true }],
+        game: baseGame({
+          phase: 'final-reveal',
+          finalWagers: [{ participantId: 'p1', amount: 50 }],
+          finalAnswers: [{ participantId: 'p1', text: 'ответ 1' }],
+          finalVerdicts: [{ participantId: 'p1', correct: true }],
+          finalCorrectAnswer: { text: 'Правильный ответ', comment: 'Коммент' },
+          scores: [{ participantId: 'p1', score: 150 }],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText('ответ 1')).toBeInTheDocument();
+    expect(screen.getByText('150')).toBeInTheDocument();
+    expect(screen.getByText('Правильный ответ')).toBeInTheDocument();
+    expect(screen.getByText('Коммент')).toBeInTheDocument();
+  });
+
+  describe('resume-choice prompt (avoids manually clearing server state to test)', () => {
+    it('shows the host a resume-choice prompt when a game is already in progress on first render, e.g. restored from a snapshot after a restart', () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+        }),
+      );
+      render(<Player />);
+      expect(screen.getByText('Незавершённая партия')).toBeInTheDocument();
+      expect(screen.queryByText(/сейчас выбирает/i)).not.toBeInTheDocument();
+    });
+
+    it('does not show the prompt to non-host participants, even with a game already in progress', () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'me',
+          isHost: false,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'me' }),
+        }),
+      );
+      render(<Player />);
+      expect(
+        screen.queryByText('Незавершённая партия'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not show the prompt for a game the host just started themselves in this same session', () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({ selfId: 'host-id', isHost: true, game: null }),
+      );
+      const { rerender } = render(<Player />);
+
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+        }),
+      );
+      rerender(<Player />);
+
+      expect(
+        screen.queryByText('Незавершённая партия'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/сейчас выбирает/i)).toBeInTheDocument();
+    });
+
+    it('dismisses the prompt and shows the game once "Продолжить" is clicked', async () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+        }),
+      );
+      render(<Player />);
+      await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+      expect(
+        screen.queryByText('Незавершённая партия'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/сейчас выбирает/i)).toBeInTheDocument();
+    });
+
+    it('resets the game on the server when "Новая игра" is clicked', async () => {
+      const resetGame = vi.fn();
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          resetGame,
+          game: baseGame({ phase: 'selecting', turnParticipantId: 'other' }),
+        }),
+      );
+      render(<Player />);
+      await userEvent.click(screen.getByRole('button', { name: 'Новая игра' }));
+      expect(resetGame).toHaveBeenCalledOnce();
+    });
+
+    it('does not show the prompt once the game has reached game-end — that screen offers its own "new game" button instead', () => {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'host-id',
+          isHost: true,
+          game: baseGame({ phase: 'game-end', scores: [] }),
+        }),
+      );
+      render(<Player />);
+      expect(
+        screen.queryByText('Незавершённая партия'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/итог/i)).toBeInTheDocument();
+    });
   });
 });

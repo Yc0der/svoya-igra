@@ -241,6 +241,30 @@ describe('useRoomConnection', () => {
     expect(socket.sent).toContainEqual(
       JSON.stringify({ type: 'vote', correct: true }),
     );
+
+    act(() => result.current.eliminateFinalTheme(1));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'eliminate-final-theme', themeIndex: 1 }),
+    );
+
+    act(() => result.current.submitWager(150));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'submit-wager', amount: 150 }),
+    );
+
+    act(() => result.current.submitFinalAnswer('мой ответ'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'submit-final-answer', text: 'мой ответ' }),
+    );
+
+    act(() => result.current.finalVote('p2', false));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'final-vote',
+        participantId: 'p2',
+        correct: false,
+      }),
+    );
   });
 
   it('sets falsestart on a falsestart message and clears it again after 2 seconds', () => {

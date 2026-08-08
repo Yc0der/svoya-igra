@@ -7,9 +7,9 @@ import { listLanCandidates, pickLanAddress } from './network.js';
 import { createServer } from './server.js';
 import { loadPack } from './pack.js';
 
-const PORT = 8080;
-const SNAPSHOT_PATH = './room-snapshot.json';
-const PACK_PATH = './packs/current.json';
+const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
+const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
+const PACK_PATH = process.env.PACK_PATH ?? './packs/current.json';
 const CLIENT_DIST_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../client/dist',

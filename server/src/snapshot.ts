@@ -18,7 +18,22 @@ export function deserializeSnapshot(json: string): RoomState {
       ...p,
       connected: false,
     })),
-    game: parsed.game ?? null,
+    game: parsed.game
+      ? {
+          ...parsed.game,
+          // Финал (2026-08-05) появился позже — снапшоты, записанные до
+          // него, не содержат этих полей вовсе. Без дефолтов
+          // toGameStateView() падает на Object.entries(undefined) уже на
+          // первой рассылке состояния.
+          finalRemainingThemeIndices:
+            parsed.game.finalRemainingThemeIndices ?? null,
+          finalElimCounterId: parsed.game.finalElimCounterId ?? null,
+          finalThemeIndex: parsed.game.finalThemeIndex ?? null,
+          finalWagers: parsed.game.finalWagers ?? {},
+          finalAnswers: parsed.game.finalAnswers ?? {},
+          finalVerdicts: parsed.game.finalVerdicts ?? {},
+        }
+      : null,
     // Тот же паттерн, что у `game` строкой выше: снапшоты, записанные до
     // появления ведущего, этого поля не содержат — по умолчанию его нет.
     hostParticipantId: parsed.hostParticipantId ?? null,

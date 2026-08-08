@@ -170,10 +170,17 @@ export function createServer(options: CreateServerOptions): GameServer {
       if (message.type === 'start-game') {
         const participantId = connections.get(ws);
         if (participantId) {
-          const result = room.startGame();
+          const result = room.startGame(participantId);
           if ('error' in result) {
             send(ws, { type: 'start-game-error', reason: result.error });
           }
+        }
+      }
+
+      if (message.type === 'reset-game') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.resetGame(participantId);
         }
       }
 
@@ -236,6 +243,88 @@ export function createServer(options: CreateServerOptions): GameServer {
         if (participantId) {
           room.cancelQuestion(participantId);
         }
+      }
+
+      // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+      if (message.type === 'skip-to-final') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.skipToFinal(participantId);
+        }
+      }
+
+      if (message.type === 'eliminate-final-theme') {
+        const participantId = connections.get(ws);
+        if (participantId && typeof message.themeIndex === 'number') {
+          room.eliminateFinalTheme(participantId, message.themeIndex);
+        }
+      }
+
+      if (message.type === 'submit-wager') {
+        const participantId = connections.get(ws);
+        if (participantId && typeof message.amount === 'number') {
+          room.submitWager(participantId, message.amount);
+        }
+      }
+
+      if (message.type === 'submit-final-answer') {
+        const participantId = connections.get(ws);
+        if (participantId && typeof message.text === 'string') {
+          room.submitFinalAnswer(participantId, message.text);
+        }
+      }
+
+      if (message.type === 'final-vote') {
+        const participantId = connections.get(ws);
+        if (
+          participantId &&
+          typeof message.participantId === 'string' &&
+          typeof message.correct === 'boolean'
+        ) {
+          room.finalVote(participantId, message.participantId, message.correct);
+        }
+      }
+
+      // Админ-панель (design.md, «Админ-панель») — сокет админки никогда не
+      // шлёт 'join', поэтому в отличие от всего выше эти сообщения не ищут
+      // отправителя в connections: авторизация не по личности отправителя,
+      // а по самому факту, что сообщение админского типа.
+      if (message.type === 'admin-start-game') {
+        const result = room.startGame(null);
+        if ('error' in result) {
+          send(ws, { type: 'start-game-error', reason: result.error });
+        }
+      }
+
+      if (message.type === 'admin-reset-game') {
+        room.resetGame(null);
+      }
+
+      if (message.type === 'admin-reset-room') {
+        room.resetRoom();
+      }
+
+      if (
+        message.type === 'admin-kick' &&
+        typeof message.participantId === 'string'
+      ) {
+        room.kickParticipant(message.participantId);
+        // Кикнутый мог быть подключён прямо сейчас — рвём его сокет, чтобы
+        // клиент увидел invalid-token и вернулся на экран входа, а не завис
+        // с мёртвым participantId. Штатный обработчик 'close' ниже сам
+        // разберётся с owners/connections для этого сокета.
+        const ownerWs = owners.get(message.participantId);
+        if (ownerWs) {
+          ownerWs.terminate();
+        }
+      }
+
+      if (
+        message.type === 'admin-set-host' &&
+        (message.participantId === null ||
+          typeof message.participantId === 'string')
+      ) {
+        room.setHost(message.participantId);
       }
     });
 

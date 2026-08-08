@@ -433,3 +433,139 @@ code {
     padding: 32px 48px;
   }
 }
+
+.final-theme-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Табло (Board.tsx) кладёт вычеркнутое имя темы прямо текстом в <li>, без
+   кнопки внутри — а игрок (Player.tsx) оборачивает его в .button. Общее
+   правило на .is-eliminated покрывает текст табло; более специфичное
+   .is-eliminated .button переопределяет его для игрока, где перечёркивать
+   нужно саму кнопку, а не невидимый текстовый узел вокруг неё. */
+.final-theme-list .is-eliminated {
+  text-decoration: line-through;
+  opacity: 0.35;
+}
+
+.final-theme-list .is-eliminated .button {
+  text-decoration: line-through;
+  opacity: 1;
+}
+
+.final-judging-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 700px;
+}
+
+.final-judging-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.final-judging-name {
+  min-width: 80px;
+  font-weight: 600;
+}
+
+.final-judging-wager {
+  font-family: var(--mono);
+  color: var(--accent);
+  min-width: 48px;
+  text-align: right;
+}
+
+.final-judging-answer {
+  flex: 1;
+  text-align: left;
+}
+
+/* Админ-панель (Admin.tsx, design.md «Админ-панель») — служебная страница
+   для того, кто держит сервер, не для игры за столом: раскладка блоками
+   слева направо, а не по центру, как у board/player. */
+
+.admin {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px 16px 48px;
+  max-width: 700px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.admin-status {
+  font-family: var(--mono);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.admin-section {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.admin-section h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.admin-participants {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-participants li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.admin-participants .is-disconnected {
+  opacity: 0.5;
+}
+
+.admin-participant-name {
+  min-width: 100px;
+  font-weight: 600;
+}
+
+.admin-participant-status {
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text);
+  min-width: 56px;
+}
+
+.admin-participant-role {
+  flex: 1;
+  min-width: 120px;
+  color: var(--text);
+}

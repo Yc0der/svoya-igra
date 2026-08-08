@@ -1,0 +1,43 @@
+{
+  "title": "E2E финал",
+  "author": "Тест",
+  "createdAt": "2026-08-05",
+  "rounds": [
+    {
+      "themes": [
+        {
+          "name": "Тема",
+          "questions": [
+            {
+              "id": "q1",
+              "price": 100,
+              "text": "Вопрос?",
+              "answer": "Ответ",
+              "type": "обычный"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "final": {
+    "themes": [
+      {
+        "name": "Финал A",
+        "question": {
+          "id": "f1",
+          "text": "Вопрос финала A?",
+          "answer": "Ответ A"
+        }
+      },
+      {
+        "name": "Финал B",
+        "question": {
+          "id": "f2",
+          "text": "Вопрос финала B?",
+          "answer": "Ответ B"
+        }
+      }
+    ]
+  }
+}

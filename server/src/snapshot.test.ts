@@ -8,7 +8,7 @@ import {
   serializeSnapshot,
   writeSnapshot,
 } from './snapshot.js';
-import type { RoomState } from './room.js';
+import { Room, type RoomState } from './room.js';
 import { createInitialState } from './engine.js';
 import type { Pack } from './pack.js';
 
@@ -201,5 +201,44 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
       }),
     );
     expect(restored.game).toBeNull();
+  });
+
+  // Регрессия (I4, финальное ревью 2026-08-05): снапшот, записанный сервером
+  // ДО появления финала, содержит `game`, но без шести финальных полей
+  // (finalRemainingThemeIndices/finalElimCounterId/finalThemeIndex/
+  // finalWagers/finalAnswers/finalVerdicts) — их тогда ещё не существовало.
+  // Без миграции toGameStateView() падает на Object.entries(undefined) уже
+  // на первой рассылке состояния после restart.
+  it('migrates a pre-final-round snapshot (game missing the six final fields) to safe defaults and does not crash toGameStateView', () => {
+    const game = createInitialState(TEST_PACK, ['1', '2']);
+    const preFinal = { ...game } as Record<string, unknown>;
+    delete preFinal.finalRemainingThemeIndices;
+    delete preFinal.finalElimCounterId;
+    delete preFinal.finalThemeIndex;
+    delete preFinal.finalWagers;
+    delete preFinal.finalAnswers;
+    delete preFinal.finalVerdicts;
+
+    const rawJson = JSON.stringify({
+      participants: [
+        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+        { id: '2', name: 'Катя', token: 'tok-2', connected: true },
+      ],
+      game: preFinal,
+      hostParticipantId: null,
+    });
+
+    const restored = deserializeSnapshot(rawJson);
+    expect(restored.game).toMatchObject({
+      finalRemainingThemeIndices: null,
+      finalElimCounterId: null,
+      finalThemeIndex: null,
+      finalWagers: {},
+      finalAnswers: {},
+      finalVerdicts: {},
+    });
+
+    const room = new Room(restored, TEST_PACK);
+    expect(() => room.toGameStateView()).not.toThrow();
   });
 });
