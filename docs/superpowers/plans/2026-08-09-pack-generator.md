@@ -136,17 +136,23 @@ Expected: `OK: ../packs/current.json — валидный пакет ("Обща�
 - [ ] **Step 5: Убрать временный файл, прогнать typecheck/lint**
 
 `server/tsconfig.json` ограничен `include: ["src"]`, поэтому обычный `npx tsc --noEmit` (из
-`server/`) не заходит в `scripts/` — типы для него нужно проверить отдельной командой с теми же
-флагами, что и в `tsconfig.json` (`target: ES2023`, `module`/`moduleResolution: NodeNext`,
-`strict: true`), не трогая сам `tsconfig.json` ради одного скрипта:
+`server/`) не заходит в `scripts/`. Отдельная ad-hoc команда с флагами, продублированными вручную с
+`tsconfig.json` (`npx tsc --noEmit --strict --target ES2023 --module NodeNext --moduleResolution
+NodeNext scripts/validate-pack.ts`), здесь не работает: при указании файлов в командной строке
+компилятор игнорирует `tsconfig.json` и падает с `TS5112: tsconfig.json is present but will not be
+loaded if files are specified on commandline`. Вместо этого — `server/tsconfig.scripts.json`,
+расширяющий `tsconfig.json` и включающий `src` и `scripts`, чтобы скрипт проверялся теми же
+реальными опциями компилятора проекта, а не отдельно поддерживаемым списком флагов; `typecheck` в
+`server/package.json` прогоняет его вторым шагом после основного `tsc --noEmit`:
 
 ```bash
 rm -f /tmp/broken-pack.json
-npx tsc --noEmit --strict --target ES2023 --module NodeNext --moduleResolution NodeNext scripts/validate-pack.ts
+pnpm typecheck
 npx eslint scripts/validate-pack.ts
 ```
 
-Expected: обе команды завершаются без ошибок и без вывода замечаний.
+Expected: обе команды завершаются без ошибок и без вывода замечаний (`pnpm typecheck` прогоняет и
+`tsconfig.json`, и `tsconfig.scripts.json` — оба должны пройти).
 
 - [ ] **Step 6: Commit**
 
