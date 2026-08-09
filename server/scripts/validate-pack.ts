@@ -9,7 +9,16 @@ if (!path) {
   process.exit(1);
 }
 
-const raw = await readFile(path, 'utf-8');
+let raw: string;
+try {
+  raw = await readFile(path, 'utf-8');
+} catch (err) {
+  console.error(
+    `${path}: не удалось прочитать файл — ${(err as Error).message}`,
+  );
+  process.exit(1);
+}
+
 let parsed: unknown;
 try {
   parsed = JSON.parse(raw);
