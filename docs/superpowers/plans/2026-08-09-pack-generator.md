@@ -280,10 +280,13 @@ description: Генерирует готовый пакет вопросов д�
    - `createdAt`: дата генерации в формате `YYYY-MM-DD`.
 2. Выбрать `<slug>` для имени файла — короткое, по-английски, по смыслу тем (например
    `sport-kino-nauka`). Записать в `packs/<slug>.json` (путь от корня репозитория).
-3. Прогнать: `(cd server && npx tsx scripts/validate-pack.ts ../packs/<slug>.json)`.
-   (Именно из `server/` — там установлена зависимость `tsx`; из корня репозитория та же команда не
-   найдёт локальный `tsx` и попытается скачать посторонний через npm. Скобки — подоболочка, чтобы
-   смена директории не осталась в текущей сессии после команды.)
+3. Прогнать (из корня репозитория): `pnpm -C server exec tsx scripts/validate-pack.ts
+../packs/<slug>.json`.
+   (`-C server` резолвит зависимость `tsx` именно из `server/node_modules` и выполняет команду в
+   этой директории, не оставляя изменённым cwd текущей сессии после себя — без `-C` команда либо не
+   найдёт локальный `tsx` и попытается скачать посторонний через npm, либо потребовала бы ручного
+   `cd server && ...`, а `&&` как разделитель команд не работает в PowerShell 5.1, шелле по умолчанию
+   у пользователя. Путь к пакету — относительно `server/`, поэтому `../packs/<slug>.json`.)
    - Если провалилось — прочитать сообщение об ошибке, поправить файл, прогнать ещё раз. Повторять,
      пока не пройдёт. Не показывать человеку невалидный файл как «готово».
    - Если прошло — идти дальше.
@@ -351,11 +354,11 @@ git commit -m "feat: add the pack-generator skill (Milestone 3)"
 литература, музыка 80-х». Ожидаемо: skill сам добирает недостающие темы до 10 (из четырёх названных
 плюс смежные), пишет `packs/test-scenario-1.json`.
 
-Прогнать (подоболочка `(cd server && ...)`, чтобы смена директории не осталась в текущей сессии
-после команды — см. Task 1):
+Прогнать (из корня репозитория, `-C server` резолвит `tsx` из воркспейса и не оставляет изменённым
+cwd текущей сессии — см. Task 1):
 
 ```bash
-(cd server && npx tsx scripts/validate-pack.ts ../packs/test-scenario-1.json)
+pnpm -C server exec tsx scripts/validate-pack.ts ../packs/test-scenario-1.json
 ```
 
 Expected: `OK: ...` (exit 0). Дополнительно прочитать сам файл глазами — 2 раунда × 5 тем × 5
@@ -373,10 +376,10 @@ Expected: `OK: ...` (exit 0). Дополнительно прочитать са
 всё равно») и убедиться, что skill доводит генерацию до конца на основе этого, пишет
 `packs/test-scenario-2.json`.
 
-Прогнать (подоболочка, как в Step 1):
+Прогнать (как в Step 1):
 
 ```bash
-(cd server && npx tsx scripts/validate-pack.ts ../packs/test-scenario-2.json)
+pnpm -C server exec tsx scripts/validate-pack.ts ../packs/test-scenario-2.json
 ```
 
 Expected: `OK: ...` (exit 0). Убрать файл (из корня репозитория): `rm packs/test-scenario-2.json`.
@@ -387,10 +390,10 @@ Expected: `OK: ...` (exit 0). Убрать файл (из корня репоз�
 10). Ожидаемо: skill добирает 8 недостающих тем сам, смежных к названным, **не** переспрашивая по
 каждой теме отдельно (см. Шаг 1 `SKILL.md`), пишет `packs/test-scenario-3.json`.
 
-Прогнать (подоболочка, как в Step 1):
+Прогнать (как в Step 1):
 
 ```bash
-(cd server && npx tsx scripts/validate-pack.ts ../packs/test-scenario-3.json)
+pnpm -C server exec tsx scripts/validate-pack.ts ../packs/test-scenario-3.json
 ```
 
 Expected: `OK: ...` (exit 0), 10 тем в основном раунде (2 явно заданные + 8 добранных). Убрать файл
