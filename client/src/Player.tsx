@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from 'react';
 import { useRoomConnection, type GameStateView } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
 import { START_GAME_ERROR_TEXT } from './errorText';
@@ -258,7 +265,14 @@ export function Player() {
         }
         return (
           <div className="player">
-            <div className="player-grid">
+            <div
+              className="player-grid"
+              style={
+                {
+                  '--price-columns': game.grid[0]?.questions.length ?? 4,
+                } as CSSProperties
+              }
+            >
               {game.grid.map((theme) => (
                 <Fragment key={theme.themeName}>
                   <h2 className="theme-name">{theme.themeName}</h2>

@@ -212,6 +212,34 @@ describe('Player', () => {
     expect(screen.getByRole('button', { name: /100/ })).toBeInTheDocument();
   });
 
+  it('sizes the grid to the actual number of questions per theme, not a hardcoded count', () => {
+    // Та же регрессия, что и в Board.test.tsx: сетка была захардкожена на
+    // 4 цены в теме, а генератор пакетов (Веха 3) делает по 5.
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          turnParticipantId: 'me',
+          grid: [
+            {
+              themeName: 'Тема',
+              questions: [
+                { id: 'q1', price: 100, answered: false },
+                { id: 'q2', price: 200, answered: false },
+                { id: 'q3', price: 300, answered: false },
+                { id: 'q4', price: 400, answered: false },
+                { id: 'q5', price: 500, answered: false },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+    render(<Player />);
+    const grid = document.querySelector('.player-grid') as HTMLElement;
+    expect(grid.style.getPropertyValue('--price-columns')).toBe('5');
+  });
+
   it("shows whose turn it is by name when it isn't mine", () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
