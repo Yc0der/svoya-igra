@@ -30,7 +30,6 @@ export function Player() {
     adjustScore,
     cancelQuestion,
     resetGame,
-    skipToFinal,
     eliminateFinalTheme,
     submitWager,
     submitFinalAnswer,
@@ -243,12 +242,6 @@ export function Player() {
             Отменить вопрос
           </button>
         )}
-        {/* ВРЕМЕННО, для ручного тестирования финала — см. комментарий у
-            EngineEvent.skip-to-final в server/src/engine.ts. Убрать вместе
-            с остальными skip-to-final местами после живой проверки финала. */}
-        <button className="button" onClick={skipToFinal}>
-          Перейти к финалу (тест)
-        </button>
       </div>
     );
   }

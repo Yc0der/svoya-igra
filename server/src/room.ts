@@ -444,8 +444,10 @@ export class Room {
   }
 
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-  skipToFinal(requesterId: string): void {
-    this.dispatch({ type: 'skip-to-final', requesterId });
+  // Только с админ-панели, поэтому без параметра — там нет личности
+  // отправителя, которую можно было бы передать.
+  skipToFinal(): void {
+    this.dispatch({ type: 'skip-to-final' });
   }
 
   eliminateFinalTheme(participantId: string, themeIndex: number): void {

@@ -1,6 +1,20 @@
 import { useState } from 'react';
 import { useAdminConnection } from './useAdminConnection';
+import type { GameStateView } from './useRoomConnection';
 import { START_GAME_ERROR_TEXT } from './errorText';
+
+// ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в
+// server/src/engine.ts. Те же фазы, при которых сам движок игнорирует
+// skip-to-final как no-op — дублируется здесь только чтобы не включать
+// кнопку без надобности, финальную проверку всё равно делает сервер.
+const FINAL_PHASES = new Set<GameStateView['phase']>([
+  'final-elim',
+  'final-wager',
+  'final-answer',
+  'final-judging',
+  'final-reveal',
+  'game-end',
+]);
 
 export function Admin() {
   const {
@@ -15,6 +29,7 @@ export function Admin() {
     resetRoom,
     kick,
     setHost,
+    skipToFinal,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -76,6 +91,16 @@ export function Admin() {
           </button>
           <button className="button" onClick={resetGame} disabled={!game}>
             Завершить партию (в лобби)
+          </button>
+          {/* ВРЕМЕННО, для ручного тестирования финала — см. комментарий у
+              EngineEvent.skip-to-final в server/src/engine.ts. Убрать вместе
+              с остальными skip-to-final местами после живой проверки финала. */}
+          <button
+            className="button"
+            onClick={skipToFinal}
+            disabled={!game || FINAL_PHASES.has(game.phase)}
+          >
+            Перейти к финалу (тест)
           </button>
           <button
             className={`button button--no${confirmingWipe ? ' is-selected' : ''}`}

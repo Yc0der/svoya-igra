@@ -63,8 +63,6 @@ export type ClientMessage =
   | { type: 'cancel-question' }
   // Сбрасывает текущую партию в пустое лобби — см. Room.resetGame().
   | { type: 'reset-game' }
-  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-  | { type: 'skip-to-final' }
   | { type: 'eliminate-final-theme'; themeIndex: number }
   | { type: 'submit-wager'; amount: number }
   | { type: 'submit-final-answer'; text: string }
@@ -77,7 +75,9 @@ export type ClientMessage =
   | { type: 'admin-reset-game' }
   | { type: 'admin-reset-room' }
   | { type: 'admin-kick'; participantId: string }
-  | { type: 'admin-set-host'; participantId: string | null };
+  | { type: 'admin-set-host'; participantId: string | null }
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  | { type: 'admin-skip-to-final' };
 
 export type StartGameErrorReason =
   | 'not-enough-players'

@@ -83,9 +83,11 @@ export type EngineEvent =
     }
   | { type: 'cancel-question'; requesterId: string }
   // ВРЕМЕННО — для ручного тестирования финала без прохождения всех
-  // раундов пакета. Не часть спеки, убрать вместе с кнопкой в Player.tsx,
-  // когда финал будет проверен вживую.
-  | { type: 'skip-to-final'; requesterId: string }
+  // раундов пакета. Не часть спеки, убрать вместе с кнопкой в Admin.tsx,
+  // когда финал будет проверен вживую. Без requesterId: вызывается только с
+  // админ-панели, у которой нет понятия личности отправителя (room.ts,
+  // Admin.tsx).
+  | { type: 'skip-to-final' }
   | { type: 'eliminate-final-theme'; counterId: string; themeIndex: number }
   | { type: 'submit-wager'; counterId: string; amount: number }
   | { type: 'submit-final-answer'; counterId: string; text: string }
@@ -176,7 +178,7 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
     case 'cancel-question':
       return handleCancelQuestion(state, event);
     case 'skip-to-final':
-      return handleSkipToFinal(state, event);
+      return handleSkipToFinal(state);
     case 'eliminate-final-theme':
       return handleEliminateFinalTheme(state, event);
     case 'submit-wager':
@@ -334,11 +336,11 @@ function handleCancelQuestion(
 // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final. Форсирует переход
 // в финал из любой фазы обычного раунда, тем же путём (startFinalOrEnd), что
 // и естественное завершение последнего раунда — не отдельная ветка правил.
-function handleSkipToFinal(
-  state: EngineState,
-  event: Extract<EngineEvent, { type: 'skip-to-final' }>,
-): Result {
-  if (state.hostId === null || event.requesterId !== state.hostId) {
+// Без ведущего no-op, а не game-end: startFinalOrEnd сам увёл бы в game-end
+// без ведущего (финал требует его всегда), но это неожиданный результат для
+// кнопки, которая должна показывать финал, а не молча заканчивать партию.
+function handleSkipToFinal(state: EngineState): Result {
+  if (state.hostId === null) {
     return unchanged(state);
   }
   if (

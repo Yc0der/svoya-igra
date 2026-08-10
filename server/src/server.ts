@@ -245,14 +245,6 @@ export function createServer(options: CreateServerOptions): GameServer {
         }
       }
 
-      // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-      if (message.type === 'skip-to-final') {
-        const participantId = connections.get(ws);
-        if (participantId) {
-          room.skipToFinal(participantId);
-        }
-      }
-
       if (message.type === 'eliminate-final-theme') {
         const participantId = connections.get(ws);
         if (participantId && typeof message.themeIndex === 'number') {
@@ -325,6 +317,11 @@ export function createServer(options: CreateServerOptions): GameServer {
           typeof message.participantId === 'string')
       ) {
         room.setHost(message.participantId);
+      }
+
+      // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+      if (message.type === 'admin-skip-to-final') {
+        room.skipToFinal();
       }
     });
 

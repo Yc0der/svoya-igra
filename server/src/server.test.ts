@@ -1393,4 +1393,50 @@ describe('createServer admin panel', () => {
     admin.ws.close();
     a.ws.close();
   });
+
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  it('admin-skip-to-final forces the phase forward — game-end here since TEST_PACK has no final block', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage();
+    const b = await joinPlayer(baseUrl, 'Катя');
+    await admin.nextMessage();
+    await a.nextMessage();
+    const c = await joinPlayer(baseUrl, 'Петя');
+    await admin.nextMessage();
+    await a.nextMessage();
+    await b.nextMessage();
+
+    // Петя — ведущий, Ваня и Катя — счётчики: skip-to-final требует ведущего,
+    // как и естественный переход в финал (engine.ts, startFinalOrEnd).
+    c.ws.send(JSON.stringify({ type: 'toggle-host' }));
+    await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-skip-to-final' }));
+    const [adminState] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ])) as { game: { phase: string } }[];
+    expect(adminState.game.phase).toBe('game-end');
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
+    c.ws.close();
+  });
 });

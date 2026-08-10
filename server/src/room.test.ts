@@ -1176,6 +1176,37 @@ const FINAL_PACK: Pack = {
   },
 };
 
+describe('Room.skipToFinal', () => {
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  // Только с админ-панели — без параметра, никакой личности отправителя.
+  it('forces a transition to the final round, skipping the rest of the current one', () => {
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [, , host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame(host);
+    expect(room.getState().game?.phase).toBe('selecting');
+
+    room.skipToFinal();
+
+    expect(room.getState().game?.phase).toBe('final-elim');
+  });
+
+  it('is a no-op without a host', () => {
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.startGame(null);
+    expect(room.getState().game?.phase).toBe('selecting');
+
+    room.skipToFinal();
+
+    expect(room.getState().game?.phase).toBe('selecting');
+  });
+});
+
 describe('Room final round', () => {
   // turnCounterId (кто выбирает первый вопрос) выбирается движком случайно
   // между двумя счётчиками (engine.ts, createInitialState) — нельзя жёстко

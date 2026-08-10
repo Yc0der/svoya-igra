@@ -79,8 +79,6 @@ type ClientMessage =
   | { type: 'adjust-score'; participantId: string; delta: number }
   | { type: 'cancel-question' }
   | { type: 'reset-game' }
-  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-  | { type: 'skip-to-final' }
   | { type: 'eliminate-final-theme'; themeIndex: number }
   | { type: 'submit-wager'; amount: number }
   | { type: 'submit-final-answer'; text: string }
@@ -109,8 +107,6 @@ export interface RoomConnection {
   adjustScore(participantId: string, delta: number): void;
   cancelQuestion(): void;
   resetGame(): void;
-  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-  skipToFinal(): void;
   eliminateFinalTheme(themeIndex: number): void;
   submitWager(amount: number): void;
   submitFinalAnswer(text: string): void;
@@ -275,7 +271,6 @@ export function useRoomConnection(
       send({ type: 'adjust-score', participantId, delta }),
     cancelQuestion: () => send({ type: 'cancel-question' }),
     resetGame: () => send({ type: 'reset-game' }),
-    skipToFinal: () => send({ type: 'skip-to-final' }),
     eliminateFinalTheme: (themeIndex) =>
       send({ type: 'eliminate-final-theme', themeIndex }),
     submitWager: (amount) => send({ type: 'submit-wager', amount }),

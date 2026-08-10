@@ -147,6 +147,17 @@ describe('useAdminConnection', () => {
     );
   });
 
+  it('sends admin-skip-to-final', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.skipToFinal());
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-skip-to-final' }),
+    );
+  });
+
   it('surfaces a start-game-error reason from the server', () => {
     const { result } = renderHook(() => useAdminConnection(factory));
     const socket = FakeWebSocket.instances[0];

@@ -56,7 +56,6 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     adjustScore: vi.fn(),
     cancelQuestion: vi.fn(),
     resetGame: vi.fn(),
-    skipToFinal: vi.fn(),
     eliminateFinalTheme: vi.fn(),
     submitWager: vi.fn(),
     submitFinalAnswer: vi.fn(),

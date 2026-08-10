@@ -50,6 +50,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     resetRoom: vi.fn(),
     kick: vi.fn(),
     setHost: vi.fn(),
+    skipToFinal: vi.fn(),
     ...overrides,
   };
 }
@@ -137,6 +138,36 @@ describe('Admin', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /точно/i }));
     expect(resetRoom).toHaveBeenCalledOnce();
+  });
+
+  it('disables "перейти к финалу" when there is no game', () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ game: null }));
+    render(<Admin />);
+    expect(
+      screen.getByRole('button', { name: /перейти к финалу/i }),
+    ).toBeDisabled();
+  });
+
+  it('disables "перейти к финалу" once already in the final round or after game-end', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ game: baseGame({ phase: 'final-wager' }) }),
+    );
+    render(<Admin />);
+    expect(
+      screen.getByRole('button', { name: /перейти к финалу/i }),
+    ).toBeDisabled();
+  });
+
+  it('calls skipToFinal when "перейти к финалу" is clicked during a normal round', async () => {
+    const skipToFinal = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ game: baseGame({ phase: 'selecting' }), skipToFinal }),
+    );
+    render(<Admin />);
+    const button = screen.getByRole('button', { name: /перейти к финалу/i });
+    expect(button).toBeEnabled();
+    await userEvent.click(button);
+    expect(skipToFinal).toHaveBeenCalledOnce();
   });
 
   it('shows a message instead of a table when nobody has joined yet', () => {

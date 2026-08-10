@@ -26,7 +26,9 @@ type ClientMessage =
   | { type: 'admin-reset-game' }
   | { type: 'admin-reset-room' }
   | { type: 'admin-kick'; participantId: string }
-  | { type: 'admin-set-host'; participantId: string | null };
+  | { type: 'admin-set-host'; participantId: string | null }
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
+  | { type: 'admin-skip-to-final' };
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -43,6 +45,8 @@ export interface AdminConnection {
   resetRoom(): void;
   kick(participantId: string): void;
   setHost(participantId: string | null): void;
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
+  skipToFinal(): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -132,5 +136,6 @@ export function useAdminConnection(
     resetRoom: () => send({ type: 'admin-reset-room' }),
     kick: (participantId) => send({ type: 'admin-kick', participantId }),
     setHost: (participantId) => send({ type: 'admin-set-host', participantId }),
+    skipToFinal: () => send({ type: 'admin-skip-to-final' }),
   };
 }
