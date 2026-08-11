@@ -148,6 +148,11 @@ async function main(): Promise<void> {
     room,
     clientDistPath: CLIENT_DIST_PATH,
     port: PORT,
+    // Полное подключение (начальный скан listAvailablePacks, имя загруженного
+    // пакета в Room) — Task 5 (docs/superpowers/plans/2026-08-11-pack-picker.md).
+    // Здесь — только минимум, чтобы CreateServerOptions.packsDir оставался
+    // обязательным полем без временного `?`, а `tsc --noEmit` проходил.
+    packsDir: dirname(PACK_PATH),
   });
 
   // Без этого обработчика занятый порт (например, процесс, оставшийся от
