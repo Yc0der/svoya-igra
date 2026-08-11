@@ -22,6 +22,7 @@ import {
 import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
+import type { PackSummary } from './packs.js';
 
 export interface Participant {
   id: string;
@@ -49,6 +50,13 @@ export interface RoomState {
 export interface LanInfo {
   candidates: LanCandidate[];
   address: string | null;
+}
+
+// Тот же принцип, что и LanInfo выше: список пакетов на диске и текущий
+// выбор — факт окружения, не игровое состояние, не часть RoomState/снапшота.
+export interface PackInfo {
+  available: PackSummary[];
+  activeFilename: string | null;
 }
 
 export type JoinResult = { participant: Participant } | { error: 'name-taken' };
@@ -139,8 +147,16 @@ export class Room {
   private lanCandidates: LanCandidate[];
   private lanAddress: string | null;
   private lanListeners = new Set<(address: string | null) => void>();
+  private availablePacks: PackSummary[] = [];
+  private activePackFilename: string | null;
+  private packListeners = new Set<(info: PackInfo) => void>();
 
-  constructor(initial?: RoomState, pack?: Pack, lan?: LanInfo) {
+  constructor(
+    initial?: RoomState,
+    pack?: Pack,
+    lan?: LanInfo,
+    initialPackFilename?: string,
+  ) {
     this.participants = initial
       ? initial.participants.map((p) => ({ ...p }))
       : [];
@@ -149,6 +165,7 @@ export class Room {
     this.hostParticipantId = initial?.hostParticipantId ?? null;
     this.lanCandidates = lan?.candidates ?? [];
     this.lanAddress = lan?.address ?? null;
+    this.activePackFilename = initialPackFilename ?? null;
     if (this.game) {
       const restart = PHASE_TIMER[this.game.phase];
       if (restart) {
@@ -529,6 +546,60 @@ export class Room {
     }
   }
 
+  getPackInfo(): PackInfo {
+    return {
+      available: [...this.availablePacks],
+      activeFilename: this.activePackFilename,
+    };
+  }
+
+  private isHostOrAdmin(requesterId: string | null): boolean {
+    return requesterId === null || requesterId === this.hostParticipantId;
+  }
+
+  // requesterId === null — с админ-панели, без проверки личности (тот же
+  // паттерн, что у setLanAddress/startGame). Иначе — только текущий
+  // лобби-ведущий (hostParticipantId, не game.hostId: выбор пакета имеет
+  // смысл до партии). Неавторизованный вызов — тихий no-op: сама кнопка не
+  // должна была быть видна отправителю, осмысленный ответ ему не нужен.
+  refreshAvailablePacks(
+    requesterId: string | null,
+    packs: PackSummary[],
+  ): void {
+    if (!this.isHostOrAdmin(requesterId)) return;
+    this.availablePacks = packs;
+    this.notifyPackChange();
+  }
+
+  // Не трогает диск сама — `pack` уже прочитан и провалидирован вызывающим
+  // (server.ts). Проверяет только то, что `filename` входит в уже известный
+  // `availablePacks` (тот же принцип, что setLanAddress с lanCandidates) —
+  // защита от гонки между обновлением списка и выбором, не источник истины
+  // о валидности содержимого файла.
+  selectPack(
+    requesterId: string | null,
+    filename: string,
+    pack: Pack,
+  ): { ok: true } | { error: 'not-host' | 'unknown-file' } {
+    if (!this.isHostOrAdmin(requesterId)) {
+      return { error: 'not-host' };
+    }
+    if (!this.availablePacks.some((p) => p.filename === filename)) {
+      return { error: 'unknown-file' };
+    }
+    this.pack = pack;
+    this.activePackFilename = filename;
+    this.notifyPackChange();
+    return { ok: true };
+  }
+
+  private notifyPackChange(): void {
+    const info = this.getPackInfo();
+    for (const listener of this.packListeners) {
+      listener(info);
+    }
+  }
+
   // `viewerId` — participantId сокета, которому строится это конкретное
   // состояние (null для ещё не залогиненного сокета и для табло — оно не
   // шлёт `join`). На judging с ведущим (game.hostId !== null) ответ обязан
@@ -661,6 +732,13 @@ export class Room {
   onLanChange(listener: (address: string | null) => void): () => void {
     this.lanListeners.add(listener);
     return () => this.lanListeners.delete(listener);
+  }
+
+  // Отдельно от onChange/onLanChange по той же причине: список пакетов и
+  // активный выбор не часть RoomState.
+  onPackChange(listener: (info: PackInfo) => void): () => void {
+    this.packListeners.add(listener);
+    return () => this.packListeners.delete(listener);
   }
 
   private stillGraceExcluded(): boolean {
