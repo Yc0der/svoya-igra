@@ -306,4 +306,57 @@ describe('useRoomConnection', () => {
     act(() => vi.advanceTimersByTime(2000));
     expect(result.current.falsestart).toBe(false);
   });
+
+  it('picks up availablePacks and activePackFilename from state broadcasts', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'state',
+        participants: [],
+        hostParticipantId: null,
+        game: null,
+        lanUrl: 'http://192.168.1.5:8080/',
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        activePackFilename: 'a.json',
+      }),
+    );
+
+    expect(result.current.availablePacks).toEqual([
+      { filename: 'a.json', title: 'Пак А', description: null },
+    ]);
+    expect(result.current.activePackFilename).toBe('a.json');
+  });
+
+  it('sends refresh-packs and select-pack', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.refreshPacks());
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'refresh-packs' }),
+    );
+
+    act(() => result.current.selectPack('b.json'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'select-pack', filename: 'b.json' }),
+    );
+  });
+
+  it('surfaces a select-pack-error reason from the server', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({ type: 'select-pack-error', reason: 'unknown-file' }),
+    );
+
+    expect(result.current.selectPackError).toBe('unknown-file');
+  });
 });
