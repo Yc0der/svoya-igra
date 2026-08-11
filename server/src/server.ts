@@ -14,7 +14,7 @@ import type {
 export interface CreateServerOptions {
   room: Room;
   clientDistPath: string;
-  lanUrl: string;
+  port: number;
 }
 
 export interface GameServer {
@@ -47,8 +47,15 @@ function toParticipantView(state: RoomState): ParticipantView[] {
   }));
 }
 
+// Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — фолбэк на
+// localhost, когда кандидатов вообще нет, а не пустая строка/null: с этим
+// URL по-прежнему можно открыть игру локально, просто без LAN-доступа.
+function lanUrlFor(address: string | null, port: number): string {
+  return `http://${address ?? 'localhost'}:${port}/`;
+}
+
 export function createServer(options: CreateServerOptions): GameServer {
-  const { room, clientDistPath, lanUrl } = options;
+  const { room, clientDistPath, port } = options;
   const assets = sirv(clientDistPath, { single: true });
 
   const httpServer = createHttpServer((req, res) => {
@@ -70,12 +77,17 @@ export function createServer(options: CreateServerOptions): GameServer {
   // GameStateView.correctAnswer) — остальным, включая табло, строится
   // отдельное сообщение с viewerId = null/чужой id, и Room.toGameStateView
   // сама скрывает в нём ответ.
-  const stateMessageFor = (viewerId: string | null): ServerMessage => ({
-    type: 'state',
-    participants: toParticipantView(room.getState()),
-    hostParticipantId: room.getState().hostParticipantId,
-    game: room.toGameStateView(viewerId),
-  });
+  const stateMessageFor = (viewerId: string | null): ServerMessage => {
+    const lan = room.getLanInfo();
+    return {
+      type: 'state',
+      participants: toParticipantView(room.getState()),
+      hostParticipantId: room.getState().hostParticipantId,
+      game: room.toGameStateView(viewerId),
+      lanUrl: lanUrlFor(lan.address, port),
+      lanCandidates: lan.candidates,
+    };
+  };
 
   const broadcastState = (): void => {
     // Deferred to a microtask so that a direct, synchronous reply to the
@@ -105,6 +117,7 @@ export function createServer(options: CreateServerOptions): GameServer {
   };
 
   room.onChange(broadcastState);
+  room.onLanChange(broadcastState);
 
   // `ws`, будучи прицепленным к готовому httpServer, переподписывает его
   // 'error' на себя. Без слушателя здесь EventEmitter на 'error' бросает
@@ -124,7 +137,6 @@ export function createServer(options: CreateServerOptions): GameServer {
     alive.add(ws);
     ws.on('pong', () => alive.add(ws));
 
-    send(ws, { type: 'hello', lanUrl });
     send(ws, stateMessageFor(connections.get(ws) ?? null));
 
     ws.on('message', (data) => {
@@ -322,6 +334,13 @@ export function createServer(options: CreateServerOptions): GameServer {
       // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
       if (message.type === 'admin-skip-to-final') {
         room.skipToFinal();
+      }
+
+      if (
+        message.type === 'admin-set-lan-address' &&
+        typeof message.address === 'string'
+      ) {
+        room.setLanAddress(message.address);
       }
     });
 

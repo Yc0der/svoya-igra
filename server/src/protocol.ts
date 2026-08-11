@@ -1,4 +1,5 @@
 import type { Phase } from './engine.js';
+import type { LanCandidate } from './network.js';
 
 export interface ParticipantView {
   id: string;
@@ -77,7 +78,10 @@ export type ClientMessage =
   | { type: 'admin-kick'; participantId: string }
   | { type: 'admin-set-host'; participantId: string | null }
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-  | { type: 'admin-skip-to-final' };
+  | { type: 'admin-skip-to-final' }
+  // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — человек
+  // выбирает из реально найденных кандидатов вместо угадывания сервером.
+  | { type: 'admin-set-lan-address'; address: string };
 
 export type StartGameErrorReason =
   | 'not-enough-players'
@@ -87,7 +91,6 @@ export type StartGameErrorReason =
   | 'host-only';
 
 export type ServerMessage =
-  | { type: 'hello'; lanUrl: string }
   | { type: 'joined'; participantId: string; token: string; name: string }
   | { type: 'name-taken' }
   | { type: 'invalid-token' }
@@ -96,6 +99,12 @@ export type ServerMessage =
       participants: ParticipantView[];
       hostParticipantId: string | null;
       game: GameStateView | null;
+      // Живой, не разовый: пересчитывается на каждой рассылке (server.ts,
+      // stateMessageFor) из room.getLanInfo(), а не отправляется один раз
+      // при подключении — иначе уже подключённые табло/админка не увидели
+      // бы смену адреса, выбранную через admin-set-lan-address.
+      lanUrl: string;
+      lanCandidates: LanCandidate[];
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason };

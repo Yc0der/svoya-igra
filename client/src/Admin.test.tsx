@@ -41,6 +41,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
   return {
     connected: true,
     lanUrl: null,
+    lanCandidates: [],
     participants: [],
     hostParticipantId: null,
     game: null,
@@ -51,6 +52,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     kick: vi.fn(),
     setHost: vi.fn(),
     skipToFinal: vi.fn(),
+    setLanAddress: vi.fn(),
     ...overrides,
   };
 }
@@ -68,6 +70,53 @@ describe('Admin', () => {
     );
     render(<Admin />);
     expect(screen.getByText(/192\.168\.1\.5:8080/)).toBeInTheDocument();
+  });
+
+  // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev).
+  it('shows a message instead of a candidate list when none were found', () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ lanCandidates: [] }));
+    render(<Admin />);
+    expect(screen.getByText(/адреса не найдены/i)).toBeInTheDocument();
+  });
+
+  it('lists LAN candidates and marks the currently selected one', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        lanUrl: 'http://192.168.56.1:8080/',
+        lanCandidates: [
+          { address: '192.168.56.1', interfaceName: 'Ethernet 2' },
+          { address: '192.168.31.179', interfaceName: 'Беспроводная сеть' },
+        ],
+      }),
+    );
+    render(<Admin />);
+    const selected = screen.getByRole('button', {
+      name: /192\.168\.56\.1.*Ethernet 2/,
+    });
+    const other = screen.getByRole('button', {
+      name: /192\.168\.31\.179.*Беспроводная сеть/,
+    });
+    expect(selected).toBeDisabled();
+    expect(other).toBeEnabled();
+  });
+
+  it('calls setLanAddress when picking a different candidate', async () => {
+    const setLanAddress = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        lanUrl: 'http://192.168.56.1:8080/',
+        lanCandidates: [
+          { address: '192.168.56.1', interfaceName: 'Ethernet 2' },
+          { address: '192.168.31.179', interfaceName: 'Беспроводная сеть' },
+        ],
+        setLanAddress,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /192\.168\.31\.179/ }),
+    );
+    expect(setLanAddress).toHaveBeenCalledWith('192.168.31.179');
   });
 
   it('shows "нет партии" and offers to start one when the room is an empty lobby', () => {

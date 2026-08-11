@@ -540,6 +540,20 @@ code {
   margin-top: 12px;
 }
 
+.admin-lan-candidates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.admin-lan-candidates .button.is-selected {
+  outline: 4px solid var(--text-h);
+  outline-offset: 2px;
+}
+
 .admin-participants {
   list-style: none;
   margin: 0;
