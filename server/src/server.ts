@@ -2,6 +2,7 @@ import {
   createServer as createHttpServer,
   type Server as HttpServer,
 } from 'node:http';
+import { join } from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import sirv from 'sirv';
 import type { Room, RoomState } from './room.js';
@@ -10,11 +11,14 @@ import type {
   ParticipantView,
   ServerMessage,
 } from './protocol.js';
+import { listAvailablePacks } from './packs.js';
+import { loadPack } from './pack.js';
 
 export interface CreateServerOptions {
   room: Room;
   clientDistPath: string;
   port: number;
+  packsDir: string;
 }
 
 export interface GameServer {
@@ -55,7 +59,7 @@ function lanUrlFor(address: string | null, port: number): string {
 }
 
 export function createServer(options: CreateServerOptions): GameServer {
-  const { room, clientDistPath, port } = options;
+  const { room, clientDistPath, port, packsDir } = options;
   const assets = sirv(clientDistPath, { single: true });
 
   const httpServer = createHttpServer((req, res) => {
@@ -79,6 +83,7 @@ export function createServer(options: CreateServerOptions): GameServer {
   // сама скрывает в нём ответ.
   const stateMessageFor = (viewerId: string | null): ServerMessage => {
     const lan = room.getLanInfo();
+    const packInfo = room.getPackInfo();
     return {
       type: 'state',
       participants: toParticipantView(room.getState()),
@@ -86,6 +91,8 @@ export function createServer(options: CreateServerOptions): GameServer {
       game: room.toGameStateView(viewerId),
       lanUrl: lanUrlFor(lan.address, port),
       lanCandidates: lan.candidates,
+      availablePacks: packInfo.available,
+      activePackFilename: packInfo.activeFilename,
     };
   };
 
@@ -118,6 +125,7 @@ export function createServer(options: CreateServerOptions): GameServer {
 
   room.onChange(broadcastState);
   room.onLanChange(broadcastState);
+  room.onPackChange(broadcastState);
 
   // `ws`, будучи прицепленным к готовому httpServer, переподписывает его
   // 'error' на себя. Без слушателя здесь EventEmitter на 'error' бросает
@@ -140,6 +148,10 @@ export function createServer(options: CreateServerOptions): GameServer {
     send(ws, stateMessageFor(connections.get(ws) ?? null));
 
     ws.on('message', (data) => {
+      void handleMessage(data);
+    });
+
+    async function handleMessage(data: WebSocket.RawData): Promise<void> {
       let message: ClientMessage;
       try {
         message = JSON.parse(data.toString()) as ClientMessage;
@@ -342,7 +354,55 @@ export function createServer(options: CreateServerOptions): GameServer {
       ) {
         room.setLanAddress(message.address);
       }
-    });
+
+      if (message.type === 'refresh-packs') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          const packs = await listAvailablePacks(packsDir);
+          room.refreshAvailablePacks(participantId, packs);
+        }
+      }
+
+      if (message.type === 'admin-refresh-packs') {
+        const packs = await listAvailablePacks(packsDir);
+        room.refreshAvailablePacks(null, packs);
+      }
+
+      if (
+        message.type === 'select-pack' &&
+        typeof message.filename === 'string'
+      ) {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          await handleSelectPack(participantId, message.filename);
+        }
+      }
+
+      if (
+        message.type === 'admin-select-pack' &&
+        typeof message.filename === 'string'
+      ) {
+        await handleSelectPack(null, message.filename);
+      }
+
+      async function handleSelectPack(
+        requesterId: string | null,
+        filename: string,
+      ): Promise<void> {
+        let pack;
+        try {
+          pack = await loadPack(join(packsDir, filename));
+        } catch {
+          send(ws, { type: 'select-pack-error', reason: 'unknown-file' });
+          return;
+        }
+        const result = room.selectPack(requesterId, filename, pack);
+        if ('error' in result && result.error === 'unknown-file') {
+          send(ws, { type: 'select-pack-error', reason: 'unknown-file' });
+        }
+        // result.error === 'not-host' — тихий no-op, без ответа (см. Task 3).
+      }
+    }
 
     ws.on('error', (err) => {
       console.error('Ошибка WebSocket-соединения:', err);

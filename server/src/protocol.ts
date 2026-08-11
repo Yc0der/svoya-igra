@@ -1,5 +1,6 @@
 import type { Phase } from './engine.js';
 import type { LanCandidate } from './network.js';
+import type { PackSummary } from './packs.js';
 
 export interface ParticipantView {
   id: string;
@@ -81,7 +82,14 @@ export type ClientMessage =
   | { type: 'admin-skip-to-final' }
   // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — человек
   // выбирает из реально найденных кандидатов вместо угадывания сервером.
-  | { type: 'admin-set-lan-address'; address: string };
+  | { type: 'admin-set-lan-address'; address: string }
+  // Выбор пакета — от участника (сервер сверяет отправителя с
+  // hostParticipantId) и с админ-панели (без проверки личности), тем же
+  // способом, каким уже разделены skip-to-final/admin-skip-to-final.
+  | { type: 'refresh-packs' }
+  | { type: 'select-pack'; filename: string }
+  | { type: 'admin-refresh-packs' }
+  | { type: 'admin-select-pack'; filename: string };
 
 export type StartGameErrorReason =
   | 'not-enough-players'
@@ -105,6 +113,15 @@ export type ServerMessage =
       // бы смену адреса, выбранную через admin-set-lan-address.
       lanUrl: string;
       lanCandidates: LanCandidate[];
+      // Живые, как lanUrl/lanCandidates — пересчитываются на каждой
+      // рассылке из room.getPackInfo(), видны всем подключённым, но
+      // действовать (refresh-packs/select-pack) могут только ведущий и
+      // админка.
+      availablePacks: PackSummary[];
+      activePackFilename: string | null;
     }
   | { type: 'falsestart' }
-  | { type: 'start-game-error'; reason: StartGameErrorReason };
+  | { type: 'start-game-error'; reason: StartGameErrorReason }
+  // Попытка select-pack/admin-select-pack на файл, ставший невалидным или
+  // исчезнувший между обновлением списка и выбором.
+  | { type: 'select-pack-error'; reason: 'unknown-file' };

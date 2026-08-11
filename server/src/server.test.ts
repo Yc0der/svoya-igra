@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -69,6 +69,7 @@ describe('createServer', () => {
       room,
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     ({ port } = server.httpServer.address() as AddressInfo);
@@ -93,6 +94,8 @@ describe('createServer', () => {
       game: null,
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
+      availablePacks: [],
+      activePackFilename: null,
     });
 
     ws.close();
@@ -128,6 +131,8 @@ describe('createServer', () => {
       game: null,
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
+      availablePacks: [],
+      activePackFilename: null,
     });
 
     board.close();
@@ -182,6 +187,8 @@ describe('createServer', () => {
       game: null,
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
+      availablePacks: [],
+      activePackFilename: null,
     });
 
     const reconnected = new WebSocket(url);
@@ -209,6 +216,8 @@ describe('createServer', () => {
       game: null,
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
+      availablePacks: [],
+      activePackFilename: null,
     });
 
     board.close();
@@ -226,6 +235,7 @@ describe('createServer', () => {
       room: new Room(),
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
 
     const err = await new Promise<NodeJS.ErrnoException>((resolve) => {
@@ -321,6 +331,8 @@ describe('createServer', () => {
       game: null,
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
+      availablePacks: [],
+      activePackFilename: null,
     });
 
     other.close();
@@ -370,6 +382,8 @@ describe('createServer', () => {
       game: null,
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
+      availablePacks: [],
+      activePackFilename: null,
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -403,6 +417,8 @@ describe('createServer', () => {
       game: null,
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
+      availablePacks: [],
+      activePackFilename: null,
     });
 
     board.close();
@@ -431,6 +447,7 @@ describe('createServer heartbeat', () => {
       room: new Room(),
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } = server.httpServer.address() as AddressInfo;
@@ -479,6 +496,8 @@ describe('createServer heartbeat', () => {
       game: null,
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
+      availablePacks: [],
+      activePackFilename: null,
     });
 
     board.close();
@@ -564,6 +583,7 @@ describe('createServer game flow', () => {
         room,
         clientDistPath: dir,
         port: 8080,
+        packsDir: dir,
       });
       await new Promise<void>((resolve) =>
         server.httpServer.listen(0, resolve),
@@ -668,6 +688,7 @@ describe('createServer game flow', () => {
       room,
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -706,6 +727,7 @@ describe('createServer game flow', () => {
       room,
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -813,6 +835,7 @@ describe('createServer host mode', () => {
       room,
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -847,6 +870,7 @@ describe('createServer host mode', () => {
       room,
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -922,6 +946,7 @@ describe('createServer host mode', () => {
       room,
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -1031,6 +1056,7 @@ describe('createServer final round', () => {
         room,
         clientDistPath: dir,
         port: 8080,
+        packsDir: dir,
       });
       await new Promise<void>((resolve) =>
         server.httpServer.listen(0, resolve),
@@ -1213,6 +1239,7 @@ describe('createServer admin panel', () => {
       room,
       clientDistPath: dir,
       port: 8080,
+      packsDir: dir,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } = server.httpServer.address() as AddressInfo;
@@ -1449,6 +1476,7 @@ describe('createServer admin panel', () => {
       room: lanRoom,
       clientDistPath: lanDir,
       port: 8080,
+      packsDir: lanDir,
     });
     await new Promise<void>((resolve) =>
       lanServer.httpServer.listen(0, resolve),
@@ -1488,6 +1516,7 @@ describe('createServer admin panel', () => {
       room: lanRoom,
       clientDistPath: lanDir,
       port: 8080,
+      packsDir: lanDir,
     });
     await new Promise<void>((resolve) =>
       lanServer.httpServer.listen(0, resolve),
@@ -1509,5 +1538,200 @@ describe('createServer admin panel', () => {
     admin.ws.close();
     await lanServer.close();
     await rm(lanDir, { recursive: true, force: true });
+  });
+});
+
+describe('createServer pack picker', () => {
+  let server: GameServer;
+  let dir: string;
+  let packsDir: string;
+  let baseUrl: string;
+
+  const PACK_A: Pack = {
+    title: 'Пак А',
+    author: 'Автор',
+    createdAt: '2026-08-04',
+    rounds: [
+      {
+        themes: [
+          {
+            name: 'Тема',
+            questions: [
+              {
+                id: 'a1',
+                price: 100,
+                text: 'В?',
+                answer: 'О',
+                type: 'обычный',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const PACK_B: Pack = {
+    ...PACK_A,
+    title: 'Пак Б',
+    description: 'Второй пак',
+    rounds: [
+      {
+        themes: [
+          {
+            name: 'Тема',
+            questions: [
+              {
+                id: 'b1',
+                price: 100,
+                text: 'В2?',
+                answer: 'О2',
+                type: 'обычный',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-pack-picker-'));
+    packsDir = await mkdtemp(join(tmpdir(), 'svoya-igra-pack-picker-packs-'));
+    await writeFile(join(packsDir, 'a.json'), JSON.stringify(PACK_A), 'utf8');
+    await writeFile(join(packsDir, 'b.json'), JSON.stringify(PACK_B), 'utf8');
+    const room = new Room(undefined, PACK_A, undefined, 'a.json');
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+    await rm(packsDir, { recursive: true, force: true });
+  });
+
+  it('sends the initial active pack filename and an empty available list before any refresh', async () => {
+    // Не connectAdmin() — та сама вычитывает единственное стартовое 'state'
+    // из очереди, а этому тесту нужно посмотреть именно на него.
+    const ws = new WebSocket(baseUrl);
+    const nextMessage = collectMessages(ws);
+    await waitForOpen(ws);
+    const state = (await nextMessage()) as {
+      activePackFilename: string;
+      availablePacks: unknown[];
+    };
+    expect(state.activePackFilename).toBe('a.json');
+    expect(state.availablePacks).toEqual([]);
+    ws.close();
+  });
+
+  it('admin-refresh-packs populates availablePacks with titles and descriptions', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(JSON.stringify({ type: 'admin-refresh-packs' }));
+    const state = (await admin.nextMessage()) as {
+      availablePacks: {
+        filename: string;
+        title: string;
+        description: string | null;
+      }[];
+    };
+    expect(state.availablePacks).toEqual(
+      expect.arrayContaining([
+        { filename: 'a.json', title: 'Пак А', description: null },
+        { filename: 'b.json', title: 'Пак Б', description: 'Второй пак' },
+      ]),
+    );
+    admin.ws.close();
+  });
+
+  it('admin-select-pack switches the active pack and broadcasts to everyone connected', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage(); // рассылка после join
+
+    admin.ws.send(JSON.stringify({ type: 'admin-refresh-packs' }));
+    // Рассылка после admin-refresh-packs идёт ВСЕМ подключённым, включая
+    // уже подключённого игрока `a` — если не вычитать её здесь и у него, она
+    // осталась бы в очереди и следующий a.nextMessage() ниже вернул бы её
+    // вместо рассылки после admin-select-pack.
+    await Promise.all([admin.nextMessage(), a.nextMessage()]);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-select-pack', filename: 'b.json' }),
+    );
+    const [adminState, aState] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+    ])) as { activePackFilename: string }[];
+    expect(adminState.activePackFilename).toBe('b.json');
+    expect(aState.activePackFilename).toBe('b.json');
+
+    admin.ws.close();
+    a.ws.close();
+  });
+
+  it('select-pack from the host succeeds; from a non-host is a silent no-op', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const host = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage();
+    const other = await joinPlayer(baseUrl, 'Катя');
+    await admin.nextMessage();
+    await host.nextMessage();
+
+    host.ws.send(JSON.stringify({ type: 'toggle-host' }));
+    await Promise.all([
+      admin.nextMessage(),
+      host.nextMessage(),
+      other.nextMessage(),
+    ]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-refresh-packs' }));
+    // Та же рассылка-всем ловушка, что и в предыдущем тесте: host и other
+    // тоже подключены и получают эту рассылку, иначе она осталась бы в их
+    // очереди и всплыла бы вместо ответа на следующее действие.
+    await Promise.all([
+      admin.nextMessage(),
+      host.nextMessage(),
+      other.nextMessage(),
+    ]);
+
+    // Не ведущий — тихий no-op, ничего не приходит, доказываем последующим
+    // легитимным действием, что сокет и процесс живы как обычно.
+    other.ws.send(JSON.stringify({ type: 'select-pack', filename: 'b.json' }));
+    other.ws.send(JSON.stringify({ type: 'buzz' }));
+    const reply = await other.nextMessage();
+    expect(reply).toEqual({ type: 'falsestart' });
+
+    host.ws.send(JSON.stringify({ type: 'select-pack', filename: 'b.json' }));
+    const [adminState] = (await Promise.all([
+      admin.nextMessage(),
+      host.nextMessage(),
+      other.nextMessage(),
+    ])) as { activePackFilename: string }[];
+    expect(adminState.activePackFilename).toBe('b.json');
+
+    admin.ws.close();
+    host.ws.close();
+    other.ws.close();
+  });
+
+  it('select-pack-error on an unknown filename', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-select-pack', filename: 'ghost.json' }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toEqual({
+      type: 'select-pack-error',
+      reason: 'unknown-file',
+    });
+    admin.ws.close();
   });
 });
