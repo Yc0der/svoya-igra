@@ -13,6 +13,12 @@ export interface LanCandidate {
   interfaceName: string;
 }
 
+export interface PackSummary {
+  filename: string;
+  title: string;
+  description: string | null;
+}
+
 // Админ-панель (design.md, «Админ-панель») — отдельный от useRoomConnection
 // хук: сокет админки никогда не шлёт 'join'/'reconnect', не хранит токен в
 // localStorage и не занимает место участника. Он получает те же
@@ -27,8 +33,11 @@ type ServerMessage =
       game: GameStateView | null;
       lanUrl: string;
       lanCandidates: LanCandidate[];
+      availablePacks: PackSummary[];
+      activePackFilename: string | null;
     }
-  | { type: 'start-game-error'; reason: StartGameErrorReason };
+  | { type: 'start-game-error'; reason: StartGameErrorReason }
+  | { type: 'select-pack-error'; reason: 'unknown-file' };
 
 type ClientMessage =
   | { type: 'admin-start-game' }
@@ -38,7 +47,9 @@ type ClientMessage =
   | { type: 'admin-set-host'; participantId: string | null }
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   | { type: 'admin-skip-to-final' }
-  | { type: 'admin-set-lan-address'; address: string };
+  | { type: 'admin-set-lan-address'; address: string }
+  | { type: 'admin-refresh-packs' }
+  | { type: 'admin-select-pack'; filename: string };
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -59,6 +70,11 @@ export interface AdminConnection {
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   skipToFinal(): void;
   setLanAddress(address: string): void;
+  availablePacks: PackSummary[];
+  activePackFilename: string | null;
+  selectPackError: 'unknown-file' | null;
+  refreshPacks(): void;
+  selectPack(filename: string): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -73,6 +89,13 @@ export function useAdminConnection(
   const [connected, setConnected] = useState(false);
   const [lanUrl, setLanUrl] = useState<string | null>(null);
   const [lanCandidates, setLanCandidates] = useState<LanCandidate[]>([]);
+  const [availablePacks, setAvailablePacks] = useState<PackSummary[]>([]);
+  const [activePackFilename, setActivePackFilename] = useState<string | null>(
+    null,
+  );
+  const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(
+    null,
+  );
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [hostParticipantId, setHostParticipantId] = useState<string | null>(
     null,
@@ -106,10 +129,16 @@ export function useAdminConnection(
           setGame(message.game);
           setLanUrl(message.lanUrl);
           setLanCandidates(message.lanCandidates);
+          setAvailablePacks(message.availablePacks);
+          setActivePackFilename(message.activePackFilename);
+          setSelectPackError(null);
           setStartGameError(null);
         }
         if (message.type === 'start-game-error') {
           setStartGameError(message.reason);
+        }
+        if (message.type === 'select-pack-error') {
+          setSelectPackError(message.reason);
         }
       });
 
@@ -152,5 +181,10 @@ export function useAdminConnection(
     skipToFinal: () => send({ type: 'admin-skip-to-final' }),
     setLanAddress: (address) =>
       send({ type: 'admin-set-lan-address', address }),
+    availablePacks,
+    activePackFilename,
+    selectPackError,
+    refreshPacks: () => send({ type: 'admin-refresh-packs' }),
+    selectPack: (filename) => send({ type: 'admin-select-pack', filename }),
   };
 }

@@ -53,6 +53,11 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     setHost: vi.fn(),
     skipToFinal: vi.fn(),
     setLanAddress: vi.fn(),
+    availablePacks: [],
+    activePackFilename: null,
+    selectPackError: null,
+    refreshPacks: vi.fn(),
+    selectPack: vi.fn(),
     ...overrides,
   };
 }
@@ -117,6 +122,66 @@ describe('Admin', () => {
       screen.getByRole('button', { name: /192\.168\.31\.179/ }),
     );
     expect(setLanAddress).toHaveBeenCalledWith('192.168.31.179');
+  });
+
+  it('shows a message instead of a pack list when none were found', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ availablePacks: [] }),
+    );
+    render(<Admin />);
+    expect(screen.getByText(/пакеты не найдены/i)).toBeInTheDocument();
+  });
+
+  it('lists packs with titles and descriptions, marking the active one', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        activePackFilename: 'a.json',
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: 'Про спорт' },
+          { filename: 'b.json', title: 'Пак Б', description: null },
+        ],
+      }),
+    );
+    render(<Admin />);
+    expect(screen.getByText('Пак А')).toBeInTheDocument();
+    expect(screen.getByText('Про спорт')).toBeInTheDocument();
+    const active = screen.getByRole('button', { name: /Пак А/ });
+    const other = screen.getByRole('button', { name: /Пак Б/ });
+    expect(active).toBeDisabled();
+    expect(other).toBeEnabled();
+  });
+
+  it('calls selectPack when picking a different pack', async () => {
+    const selectPack = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        activePackFilename: 'a.json',
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+          { filename: 'b.json', title: 'Пак Б', description: null },
+        ],
+        selectPack,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(screen.getByRole('button', { name: /Пак Б/ }));
+    expect(selectPack).toHaveBeenCalledWith('b.json');
+  });
+
+  it('calls refreshPacks when clicking "Обновить"', async () => {
+    const refreshPacks = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(connection({ refreshPacks }));
+    render(<Admin />);
+    await userEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+    expect(refreshPacks).toHaveBeenCalledOnce();
+  });
+
+  it('shows an alert when selectPackError is set', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ selectPackError: 'unknown-file' }),
+    );
+    render(<Admin />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/не удалось выбрать/i);
   });
 
   it('shows "нет партии" and offers to start one when the room is an empty lobby', () => {
