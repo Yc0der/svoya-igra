@@ -21,6 +21,7 @@ import {
 } from './engine.js';
 import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
+import type { LanCandidate } from './network.js';
 
 export interface Participant {
   id: string;
@@ -38,6 +39,16 @@ export interface RoomState {
   // startGame() копируется в EngineState.hostId и на время партии больше не
   // меняется (см. toggleHost()).
   hostParticipantId: string | null;
+}
+
+// Не часть RoomState/снапшота: кандидаты — это факт текущего окружения
+// (сетевые адаптеры этого запуска процесса), а не игровое состояние, и
+// пересчитывать их из старого снапшота после перезапуска было бы неверно —
+// адаптеры могли уже поменяться. Только выбранный address переживает
+// перезапуск, и то через отдельный файл (lan-host.ts), не через снапшот.
+export interface LanInfo {
+  candidates: LanCandidate[];
+  address: string | null;
 }
 
 export type JoinResult = { participant: Participant } | { error: 'name-taken' };
@@ -125,14 +136,19 @@ export class Room {
   private graceExclusionTimeoutHandle: ReturnType<typeof setTimeout> | null =
     null;
   private listeners = new Set<(state: RoomState) => void>();
+  private lanCandidates: LanCandidate[];
+  private lanAddress: string | null;
+  private lanListeners = new Set<(address: string | null) => void>();
 
-  constructor(initial?: RoomState, pack?: Pack) {
+  constructor(initial?: RoomState, pack?: Pack, lan?: LanInfo) {
     this.participants = initial
       ? initial.participants.map((p) => ({ ...p }))
       : [];
     this.pack = pack;
     this.game = initial?.game ? { ...initial.game } : null;
     this.hostParticipantId = initial?.hostParticipantId ?? null;
+    this.lanCandidates = lan?.candidates ?? [];
+    this.lanAddress = lan?.address ?? null;
     if (this.game) {
       const restart = PHASE_TIMER[this.game.phase];
       if (restart) {
@@ -444,8 +460,10 @@ export class Room {
   }
 
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-  skipToFinal(requesterId: string): void {
-    this.dispatch({ type: 'skip-to-final', requesterId });
+  // Только с админ-панели, поэтому без параметра — там нет личности
+  // отправителя, которую можно было бы передать.
+  skipToFinal(): void {
+    this.dispatch({ type: 'skip-to-final' });
   }
 
   eliminateFinalTheme(participantId: string, themeIndex: number): void {
@@ -490,6 +508,25 @@ export class Room {
       game: this.game ? { ...this.game } : null,
       hostParticipantId: this.hostParticipantId,
     };
+  }
+
+  getLanInfo(): LanInfo {
+    return { candidates: [...this.lanCandidates], address: this.lanAddress };
+  }
+
+  // Только для админ-панели (design.md, «Ловушки этого проекта», «Выбор
+  // локального IP на Windows») — автовыбор первого адреса иногда указывает
+  // на виртуальный адаптер, недостижимый с телефона. Здесь человек выбирает
+  // сам из реально найденных кандидатов; неизвестный address — тихий no-op,
+  // а не ошибка (тот же паттерн, что у admin-kick с неизвестным id).
+  setLanAddress(address: string): void {
+    if (!this.lanCandidates.some((c) => c.address === address)) {
+      return;
+    }
+    this.lanAddress = address;
+    for (const listener of this.lanListeners) {
+      listener(this.lanAddress);
+    }
   }
 
   // `viewerId` — participantId сокета, которому строится это конкретное
@@ -615,6 +652,15 @@ export class Room {
   onChange(listener: (state: RoomState) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  // Отдельно от onChange: смена LAN-адреса не часть RoomState (см. LanInfo),
+  // поэтому и подписка на неё отдельная — иначе пришлось бы либо пихать
+  // lanAddress в RoomState/снапшот не по смыслу, либо дёргать общий listener
+  // без реального изменения состояния комнаты.
+  onLanChange(listener: (address: string | null) => void): () => void {
+    this.lanListeners.add(listener);
+    return () => this.lanListeners.delete(listener);
   }
 
   private stillGraceExcluded(): boolean {

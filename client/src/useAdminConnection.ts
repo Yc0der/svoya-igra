@@ -5,6 +5,14 @@ import type {
   StartGameErrorReason,
 } from './useRoomConnection';
 
+// Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — сервер сам не
+// умеет угадать, какой сетевой адаптер настоящий, и печатает всех
+// кандидатов, среди которых человек выбирает нужный (server/src/network.ts).
+export interface LanCandidate {
+  address: string;
+  interfaceName: string;
+}
+
 // Админ-панель (design.md, «Админ-панель») — отдельный от useRoomConnection
 // хук: сокет админки никогда не шлёт 'join'/'reconnect', не хранит токен в
 // localStorage и не занимает место участника. Он получает те же
@@ -12,12 +20,13 @@ import type {
 // подключённому сокету независимо от того, представился тот или нет), но
 // шлёт в ответ только admin-* сообщения.
 type ServerMessage =
-  | { type: 'hello'; lanUrl: string }
   | {
       type: 'state';
       participants: ParticipantView[];
       hostParticipantId: string | null;
       game: GameStateView | null;
+      lanUrl: string;
+      lanCandidates: LanCandidate[];
     }
   | { type: 'start-game-error'; reason: StartGameErrorReason };
 
@@ -26,7 +35,10 @@ type ClientMessage =
   | { type: 'admin-reset-game' }
   | { type: 'admin-reset-room' }
   | { type: 'admin-kick'; participantId: string }
-  | { type: 'admin-set-host'; participantId: string | null };
+  | { type: 'admin-set-host'; participantId: string | null }
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
+  | { type: 'admin-skip-to-final' }
+  | { type: 'admin-set-lan-address'; address: string };
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -34,6 +46,7 @@ export interface AdminConnection {
   // состояние ниже остаётся на экране, не сбрасываясь в пустоту.
   connected: boolean;
   lanUrl: string | null;
+  lanCandidates: LanCandidate[];
   participants: ParticipantView[];
   hostParticipantId: string | null;
   game: GameStateView | null;
@@ -43,6 +56,9 @@ export interface AdminConnection {
   resetRoom(): void;
   kick(participantId: string): void;
   setHost(participantId: string | null): void;
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
+  skipToFinal(): void;
+  setLanAddress(address: string): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -56,6 +72,7 @@ export function useAdminConnection(
 ): AdminConnection {
   const [connected, setConnected] = useState(false);
   const [lanUrl, setLanUrl] = useState<string | null>(null);
+  const [lanCandidates, setLanCandidates] = useState<LanCandidate[]>([]);
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [hostParticipantId, setHostParticipantId] = useState<string | null>(
     null,
@@ -83,13 +100,12 @@ export function useAdminConnection(
           (event as MessageEvent<string>).data,
         ) as ServerMessage;
 
-        if (message.type === 'hello') {
-          setLanUrl(message.lanUrl);
-        }
         if (message.type === 'state') {
           setParticipants(message.participants);
           setHostParticipantId(message.hostParticipantId);
           setGame(message.game);
+          setLanUrl(message.lanUrl);
+          setLanCandidates(message.lanCandidates);
           setStartGameError(null);
         }
         if (message.type === 'start-game-error') {
@@ -123,6 +139,7 @@ export function useAdminConnection(
   return {
     connected,
     lanUrl,
+    lanCandidates,
     participants,
     hostParticipantId,
     game,
@@ -132,5 +149,8 @@ export function useAdminConnection(
     resetRoom: () => send({ type: 'admin-reset-room' }),
     kick: (participantId) => send({ type: 'admin-kick', participantId }),
     setHost: (participantId) => send({ type: 'admin-set-host', participantId }),
+    skipToFinal: () => send({ type: 'admin-skip-to-final' }),
+    setLanAddress: (address) =>
+      send({ type: 'admin-set-lan-address', address }),
   };
 }

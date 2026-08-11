@@ -1,11 +1,26 @@
 import { useState } from 'react';
 import { useAdminConnection } from './useAdminConnection';
+import type { GameStateView } from './useRoomConnection';
 import { START_GAME_ERROR_TEXT } from './errorText';
+
+// ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в
+// server/src/engine.ts. Те же фазы, при которых сам движок игнорирует
+// skip-to-final как no-op — дублируется здесь только чтобы не включать
+// кнопку без надобности, финальную проверку всё равно делает сервер.
+const FINAL_PHASES = new Set<GameStateView['phase']>([
+  'final-elim',
+  'final-wager',
+  'final-answer',
+  'final-judging',
+  'final-reveal',
+  'game-end',
+]);
 
 export function Admin() {
   const {
     connected,
     lanUrl,
+    lanCandidates,
     participants,
     hostParticipantId,
     game,
@@ -15,6 +30,8 @@ export function Admin() {
     resetRoom,
     kick,
     setHost,
+    skipToFinal,
+    setLanAddress,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -33,6 +50,15 @@ export function Admin() {
       return 'Не в партии';
     }
     return hostParticipantId === participantId ? 'Ведущий (лобби)' : '—';
+  }
+
+  // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — сервер сам
+  // не знает, какой адаптер настоящий, и угадывает первый попавшийся; тут
+  // человек видит все найденные и выбирает сам. Сравнение по hostname, а не
+  // по вхождению строки — «192.168.1.1» не должен считаться выбранным из-за
+  // «192.168.1.10».
+  function isSelectedAddress(address: string): boolean {
+    return lanUrl !== null && new URL(lanUrl).hostname === address;
   }
 
   function scoreOf(participantId: string): number | null {
@@ -59,6 +85,32 @@ export function Admin() {
       </p>
 
       <section className="admin-section">
+        <h2>Сеть</h2>
+        {lanCandidates.length === 0 ? (
+          <p>
+            Сетевые адреса не найдены — игра доступна только с этого устройства.
+          </p>
+        ) : (
+          <ul className="admin-lan-candidates">
+            {lanCandidates.map((c) => {
+              const selected = isSelectedAddress(c.address);
+              return (
+                <li key={c.address}>
+                  <button
+                    className={`button${selected ? ' is-selected' : ''}`}
+                    onClick={() => setLanAddress(c.address)}
+                    disabled={selected}
+                  >
+                    {c.address} ({c.interfaceName})
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="admin-section">
         <h2>Партия</h2>
         <p>
           Фаза: <strong>{game ? game.phase : 'нет партии (лобби)'}</strong>
@@ -76,6 +128,16 @@ export function Admin() {
           </button>
           <button className="button" onClick={resetGame} disabled={!game}>
             Завершить партию (в лобби)
+          </button>
+          {/* ВРЕМЕННО, для ручного тестирования финала — см. комментарий у
+              EngineEvent.skip-to-final в server/src/engine.ts. Убрать вместе
+              с остальными skip-to-final местами после живой проверки финала. */}
+          <button
+            className="button"
+            onClick={skipToFinal}
+            disabled={!game || FINAL_PHASES.has(game.phase)}
+          >
+            Перейти к финалу (тест)
           </button>
           <button
             className={`button button--no${confirmingWipe ? ' is-selected' : ''}`}

@@ -68,7 +68,7 @@ describe('createServer', () => {
     server = createServer({
       room,
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     ({ port } = server.httpServer.address() as AddressInfo);
@@ -80,16 +80,10 @@ describe('createServer', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('sends hello then the current state on connect', async () => {
+  it('sends the current state, including the LAN url, on connect', async () => {
     const ws = new WebSocket(url);
     const nextMessage = collectMessages(ws);
     await waitForOpen(ws);
-
-    const hello = await nextMessage();
-    expect(hello).toEqual({
-      type: 'hello',
-      lanUrl: 'http://192.168.1.1:8080/',
-    });
 
     const state = await nextMessage();
     expect(state).toEqual({
@@ -97,6 +91,8 @@ describe('createServer', () => {
       participants: [],
       hostParticipantId: null,
       game: null,
+      lanUrl: 'http://localhost:8080/',
+      lanCandidates: [],
     });
 
     ws.close();
@@ -107,12 +103,10 @@ describe('createServer', () => {
     const nextBoardMessage = collectMessages(board);
     await waitForOpen(board);
     await nextBoardMessage();
-    await nextBoardMessage();
 
     const player = new WebSocket(url);
     const nextPlayerMessage = collectMessages(player);
     await waitForOpen(player);
-    await nextPlayerMessage();
     await nextPlayerMessage();
 
     player.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
@@ -132,6 +126,8 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      lanUrl: 'http://localhost:8080/',
+      lanCandidates: [],
     });
 
     board.close();
@@ -143,14 +139,12 @@ describe('createServer', () => {
     const nextFirstMessage = collectMessages(first);
     await waitForOpen(first);
     await nextFirstMessage();
-    await nextFirstMessage();
     first.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
     await nextFirstMessage();
 
     const second = new WebSocket(url);
     const nextSecondMessage = collectMessages(second);
     await waitForOpen(second);
-    await nextSecondMessage();
     await nextSecondMessage();
     second.send(JSON.stringify({ type: 'join', name: 'ваня' }));
 
@@ -166,7 +160,6 @@ describe('createServer', () => {
     const nextPlayerMessage = collectMessages(player);
     await waitForOpen(player);
     await nextPlayerMessage();
-    await nextPlayerMessage();
     player.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
     const joined = (await nextPlayerMessage()) as {
       token: string;
@@ -176,7 +169,6 @@ describe('createServer', () => {
     const board = new WebSocket(url);
     const nextBoardMessage = collectMessages(board);
     await waitForOpen(board);
-    await nextBoardMessage();
     await nextBoardMessage();
 
     player.close();
@@ -188,12 +180,13 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      lanUrl: 'http://localhost:8080/',
+      lanCandidates: [],
     });
 
     const reconnected = new WebSocket(url);
     const nextReconnectedMessage = collectMessages(reconnected);
     await waitForOpen(reconnected);
-    await nextReconnectedMessage();
     await nextReconnectedMessage();
     reconnected.send(
       JSON.stringify({ type: 'reconnect', token: joined.token }),
@@ -214,6 +207,8 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      lanUrl: 'http://localhost:8080/',
+      lanCandidates: [],
     });
 
     board.close();
@@ -230,7 +225,7 @@ describe('createServer', () => {
     const other = createServer({
       room: new Room(),
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
 
     const err = await new Promise<NodeJS.ErrnoException>((resolve) => {
@@ -251,7 +246,6 @@ describe('createServer', () => {
     const ws = new WebSocket(url);
     const nextMessage = collectMessages(ws);
     await waitForOpen(ws);
-    await nextMessage(); // hello
     await nextMessage(); // state
 
     // Missing `name` — an unchecked `room.join(message.name)` would call
@@ -276,7 +270,6 @@ describe('createServer', () => {
     const ws = new WebSocket(url);
     const nextMessage = collectMessages(ws);
     await waitForOpen(ws);
-    await nextMessage(); // hello
     await nextMessage(); // state
 
     // No 'join' sent — this socket is unknown to `connections`. An
@@ -299,7 +292,6 @@ describe('createServer', () => {
     const attacker = new WebSocket(url);
     const nextAttackerMessage = collectMessages(attacker);
     await waitForOpen(attacker);
-    await nextAttackerMessage(); // hello
     await nextAttackerMessage(); // state
 
     // Write a raw frame with an invalid (reserved) opcode directly to the
@@ -321,10 +313,14 @@ describe('createServer', () => {
     const other = new WebSocket(url);
     const nextOtherMessage = collectMessages(other);
     await waitForOpen(other);
-    const hello = await nextOtherMessage();
-    expect(hello).toEqual({
-      type: 'hello',
-      lanUrl: 'http://192.168.1.1:8080/',
+    const state = await nextOtherMessage();
+    expect(state).toEqual({
+      type: 'state',
+      participants: [],
+      hostParticipantId: null,
+      game: null,
+      lanUrl: 'http://localhost:8080/',
+      lanCandidates: [],
     });
 
     other.close();
@@ -334,7 +330,6 @@ describe('createServer', () => {
     const player = new WebSocket(url);
     const nextPlayerMessage = collectMessages(player);
     await waitForOpen(player);
-    await nextPlayerMessage();
     await nextPlayerMessage();
     player.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
     const joined = (await nextPlayerMessage()) as {
@@ -346,7 +341,6 @@ describe('createServer', () => {
     const nextBoardMessage = collectMessages(board);
     await waitForOpen(board);
     await nextBoardMessage();
-    await nextBoardMessage();
 
     // Reconnect on a NEW socket WITHOUT closing the original ("stale") one —
     // simulating a phone that dropped Wi-Fi and reconnected before the
@@ -354,7 +348,6 @@ describe('createServer', () => {
     const reconnected = new WebSocket(url);
     const nextReconnectedMessage = collectMessages(reconnected);
     await waitForOpen(reconnected);
-    await nextReconnectedMessage();
     await nextReconnectedMessage();
     reconnected.send(
       JSON.stringify({ type: 'reconnect', token: joined.token }),
@@ -375,6 +368,8 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      lanUrl: 'http://localhost:8080/',
+      lanCandidates: [],
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -394,7 +389,6 @@ describe('createServer', () => {
     const nextBystanderMessage = collectMessages(bystander);
     await waitForOpen(bystander);
     await nextBystanderMessage();
-    await nextBystanderMessage();
     bystander.send(JSON.stringify({ type: 'join', name: 'Оля' }));
     await nextBystanderMessage(); // joined
 
@@ -407,6 +401,8 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      lanUrl: 'http://localhost:8080/',
+      lanCandidates: [],
     });
 
     board.close();
@@ -434,7 +430,7 @@ describe('createServer heartbeat', () => {
     server = createServer({
       room: new Room(),
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } = server.httpServer.address() as AddressInfo;
@@ -451,13 +447,11 @@ describe('createServer heartbeat', () => {
     const board = new WebSocket(url);
     const nextBoardMessage = collectMessages(board);
     await waitForOpen(board);
-    await nextBoardMessage(); // hello
     await nextBoardMessage(); // state
 
     const player = new WebSocket(url);
     const nextPlayerMessage = collectMessages(player);
     await waitForOpen(player);
-    await nextPlayerMessage(); // hello
     await nextPlayerMessage(); // state
     player.send(JSON.stringify({ type: 'join', name: 'Ваня' }));
     const joined = (await nextPlayerMessage()) as { participantId: string };
@@ -483,6 +477,8 @@ describe('createServer heartbeat', () => {
       ],
       hostParticipantId: null,
       game: null,
+      lanUrl: 'http://localhost:8080/',
+      lanCandidates: [],
     });
 
     board.close();
@@ -519,7 +515,6 @@ async function joinPlayer(baseUrl: string, name: string) {
   const ws = new WebSocket(baseUrl);
   const nextMessage = collectMessages(ws);
   await waitForOpen(ws);
-  await nextMessage(); // hello
   await nextMessage(); // state
   ws.send(JSON.stringify({ type: 'join', name }));
   const joined = (await nextMessage()) as {
@@ -568,7 +563,7 @@ describe('createServer game flow', () => {
       const server = createServer({
         room,
         clientDistPath: dir,
-        lanUrl: 'http://192.168.1.1:8080/',
+        port: 8080,
       });
       await new Promise<void>((resolve) =>
         server.httpServer.listen(0, resolve),
@@ -672,7 +667,7 @@ describe('createServer game flow', () => {
     const server = createServer({
       room,
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -710,7 +705,7 @@ describe('createServer game flow', () => {
     const server = createServer({
       room,
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -766,7 +761,6 @@ describe('createServer game flow', () => {
     const reconnected = new WebSocket(url);
     const nextReconnectedMessage = collectMessages(reconnected);
     await waitForOpen(reconnected);
-    await nextReconnectedMessage(); // hello
     const stateOnConnect = (await nextReconnectedMessage()) as {
       game: { phase: string } | null;
     };
@@ -818,7 +812,7 @@ describe('createServer host mode', () => {
     const server = createServer({
       room,
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -852,7 +846,7 @@ describe('createServer host mode', () => {
     const server = createServer({
       room,
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -927,7 +921,7 @@ describe('createServer host mode', () => {
     const server = createServer({
       room,
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } =
@@ -1036,7 +1030,7 @@ describe('createServer final round', () => {
       const server = createServer({
         room,
         clientDistPath: dir,
-        lanUrl: 'http://192.168.1.1:8080/',
+        port: 8080,
       });
       await new Promise<void>((resolve) =>
         server.httpServer.listen(0, resolve),
@@ -1197,13 +1191,12 @@ describe('createServer final round', () => {
 });
 
 // Админ-панель (design.md, «Админ-панель») — сокет никогда не шлёт 'join',
-// поэтому в отличие от joinPlayer() выше здесь только 'hello' и стартовое
-// 'state', без 'joined'.
+// поэтому в отличие от joinPlayer() выше здесь только стартовое 'state',
+// без 'joined'.
 async function connectAdmin(baseUrl: string) {
   const ws = new WebSocket(baseUrl);
   const nextMessage = collectMessages(ws);
   await waitForOpen(ws);
-  await nextMessage(); // hello
   await nextMessage(); // стартовое state
   return { ws, nextMessage };
 }
@@ -1219,7 +1212,7 @@ describe('createServer admin panel', () => {
     server = createServer({
       room,
       clientDistPath: dir,
-      lanUrl: 'http://192.168.1.1:8080/',
+      port: 8080,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } = server.httpServer.address() as AddressInfo;
@@ -1354,7 +1347,6 @@ describe('createServer admin panel', () => {
     const retry = new WebSocket(baseUrl);
     const nextMessage = collectMessages(retry);
     await waitForOpen(retry);
-    await nextMessage(); // hello
     await nextMessage(); // state
     retry.send(JSON.stringify({ type: 'reconnect', token: a.token }));
     const result = await nextMessage();
@@ -1392,5 +1384,130 @@ describe('createServer admin panel', () => {
 
     admin.ws.close();
     a.ws.close();
+  });
+
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  it('admin-skip-to-final forces the phase forward — game-end here since TEST_PACK has no final block', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Ваня');
+    await admin.nextMessage();
+    const b = await joinPlayer(baseUrl, 'Катя');
+    await admin.nextMessage();
+    await a.nextMessage();
+    const c = await joinPlayer(baseUrl, 'Петя');
+    await admin.nextMessage();
+    await a.nextMessage();
+    await b.nextMessage();
+
+    // Петя — ведущий, Ваня и Катя — счётчики: skip-to-final требует ведущего,
+    // как и естественный переход в финал (engine.ts, startFinalOrEnd).
+    c.ws.send(JSON.stringify({ type: 'toggle-host' }));
+    await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-skip-to-final' }));
+    const [adminState] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+      c.nextMessage(),
+    ])) as { game: { phase: string } }[];
+    expect(adminState.game.phase).toBe('game-end');
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
+    c.ws.close();
+  });
+
+  // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — своя
+  // комната с кандидатами, а не общая из beforeEach (там их нет), и своя
+  // рассылка проверяется у обоих сокетов сразу: смена адреса должна дойти
+  // до уже подключённых табло/игроков, не только до новых подключений.
+  it('admin-set-lan-address switches the LAN url broadcast to everyone connected', async () => {
+    const lanDir = await mkdtemp(join(tmpdir(), 'svoya-igra-admin-lan-'));
+    const lanRoom = new Room(undefined, TEST_PACK, {
+      candidates: [
+        { address: '192.168.56.1', interfaceName: 'Ethernet 2' },
+        { address: '192.168.31.179', interfaceName: 'Беспроводная сеть' },
+      ],
+      address: '192.168.56.1',
+    });
+    const lanServer = createServer({
+      room: lanRoom,
+      clientDistPath: lanDir,
+      port: 8080,
+    });
+    await new Promise<void>((resolve) =>
+      lanServer.httpServer.listen(0, resolve),
+    );
+    const { port: lanPort } = lanServer.httpServer.address() as AddressInfo;
+    const lanBaseUrl = `ws://127.0.0.1:${lanPort}/ws`;
+
+    const admin = await connectAdmin(lanBaseUrl);
+    const board = await connectAdmin(lanBaseUrl); // табло — тоже не 'join'-сокет
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-set-lan-address',
+        address: '192.168.31.179',
+      }),
+    );
+    const [adminState, boardState] = (await Promise.all([
+      admin.nextMessage(),
+      board.nextMessage(),
+    ])) as { lanUrl: string }[];
+    expect(adminState.lanUrl).toBe('http://192.168.31.179:8080/');
+    expect(boardState.lanUrl).toBe('http://192.168.31.179:8080/');
+
+    admin.ws.close();
+    board.ws.close();
+    await lanServer.close();
+    await rm(lanDir, { recursive: true, force: true });
+  });
+
+  it('admin-set-lan-address ignores an address that is not a known candidate', async () => {
+    const lanDir = await mkdtemp(join(tmpdir(), 'svoya-igra-admin-lan-bad-'));
+    const lanRoom = new Room(undefined, TEST_PACK, {
+      candidates: [{ address: '192.168.56.1', interfaceName: 'Ethernet 2' }],
+      address: '192.168.56.1',
+    });
+    const lanServer = createServer({
+      room: lanRoom,
+      clientDistPath: lanDir,
+      port: 8080,
+    });
+    await new Promise<void>((resolve) =>
+      lanServer.httpServer.listen(0, resolve),
+    );
+    const { port: lanPort } = lanServer.httpServer.address() as AddressInfo;
+    const lanBaseUrl = `ws://127.0.0.1:${lanPort}/ws`;
+
+    const admin = await connectAdmin(lanBaseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-lan-address', address: '9.9.9.9' }),
+    );
+    // Невалидный адрес не меняет состояние — оно не рассылается заново,
+    // значит и ждать здесь больше нечего. Прогоняем безобидное admin-действие
+    // следом и проверяем по его рассылке, что lanUrl остался прежним.
+    admin.ws.send(JSON.stringify({ type: 'admin-reset-room' }));
+    const state = (await admin.nextMessage()) as { lanUrl: string };
+    expect(state.lanUrl).toBe('http://192.168.56.1:8080/');
+
+    admin.ws.close();
+    await lanServer.close();
+    await rm(lanDir, { recursive: true, force: true });
   });
 });

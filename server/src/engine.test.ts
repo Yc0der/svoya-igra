@@ -642,6 +642,40 @@ describe('adjust-score', () => {
   });
 });
 
+describe('skip-to-final', () => {
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final. Только с
+  // админ-панели, поэтому без requesterId — проверять тут нечего, кроме фаз.
+  it('forces a transition to the final round from a normal round phase, when a host exists', () => {
+    const state = createInitialState(FINAL_PACK, ['p1', 'p2'], 'judge');
+    const { state: next, effects } = reduce(state, { type: 'skip-to-final' });
+    expect(next.phase).toBe('final-elim');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'final-elim', ms: FINAL_ELIM_TIMER_MS },
+    ]);
+  });
+
+  it('is a no-op with no host — the final round always requires one, same as a natural transition', () => {
+    const state = createInitialState(FINAL_PACK, ['p1', 'p2']);
+    const { state: next } = reduce(state, { type: 'skip-to-final' });
+    expect(next).toEqual(state);
+  });
+
+  it('is a no-op once already in the final round', () => {
+    const state = finalElimState({ p1: 0, p2: 0 });
+    const { state: next } = reduce(state, { type: 'skip-to-final' });
+    expect(next).toEqual(state);
+  });
+
+  it('is a no-op after the game has already ended', () => {
+    const state: EngineState = {
+      ...createInitialState(PACK, ['p1', 'p2'], 'judge'),
+      phase: 'game-end',
+    };
+    const { state: next } = reduce(state, { type: 'skip-to-final' });
+    expect(next).toEqual(state);
+  });
+});
+
 describe('cancel-question', () => {
   it('closes the open question with no score change and keeps the same picker, like a timeout', () => {
     const initial = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');

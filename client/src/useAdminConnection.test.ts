@@ -75,28 +75,44 @@ describe('useAdminConnection', () => {
     localStorage.clear();
   });
 
-  it('picks up lanUrl from hello and room state from state broadcasts', () => {
+  it('picks up lanUrl, lanCandidates and room state from state broadcasts', () => {
     const { result } = renderHook(() => useAdminConnection(factory));
     const socket = FakeWebSocket.instances[0];
 
     act(() => socket.emitOpen());
-    act(() =>
-      socket.emitMessage({ type: 'hello', lanUrl: 'http://192.168.1.5:8080/' }),
-    );
     act(() =>
       socket.emitMessage({
         type: 'state',
         participants: [{ id: 'p1', name: 'Ваня', connected: true }],
         hostParticipantId: 'p1',
         game: null,
+        lanUrl: 'http://192.168.1.5:8080/',
+        lanCandidates: [{ address: '192.168.1.5', interfaceName: 'Wi-Fi' }],
       }),
     );
 
     expect(result.current.lanUrl).toBe('http://192.168.1.5:8080/');
+    expect(result.current.lanCandidates).toEqual([
+      { address: '192.168.1.5', interfaceName: 'Wi-Fi' },
+    ]);
     expect(result.current.participants).toEqual([
       { id: 'p1', name: 'Ваня', connected: true },
     ]);
     expect(result.current.hostParticipantId).toBe('p1');
+  });
+
+  it('sends admin-set-lan-address with the chosen address', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.setLanAddress('192.168.31.179'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-set-lan-address',
+        address: '192.168.31.179',
+      }),
+    );
   });
 
   it('sends admin-start-game/admin-reset-game/admin-reset-room as the matching messages', () => {
@@ -144,6 +160,17 @@ describe('useAdminConnection', () => {
     act(() => result.current.setHost(null));
     expect(socket.sent).toContainEqual(
       JSON.stringify({ type: 'admin-set-host', participantId: null }),
+    );
+  });
+
+  it('sends admin-skip-to-final', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.skipToFinal());
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-skip-to-final' }),
     );
   });
 

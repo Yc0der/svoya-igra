@@ -3,6 +3,58 @@ import { Room } from './room.js';
 import { deserializeSnapshot, serializeSnapshot } from './snapshot.js';
 import { QUESTION_TIMER_MS, REVEAL_TIMER_MS } from './engine.js';
 
+// Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — кандидаты и
+// текущий адрес не часть RoomState (см. room.ts, LanInfo), поэтому и
+// проверяются отдельно от снапшот-теста ниже.
+describe('Room.getLanInfo / setLanAddress / onLanChange', () => {
+  it('defaults to no candidates and no address when none is given', () => {
+    const room = new Room();
+    expect(room.getLanInfo()).toEqual({ candidates: [], address: null });
+  });
+
+  it('exposes the candidates and address passed at construction', () => {
+    const room = new Room(undefined, undefined, {
+      candidates: [{ address: '10.0.0.1', interfaceName: 'eth0' }],
+      address: '10.0.0.1',
+    });
+    expect(room.getLanInfo()).toEqual({
+      candidates: [{ address: '10.0.0.1', interfaceName: 'eth0' }],
+      address: '10.0.0.1',
+    });
+  });
+
+  it('setLanAddress switches to another candidate and notifies onLanChange listeners', () => {
+    const room = new Room(undefined, undefined, {
+      candidates: [
+        { address: '10.0.0.1', interfaceName: 'eth0' },
+        { address: '192.168.1.5', interfaceName: 'wifi0' },
+      ],
+      address: '10.0.0.1',
+    });
+    const seen: (string | null)[] = [];
+    room.onLanChange((address) => seen.push(address));
+
+    room.setLanAddress('192.168.1.5');
+
+    expect(room.getLanInfo().address).toBe('192.168.1.5');
+    expect(seen).toEqual(['192.168.1.5']);
+  });
+
+  it('ignores an address that is not among the known candidates', () => {
+    const room = new Room(undefined, undefined, {
+      candidates: [{ address: '10.0.0.1', interfaceName: 'eth0' }],
+      address: '10.0.0.1',
+    });
+    const seen: (string | null)[] = [];
+    room.onLanChange((address) => seen.push(address));
+
+    room.setLanAddress('9.9.9.9');
+
+    expect(room.getLanInfo().address).toBe('10.0.0.1');
+    expect(seen).toEqual([]);
+  });
+});
+
 describe('Room.join', () => {
   it('adds a new participant', () => {
     const room = new Room();
@@ -1175,6 +1227,37 @@ const FINAL_PACK: Pack = {
     ],
   },
 };
+
+describe('Room.skipToFinal', () => {
+  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
+  // Только с админ-панели — без параметра, никакой личности отправителя.
+  it('forces a transition to the final round, skipping the rest of the current one', () => {
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [, , host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame(host);
+    expect(room.getState().game?.phase).toBe('selecting');
+
+    room.skipToFinal();
+
+    expect(room.getState().game?.phase).toBe('final-elim');
+  });
+
+  it('is a no-op without a host', () => {
+    const room = new Room(undefined, FINAL_PACK);
+    room.join('A');
+    room.join('B');
+    room.startGame(null);
+    expect(room.getState().game?.phase).toBe('selecting');
+
+    room.skipToFinal();
+
+    expect(room.getState().game?.phase).toBe('selecting');
+  });
+});
 
 describe('Room final round', () => {
   // turnCounterId (кто выбирает первый вопрос) выбирается движком случайно

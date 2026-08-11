@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from 'react';
 import { useRoomConnection, type GameStateView } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
 import { START_GAME_ERROR_TEXT } from './errorText';
@@ -23,7 +30,6 @@ export function Player() {
     adjustScore,
     cancelQuestion,
     resetGame,
-    skipToFinal,
     eliminateFinalTheme,
     submitWager,
     submitFinalAnswer,
@@ -236,12 +242,6 @@ export function Player() {
             Отменить вопрос
           </button>
         )}
-        {/* ВРЕМЕННО, для ручного тестирования финала — см. комментарий у
-            EngineEvent.skip-to-final в server/src/engine.ts. Убрать вместе
-            с остальными skip-to-final местами после живой проверки финала. */}
-        <button className="button" onClick={skipToFinal}>
-          Перейти к финалу (тест)
-        </button>
       </div>
     );
   }
@@ -258,7 +258,14 @@ export function Player() {
         }
         return (
           <div className="player">
-            <div className="player-grid">
+            <div
+              className="player-grid"
+              style={
+                {
+                  '--price-columns': game.grid[0]?.questions.length ?? 4,
+                } as CSSProperties
+              }
+            >
               {game.grid.map((theme) => (
                 <Fragment key={theme.themeName}>
                   <h2 className="theme-name">{theme.themeName}</h2>

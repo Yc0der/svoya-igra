@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Room, type RoomState } from './room.js';
 import { readSnapshot, writeSnapshot } from './snapshot.js';
+import { readLanHostConfig, writeLanHostAddress } from './lan-host.js';
 import { listLanCandidates, pickLanAddress } from './network.js';
 import { createServer } from './server.js';
 import { loadPack } from './pack.js';
@@ -10,6 +11,19 @@ import { loadPack } from './pack.js';
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
 const PACK_PATH = process.env.PACK_PATH ?? './packs/current.json';
+const LAN_HOST_CONFIG_PATH =
+  process.env.LAN_HOST_CONFIG_PATH ?? './lan-host.local.json';
+// Разовая добавка к hiddenInterfaces из LAN_HOST_CONFIG_PATH ниже — для
+// одного запуска, не заводя постоянную запись в файл. Список интерфейсов,
+// не адресов: у заведомо бесполезных на этой машине адаптеров (VPN,
+// виртуалки) interfaceName стабильнее, чем их address, — тот может
+// смениться между запусками, имя обычно нет.
+const LAN_HOST_HIDE_ENV = new Set(
+  (process.env.LAN_HOST_HIDE ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0),
+);
 const CLIENT_DIST_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../client/dist',
@@ -46,7 +60,68 @@ async function main(): Promise<void> {
     return;
   }
 
-  const room = new Room(initial ?? undefined, pack);
+  // Автовыбор адреса — эвристика «первый non-internal IPv4», и она вполне
+  // может указать на виртуальный адаптер (VirtualBox/WSL/Hyper-V), недостижимый
+  // с телефона. Сервер при этом слушает все интерфейсы и работает, а вот QR на
+  // табло ведёт в никуда — отказ молчаливый. Поэтому печатаем всех кандидатов,
+  // чтобы человек увидел, что выбрано и что ещё было, и даём выбрать нужный
+  // прямо в админ-панели (Admin.tsx) — выбор переживает перезапуск через
+  // LAN_HOST_CONFIG_PATH, не только через ручной LAN_HOST на этот один раз.
+  let lanConfig = {
+    address: null as string | null,
+    hiddenInterfaces: [] as string[],
+  };
+  try {
+    lanConfig = await readLanHostConfig(LAN_HOST_CONFIG_PATH);
+  } catch (err) {
+    console.error(
+      `Файл ${LAN_HOST_CONFIG_PATH} повреждён, игнорируем сохранённые адрес и список скрытых адаптеров:`,
+      err,
+    );
+  }
+  const hiddenInterfaces = new Set([
+    ...lanConfig.hiddenInterfaces,
+    ...LAN_HOST_HIDE_ENV,
+  ]);
+
+  const interfaces = networkInterfaces();
+  const candidates = listLanCandidates(interfaces).filter(
+    (c) => !hiddenInterfaces.has(c.interfaceName),
+  );
+  console.log(
+    candidates.length > 0
+      ? `Найденные сетевые адреса: ${candidates
+          .map(({ address, interfaceName }) => `${address} (${interfaceName})`)
+          .join(', ')}`
+      : 'Найденные сетевые адреса: нет',
+  );
+
+  // Сохранённый адрес мог устареть (сменилась сеть/адаптеры, или адаптер
+  // только что скрыли) — используем его, только если он всё ещё среди
+  // реально найденных кандидатов, иначе тихо откатываемся к автовыбору
+  // вместо того, чтобы упорствовать в адресе, которого больше нет.
+  const savedAddressStillValid =
+    lanConfig.address !== null &&
+    candidates.some((c) => c.address === lanConfig.address);
+
+  const lanAddressSource = process.env.LAN_HOST
+    ? 'LAN_HOST'
+    : savedAddressStillValid
+      ? LAN_HOST_CONFIG_PATH
+      : null;
+  const lanAddress =
+    process.env.LAN_HOST ??
+    (savedAddressStillValid ? lanConfig.address : pickLanAddress(interfaces));
+  console.log(
+    `Используется: ${lanAddress ?? 'localhost'}${
+      lanAddressSource ? ` (из ${lanAddressSource})` : ''
+    }. Выбрать другой можно в /admin, задать вручную — LAN_HOST=<ваш IP>.`,
+  );
+
+  const room = new Room(initial ?? undefined, pack, {
+    candidates,
+    address: lanAddress,
+  });
 
   // Записи снапшота сериализуются в очередь, чтобы более медленная запись
   // не перезаписала диск устаревшим состоянием после более быстрой поздней записи.
@@ -59,36 +134,20 @@ async function main(): Promise<void> {
     );
   });
 
-  // Автовыбор адреса — эвристика «первый non-internal IPv4», и она вполне
-  // может указать на виртуальный адаптер (VirtualBox/WSL/Hyper-V), недостижимый
-  // с телефона. Сервер при этом слушает все интерфейсы и работает, а вот QR на
-  // табло ведёт в никуда — отказ молчаливый. Поэтому печатаем всех кандидатов,
-  // чтобы человек увидел, что выбрано и что ещё было, и даём переопределить.
-  const interfaces = networkInterfaces();
-  const candidates = listLanCandidates(interfaces);
-  console.log(
-    candidates.length > 0
-      ? `Найденные сетевые адреса: ${candidates
-          .map(({ address, interfaceName }) => `${address} (${interfaceName})`)
-          .join(', ')}`
-      : 'Найденные сетевые адреса: нет',
-  );
-
-  const lanAddress = process.env.LAN_HOST ?? pickLanAddress(interfaces);
-  console.log(
-    `Используется: ${lanAddress ?? 'localhost'}${
-      process.env.LAN_HOST ? ' (из LAN_HOST)' : ''
-    }. Если адрес не тот, задайте LAN_HOST=<ваш IP>.`,
-  );
-
-  const lanUrl = lanAddress
-    ? `http://${lanAddress}:${PORT}/`
-    : `http://localhost:${PORT}/`;
+  // Только явный выбор в /admin доходит сюда (Room.setLanAddress) — обычный
+  // автовыбор при старте ничего не пишет, иначе файл переписывался бы на
+  // каждом запуске без участия человека.
+  room.onLanChange((address) => {
+    if (address === null) return;
+    writeLanHostAddress(LAN_HOST_CONFIG_PATH, address).catch((err: unknown) => {
+      console.error(`Не удалось сохранить ${LAN_HOST_CONFIG_PATH}:`, err);
+    });
+  });
 
   const { httpServer } = createServer({
     room,
     clientDistPath: CLIENT_DIST_PATH,
-    lanUrl,
+    port: PORT,
   });
 
   // Без этого обработчика занятый порт (например, процесс, оставшийся от
@@ -106,7 +165,9 @@ async function main(): Promise<void> {
   });
 
   httpServer.listen(PORT, () => {
-    console.log(`Своя игра слушает на ${lanUrl}`);
+    console.log(
+      `Своя игра слушает на http://${lanAddress ?? 'localhost'}:${PORT}/`,
+    );
   });
 }
 

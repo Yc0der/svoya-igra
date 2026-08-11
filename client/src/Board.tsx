@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, type CSSProperties } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoomConnection } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
@@ -150,7 +150,14 @@ export function Board() {
         </p>
       )}
 
-      <div className="board-grid">
+      <div
+        className="board-grid"
+        style={
+          {
+            '--price-columns': game.grid[0]?.questions.length ?? 4,
+          } as CSSProperties
+        }
+      >
         {game.grid.map((theme) => (
           <Fragment key={theme.themeName}>
             <h2 className="theme-name">{theme.themeName}</h2>

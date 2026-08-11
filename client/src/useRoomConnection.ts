@@ -54,7 +54,6 @@ export type StartGameErrorReason =
   | 'host-only';
 
 type ServerMessage =
-  | { type: 'hello'; lanUrl: string }
   | { type: 'joined'; participantId: string; token: string; name: string }
   | { type: 'name-taken' }
   | { type: 'invalid-token' }
@@ -63,6 +62,7 @@ type ServerMessage =
       participants: ParticipantView[];
       hostParticipantId: string | null;
       game: GameStateView | null;
+      lanUrl: string;
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason };
@@ -79,8 +79,6 @@ type ClientMessage =
   | { type: 'adjust-score'; participantId: string; delta: number }
   | { type: 'cancel-question' }
   | { type: 'reset-game' }
-  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-  | { type: 'skip-to-final' }
   | { type: 'eliminate-final-theme'; themeIndex: number }
   | { type: 'submit-wager'; amount: number }
   | { type: 'submit-final-answer'; text: string }
@@ -109,8 +107,6 @@ export interface RoomConnection {
   adjustScore(participantId: string, delta: number): void;
   cancelQuestion(): void;
   resetGame(): void;
-  // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
-  skipToFinal(): void;
   eliminateFinalTheme(themeIndex: number): void;
   submitWager(amount: number): void;
   submitFinalAnswer(text: string): void;
@@ -173,9 +169,6 @@ export function useRoomConnection(
           (event as MessageEvent<string>).data,
         ) as ServerMessage;
 
-        if (message.type === 'hello') {
-          setLanUrl(message.lanUrl);
-        }
         if (message.type === 'joined') {
           localStorage.setItem(TOKEN_KEY, message.token);
           setSelfId(message.participantId);
@@ -200,6 +193,7 @@ export function useRoomConnection(
           setParticipants(message.participants);
           setHostParticipantId(message.hostParticipantId);
           setGame(message.game);
+          setLanUrl(message.lanUrl);
           // Любое изменение в комнате (кто-то присоединился, кто-то стал
           // ведущим, партия реально началась) делает старую ошибку запуска
           // неактуальной — пользователь либо чинит проблему прямо сейчас,
@@ -275,7 +269,6 @@ export function useRoomConnection(
       send({ type: 'adjust-score', participantId, delta }),
     cancelQuestion: () => send({ type: 'cancel-question' }),
     resetGame: () => send({ type: 'reset-game' }),
-    skipToFinal: () => send({ type: 'skip-to-final' }),
     eliminateFinalTheme: (themeIndex) =>
       send({ type: 'eliminate-final-theme', themeIndex }),
     submitWager: (amount) => send({ type: 'submit-wager', amount }),

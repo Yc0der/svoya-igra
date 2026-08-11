@@ -54,3 +54,8 @@ room-snapshot.json
 room-snapshot.json.tmp
 e2e/fixtures/final-room-snapshot.json
 e2e/fixtures/final-room-snapshot.json.tmp
+
+# Saved LAN address override (server/src/lan-host.ts) — this machine's own
+# network-adapter pick, not something to share across machines/checkouts.
+lan-host.local.json
+lan-host.local.json.tmp

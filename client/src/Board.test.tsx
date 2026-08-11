@@ -56,7 +56,6 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     adjustScore: vi.fn(),
     cancelQuestion: vi.fn(),
     resetGame: vi.fn(),
-    skipToFinal: vi.fn(),
     eliminateFinalTheme: vi.fn(),
     submitWager: vi.fn(),
     submitFinalAnswer: vi.fn(),
@@ -164,6 +163,33 @@ describe('Board', () => {
     render(<Board />);
     expect(screen.getByText('200')).toBeInTheDocument();
     expect(screen.queryByText('100')).not.toBeInTheDocument();
+  });
+
+  it('sizes the grid to the actual number of questions per theme, not a hardcoded count', () => {
+    // Регрессия: сетка была захардкожена на 4 цены в теме (под старый
+    // packs/current.json), а генератор пакетов (Веха 3) делает по 5 —
+    // из-за чего строки съезжали по диагонали начиная со второй темы.
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          grid: [
+            {
+              themeName: 'Тема',
+              questions: [
+                { id: 'q1', price: 100, answered: false },
+                { id: 'q2', price: 200, answered: false },
+                { id: 'q3', price: 300, answered: false },
+                { id: 'q4', price: 400, answered: false },
+                { id: 'q5', price: 500, answered: false },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+    render(<Board />);
+    const grid = document.querySelector('.board-grid') as HTMLElement;
+    expect(grid.style.getPropertyValue('--price-columns')).toBe('5');
   });
 
   it('shows the open question text', () => {
