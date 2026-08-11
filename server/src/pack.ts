@@ -32,6 +32,7 @@ export interface Pack {
   title: string;
   author: string;
   createdAt: string;
+  description?: string;
   rounds: Round[];
   final?: { themes: FinalTheme[] };
 }
@@ -186,6 +187,9 @@ export function validatePack(data: unknown): Pack {
   const title = requireString(pack.title, 'пакет.title');
   const author = requireString(pack.author, 'пакет.author');
   const createdAt = requireString(pack.createdAt, 'пакет.createdAt');
+  if (pack.description !== undefined && typeof pack.description !== 'string') {
+    throw new Error('пакет.description: если есть, должно быть строкой');
+  }
   const roundsData = requireArray(pack.rounds, 'пакет.rounds');
   const rounds = roundsData.map((r, i) =>
     validateRound(r, `пакет.rounds[${i}]`),
@@ -195,7 +199,14 @@ export function validatePack(data: unknown): Pack {
       ? validateFinal(pack.final, 'пакет.final')
       : undefined;
   checkUniqueQuestionIds(rounds, final);
-  return { title, author, createdAt, rounds, final };
+  return {
+    title,
+    author,
+    createdAt,
+    description: pack.description as string | undefined,
+    rounds,
+    final,
+  };
 }
 
 export async function loadPack(path: string): Promise<Pack> {
