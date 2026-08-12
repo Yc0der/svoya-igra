@@ -554,6 +554,53 @@ code {
   outline-offset: 2px;
 }
 
+.admin-packs,
+.player-packs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-packs .button,
+.player-packs .button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 4px;
+}
+
+.admin-pack-title {
+  font-weight: 600;
+}
+
+.admin-pack-description {
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 400;
+}
+
+.admin-packs .button.is-selected,
+.player-packs .button.is-selected {
+  outline: 4px solid var(--text-h);
+  outline-offset: 2px;
+}
+
+.player-pack-picker {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 16px;
+  width: 100%;
+}
+
+.player-pack-picker h3 {
+  font-size: 16px;
+  margin: 0 0 12px;
+}
+
 .admin-participants {
   list-style: none;
   margin: 0;
