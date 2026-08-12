@@ -2,6 +2,7 @@ import type { Pack, Question } from './pack.js';
 
 export type Phase =
   | 'selecting'
+  | 'cat-handoff'
   | 'question-open'
   | 'buzzed'
   | 'judging'
@@ -16,6 +17,7 @@ export type Phase =
 
 export type TimerName =
   | 'question'
+  | 'cat-handoff'
   | 'said-answer'
   | 'vote'
   | 'reveal'
@@ -27,6 +29,7 @@ export type TimerName =
   | 'final-reveal';
 
 export const QUESTION_TIMER_MS = 30_000;
+export const CAT_HANDOFF_TIMER_MS = 15_000;
 export const SAID_ANSWER_TIMER_MS = 10_000;
 export const VOTE_TIMER_MS = 10_000;
 export const REVEAL_TIMER_MS = 4_000;
@@ -47,6 +50,10 @@ export interface EngineState {
   turnCounterId: string;
   currentQuestion: { themeIndex: number; questionId: string } | null;
   buzzedCounterId: string | null;
+  // Не null только пока фаза — question-open/buzzed/judging для
+  // вопроса-«кота»: единственный, кому в этом состоянии можно жать «Ответ»
+  // (docs/superpowers/specs/2026-08-12-cat-in-bag-design.md).
+  catRecipientCounterId: string | null;
   votes: Record<string, boolean>;
   scores: Record<string, number>;
   lastCorrectCounterId: string | null;
@@ -68,6 +75,11 @@ export type EngineEvent =
       counterId: string;
       themeIndex: number;
       questionId: string;
+    }
+  | {
+      type: 'assign-cat';
+      counterId: string;
+      recipientCounterId: string;
     }
   | { type: 'buzz'; counterId: string }
   | { type: 'said-answer'; counterId: string }
@@ -122,6 +134,7 @@ export function createInitialState(
     turnCounterId: counterIds[Math.floor(Math.random() * counterIds.length)],
     currentQuestion: null,
     buzzedCounterId: null,
+    catRecipientCounterId: null,
     votes: {},
     scores,
     lastCorrectCounterId: null,
@@ -135,7 +148,7 @@ export function createInitialState(
   };
 }
 
-function findQuestion(
+export function findQuestion(
   pack: Pack,
   roundIndex: number,
   themeIndex: number,
@@ -165,6 +178,8 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
   switch (event.type) {
     case 'select-question':
       return handleSelectQuestion(state, event);
+    case 'assign-cat':
+      return handleAssignCat(state, event);
     case 'buzz':
       return handleBuzz(state, event);
     case 'said-answer':
@@ -206,14 +221,53 @@ function handleSelectQuestion(
   if (!question || state.answeredQuestionIds.includes(question.id)) {
     return unchanged(state);
   }
+  const currentQuestion = {
+    themeIndex: event.themeIndex,
+    questionId: event.questionId,
+  };
+  // Онлайн-статус здесь не проверяется — движок его не знает (инвариант 1).
+  // «Некому отдать» отклоняет Room ДО того, как это событие сюда попадёт
+  // (docs/superpowers/specs/2026-08-12-cat-in-bag-design.md, «Комната»).
+  if (question.type === 'кот') {
+    return {
+      state: { ...state, phase: 'cat-handoff', currentQuestion },
+      effects: [
+        {
+          type: 'start-timer',
+          timer: 'cat-handoff',
+          ms: CAT_HANDOFF_TIMER_MS,
+        },
+      ],
+    };
+  }
+  return {
+    state: { ...state, phase: 'question-open', currentQuestion },
+    effects: [
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ],
+  };
+}
+
+// Онлайн-статус получателя здесь тоже не проверяется — та же причина, что
+// у handleSelectQuestion выше; Room отклоняет попытку передать офлайн-
+// участнику до вызова reduce() (design.md, «Комната»).
+function handleAssignCat(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'assign-cat' }>,
+): Result {
+  if (
+    state.phase !== 'cat-handoff' ||
+    event.counterId !== state.turnCounterId ||
+    event.recipientCounterId === event.counterId ||
+    !(event.recipientCounterId in state.scores)
+  ) {
+    return unchanged(state);
+  }
   return {
     state: {
       ...state,
       phase: 'question-open',
-      currentQuestion: {
-        themeIndex: event.themeIndex,
-        questionId: event.questionId,
-      },
+      catRecipientCounterId: event.recipientCounterId,
     },
     effects: [
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
@@ -226,6 +280,15 @@ function handleBuzz(
   event: Extract<EngineEvent, { type: 'buzz' }>,
 ): Result {
   if (state.phase !== 'question-open' || !(event.counterId in state.scores)) {
+    return unchanged(state);
+  }
+  // Вопрос-«кот»: жать может только тот, кому его передали — остальные, хоть
+  // и счётчики, для этого конкретного вопроса не считаются (design.md,
+  // «Правило»).
+  if (
+    state.catRecipientCounterId !== null &&
+    event.counterId !== state.catRecipientCounterId
+  ) {
     return unchanged(state);
   }
   return {
@@ -357,6 +420,7 @@ function handleSkipToFinal(state: EngineState): Result {
     ...state,
     currentQuestion: null,
     buzzedCounterId: null,
+    catRecipientCounterId: null,
     votes: {},
   });
 }
@@ -368,6 +432,18 @@ function handleTimerExpired(
   switch (event.timer) {
     case 'question':
       return revealQuestion(state, null);
+    case 'cat-handoff': {
+      const candidates = Object.keys(state.scores).filter(
+        (id) => id !== state.turnCounterId,
+      );
+      const recipientCounterId =
+        candidates[Math.floor(Math.random() * candidates.length)];
+      return handleAssignCat(state, {
+        type: 'assign-cat',
+        counterId: state.turnCounterId,
+        recipientCounterId,
+      });
+    }
     case 'said-answer':
       return startJudging(state);
     case 'vote':
@@ -427,6 +503,15 @@ function resolveVote(state: EngineState): Result {
     return revealQuestion({ ...state, scores: penalizedScores }, null);
   }
 
+  if (question.type === 'кот') {
+    // Вопрос-«кот»: получатель отвечает один, перехвата нет даже при
+    // ведущем — единственное отличие «кота» от обычного вопроса в этой
+    // функции (docs/superpowers/specs/2026-08-12-cat-in-bag-design.md,
+    // «Отказы»). Дальше — тот же путь, что у пары без ведущего: закрыть
+    // сразу.
+    return revealQuestion({ ...state, scores: penalizedScores }, null);
+  }
+
   // Судейство с ведущим: ответ никому, кроме ведущего, не показывался —
   // переоткрыть честно и сразу же, тем же 'question'-таймером, с которого
   // всё начиналось (Комната подставит в него не полные QUESTION_TIMER_MS, а
@@ -473,6 +558,7 @@ function revealQuestion(
         ? correctResult.counterId
         : state.lastCorrectCounterId,
       buzzedCounterId: null,
+      catRecipientCounterId: null,
       votes: {},
     },
     effects: [{ type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS }],
