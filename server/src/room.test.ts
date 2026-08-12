@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Room, type PackInfo } from './room.js';
 import { deserializeSnapshot, serializeSnapshot } from './snapshot.js';
-import { QUESTION_TIMER_MS, REVEAL_TIMER_MS } from './engine.js';
+import {
+  QUESTION_TIMER_MS,
+  REVEAL_TIMER_MS,
+  CAT_HANDOFF_TIMER_MS,
+} from './engine.js';
 
 // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — кандидаты и
 // текущий адрес не часть RoomState (см. room.ts, LanInfo), поэтому и
@@ -385,6 +389,37 @@ const ONE_QUESTION_PACK: Pack = {
               price: 100,
               text: 'Вопрос 1?',
               answer: 'ответ 1',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const CAT_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'cat1',
+              price: 100,
+              text: 'Вопрос-кот?',
+              answer: 'ответ кота',
+              type: 'кот',
+            },
+            {
+              id: 'q2',
+              price: 200,
+              text: 'Вопрос 2?',
+              answer: 'ответ 2',
               type: 'обычный',
             },
           ],
@@ -1653,5 +1688,109 @@ describe('Room final round', () => {
     expect(restored.getState().game?.phase).toBe('final-wager');
 
     vi.useRealTimers();
+  });
+});
+
+describe('Room — вопрос-«кот» (онлайн-проверки)', () => {
+  it('rejects selecting a cat question when no one else is online', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+    room.disconnect(other);
+
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView()?.phase).toBe('selecting');
+  });
+
+  it('allows selecting a cat question when at least one other participant is online', () => {
+    const room = new Room(undefined, CAT_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView()?.phase).toBe('cat-handoff');
+  });
+
+  it('rejects assignCat to an offline participant', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+    room.selectQuestion(picker, 0, 'cat1');
+    room.disconnect(other);
+
+    room.assignCat(picker, other);
+
+    expect(room.toGameStateView()?.phase).toBe('cat-handoff');
+    expect(room.toGameStateView()?.catRecipientParticipantId).toBeNull();
+  });
+
+  it('allows assignCat to an online participant', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+    room.selectQuestion(picker, 0, 'cat1');
+
+    room.assignCat(picker, other);
+
+    expect(room.toGameStateView()?.phase).toBe('question-open');
+    expect(room.toGameStateView()?.catRecipientParticipantId).toBe(other);
+  });
+
+  it('hides the question text while cat-handoff is in progress, and reveals it once assigned', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView()?.currentQuestion).toBeNull();
+
+    room.assignCat(picker, other);
+
+    expect(room.toGameStateView()?.currentQuestion).toEqual({
+      text: 'Вопрос-кот?',
+      price: 100,
+    });
+  });
+
+  it('re-arms the cat-handoff timer after restoring from a snapshot mid-handoff', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, CAT_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const view = room.toGameStateView()!;
+      const picker = view.turnParticipantId;
+      room.selectQuestion(picker, 0, 'cat1');
+
+      const snapshot = room.getState();
+      const restored = new Room(snapshot, CAT_PACK);
+
+      vi.advanceTimersByTime(CAT_HANDOFF_TIMER_MS);
+      expect(restored.toGameStateView()?.phase).toBe('question-open');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

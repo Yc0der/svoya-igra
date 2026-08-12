@@ -21,6 +21,10 @@ export interface GameStateView {
   turnParticipantId: string;
   currentQuestion: { text: string; price: number } | null;
   buzzedParticipantId: string | null;
+  // Не null только для вопроса-«кота», пока фаза question-open/buzzed/
+  // judging — единственный, кому в этот момент можно жать «Ответ» (см.
+  // Room.toGameStateView).
+  catRecipientParticipantId: string | null;
   // На judging непустой только для одного получателя за раз: при
   // hostParticipantId === null — для всех (двое, открытое судейство), иначе
   // — только для сокета с этим participantId (см. Room.toGameStateView).
