@@ -21,6 +21,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     turnParticipantId: '',
     currentQuestion: null,
     buzzedParticipantId: null,
+    catRecipientParticipantId: null,
     correctAnswer: null,
     graceExcludedParticipantId: null,
     graceExcludedUntil: null,

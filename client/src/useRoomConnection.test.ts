@@ -359,4 +359,16 @@ describe('useRoomConnection', () => {
 
     expect(result.current.selectPackError).toBe('unknown-file');
   });
+
+  it('sends assign-cat with the chosen recipient', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.assignCat('p2'));
+
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'assign-cat', recipientParticipantId: 'p2' }),
+    );
+  });
 });
