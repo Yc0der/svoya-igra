@@ -2,7 +2,7 @@ import {
   createServer as createHttpServer,
   type Server as HttpServer,
 } from 'node:http';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { WebSocket, WebSocketServer } from 'ws';
 import sirv from 'sirv';
 import type { Room, RoomState } from './room.js';
@@ -389,6 +389,13 @@ export function createServer(options: CreateServerOptions): GameServer {
         requesterId: string | null,
         filename: string,
       ): Promise<void> {
+        if (basename(filename) !== filename) {
+          // Легитимный клиент никогда сам не конструирует filename — он лишь
+          // эхом отправляет значение из серверного availablePacks. Значение,
+          // не прошедшее эту проверку, может прийти только от нестандартного
+          // отправителя — тихий no-op, как при not-host (см. Task 3).
+          return;
+        }
         let pack;
         try {
           pack = await loadPack(join(packsDir, filename));

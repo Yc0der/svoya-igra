@@ -1722,6 +1722,40 @@ describe('createServer pack picker', () => {
     other.ws.close();
   });
 
+  it('admin-select-pack with a path-traversal filename is a silent no-op', async () => {
+    const admin = await connectAdmin(baseUrl);
+
+    // Room знает о b.json только после refresh — иначе admin-select-pack
+    // ниже сам получил бы unknown-file, независимо от проверяемой защиты.
+    admin.ws.send(JSON.stringify({ type: 'admin-refresh-packs' }));
+    await admin.nextMessage();
+
+    // Сначала легитимно переключаемся на b.json, чтобы отличить "ничего не
+    // произошло" от "и так был активен a.json".
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-select-pack', filename: 'b.json' }),
+    );
+    const switched = (await admin.nextMessage()) as {
+      activePackFilename: string;
+    };
+    expect(switched.activePackFilename).toBe('b.json');
+
+    // Тихий no-op отличить от смены пака (или от select-pack-error) иначе,
+    // чем последующим легитимным действием — та же техника, что и в тесте
+    // выше на 'не ведущий': если бы это сообщение дало какой-то ответ, он
+    // пришёл бы раньше ответа на admin-refresh-packs и тест бы упал.
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-select-pack', filename: '../a.json' }),
+    );
+    admin.ws.send(JSON.stringify({ type: 'admin-refresh-packs' }));
+    const state = (await admin.nextMessage()) as {
+      activePackFilename: string;
+    };
+    expect(state.activePackFilename).toBe('b.json');
+
+    admin.ws.close();
+  });
+
   it('select-pack-error on an unknown filename', async () => {
     const admin = await connectAdmin(baseUrl);
     admin.ws.send(

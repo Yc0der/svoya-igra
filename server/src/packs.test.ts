@@ -67,6 +67,26 @@ describe('listAvailablePacks', () => {
     ]);
   });
 
+  it('returns packs sorted by filename regardless of readdir order', async () => {
+    // Пишем сначала b.json, потом a.json — readdir на некоторых ФС может
+    // вернуть их в порядке создания, а не по алфавиту. Список должен быть
+    // отсортирован самой listAvailablePacks, а не зависеть от порядка readdir.
+    await writeFile(
+      join(dir, 'b.json'),
+      JSON.stringify({ ...VALID_PACK, title: 'Б' }),
+      'utf8',
+    );
+    await writeFile(
+      join(dir, 'a.json'),
+      JSON.stringify({ ...VALID_PACK, title: 'А' }),
+      'utf8',
+    );
+    expect(await listAvailablePacks(dir)).toEqual([
+      { filename: 'a.json', title: 'А', description: null },
+      { filename: 'b.json', title: 'Б', description: null },
+    ]);
+  });
+
   it('skips a non-.json file without erroring', async () => {
     await writeFile(join(dir, 'readme.txt'), 'не пак', 'utf8');
     expect(await listAvailablePacks(dir)).toEqual([]);

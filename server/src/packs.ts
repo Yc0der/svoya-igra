@@ -42,5 +42,6 @@ export async function listAvailablePacks(dir: string): Promise<PackSummary[]> {
       console.error(`Пропускаю невалидный пакет ${path}:`, err);
     }
   }
+  summaries.sort((a, b) => a.filename.localeCompare(b.filename));
   return summaries;
 }
