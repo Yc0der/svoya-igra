@@ -53,6 +53,12 @@ export type StartGameErrorReason =
   | 'host-required'
   | 'host-only';
 
+export interface PackSummary {
+  filename: string;
+  title: string;
+  description: string | null;
+}
+
 type ServerMessage =
   | { type: 'joined'; participantId: string; token: string; name: string }
   | { type: 'name-taken' }
@@ -63,9 +69,12 @@ type ServerMessage =
       hostParticipantId: string | null;
       game: GameStateView | null;
       lanUrl: string;
+      availablePacks: PackSummary[];
+      activePackFilename: string | null;
     }
   | { type: 'falsestart' }
-  | { type: 'start-game-error'; reason: StartGameErrorReason };
+  | { type: 'start-game-error'; reason: StartGameErrorReason }
+  | { type: 'select-pack-error'; reason: 'unknown-file' };
 
 type ClientMessage =
   | { type: 'join'; name: string }
@@ -82,7 +91,9 @@ type ClientMessage =
   | { type: 'eliminate-final-theme'; themeIndex: number }
   | { type: 'submit-wager'; amount: number }
   | { type: 'submit-final-answer'; text: string }
-  | { type: 'final-vote'; participantId: string; correct: boolean };
+  | { type: 'final-vote'; participantId: string; correct: boolean }
+  | { type: 'refresh-packs' }
+  | { type: 'select-pack'; filename: string };
 
 export type ConnectionStatus =
   'connecting' | 'joining' | 'joined' | 'name-taken' | 'disconnected';
@@ -111,6 +122,11 @@ export interface RoomConnection {
   submitWager(amount: number): void;
   submitFinalAnswer(text: string): void;
   finalVote(participantId: string, correct: boolean): void;
+  availablePacks: PackSummary[];
+  activePackFilename: string | null;
+  selectPackError: 'unknown-file' | null;
+  refreshPacks(): void;
+  selectPack(filename: string): void;
 }
 
 const TOKEN_KEY = 'svoya-igra-token';
@@ -128,6 +144,13 @@ export function useRoomConnection(
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [selfId, setSelfId] = useState<string | null>(null);
   const [lanUrl, setLanUrl] = useState<string | null>(null);
+  const [availablePacks, setAvailablePacks] = useState<PackSummary[]>([]);
+  const [activePackFilename, setActivePackFilename] = useState<string | null>(
+    null,
+  );
+  const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(
+    null,
+  );
   const [game, setGame] = useState<GameStateView | null>(null);
   const [falsestart, setFalsestart] = useState(false);
   const [hostParticipantId, setHostParticipantId] = useState<string | null>(
@@ -194,6 +217,9 @@ export function useRoomConnection(
           setHostParticipantId(message.hostParticipantId);
           setGame(message.game);
           setLanUrl(message.lanUrl);
+          setAvailablePacks(message.availablePacks);
+          setActivePackFilename(message.activePackFilename);
+          setSelectPackError(null);
           // Любое изменение в комнате (кто-то присоединился, кто-то стал
           // ведущим, партия реально началась) делает старую ошибку запуска
           // неактуальной — пользователь либо чинит проблему прямо сейчас,
@@ -202,6 +228,9 @@ export function useRoomConnection(
         }
         if (message.type === 'start-game-error') {
           setStartGameError(message.reason);
+        }
+        if (message.type === 'select-pack-error') {
+          setSelectPackError(message.reason);
         }
         if (message.type === 'falsestart') {
           setFalsestart(true);
@@ -275,5 +304,10 @@ export function useRoomConnection(
     submitFinalAnswer: (text) => send({ type: 'submit-final-answer', text }),
     finalVote: (participantId, correct) =>
       send({ type: 'final-vote', participantId, correct }),
+    availablePacks,
+    activePackFilename,
+    selectPackError,
+    refreshPacks: () => send({ type: 'refresh-packs' }),
+    selectPack: (filename) => send({ type: 'select-pack', filename }),
   };
 }

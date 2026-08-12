@@ -34,6 +34,11 @@ export function Player() {
     submitWager,
     submitFinalAnswer,
     finalVote,
+    availablePacks,
+    activePackFilename,
+    selectPackError,
+    refreshPacks,
+    selectPack,
   } = useRoomConnection();
   const [name, setName] = useState('');
   const [myVote, setMyVote] = useState<boolean | null>(null);
@@ -152,6 +157,46 @@ export function Player() {
         <button className="button" onClick={toggleHost}>
           {isHost ? 'Перестать быть ведущим' : 'Стать ведущим'}
         </button>
+        {isHost && (
+          <div className="player-pack-picker">
+            <h3>Пакет</h3>
+            {selectPackError && (
+              <p className="player-alert" role="alert">
+                Не удалось выбрать пакет — файл стал невалиден или исчез.
+              </p>
+            )}
+            <button className="button" onClick={refreshPacks}>
+              Обновить
+            </button>
+            {availablePacks.length === 0 ? (
+              <p>
+                Пакеты не найдены — положите файлы в packs/ и обновите список.
+              </p>
+            ) : (
+              <ul className="player-packs">
+                {availablePacks.map((p) => {
+                  const selected = p.filename === activePackFilename;
+                  return (
+                    <li key={p.filename}>
+                      <button
+                        className={`button${selected ? ' is-selected' : ''}`}
+                        onClick={() => selectPack(p.filename)}
+                        disabled={selected}
+                      >
+                        <span className="admin-pack-title">{p.title}</span>
+                        {p.description && (
+                          <span className="admin-pack-description">
+                            {p.description}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        )}
         {startGameError && (
           <p className="player-alert" role="alert">
             {START_GAME_ERROR_TEXT[startGameError]}

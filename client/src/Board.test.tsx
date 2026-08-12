@@ -60,6 +60,11 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     submitWager: vi.fn(),
     submitFinalAnswer: vi.fn(),
     finalVote: vi.fn(),
+    availablePacks: [],
+    activePackFilename: null,
+    selectPackError: null,
+    refreshPacks: vi.fn(),
+    selectPack: vi.fn(),
     ...overrides,
   };
 }

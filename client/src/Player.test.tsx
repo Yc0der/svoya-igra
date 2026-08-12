@@ -61,6 +61,11 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     submitWager: vi.fn(),
     submitFinalAnswer: vi.fn(),
     finalVote: vi.fn(),
+    availablePacks: [],
+    activePackFilename: null,
+    selectPackError: null,
+    refreshPacks: vi.fn(),
+    selectPack: vi.fn(),
     ...overrides,
   };
 }
@@ -190,6 +195,76 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByRole('alert')).toHaveTextContent(/нужен ведущий/i);
+  });
+
+  it('does not show the pack picker in the lobby when not the host', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: null,
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByText('Пак А')).not.toBeInTheDocument();
+  });
+
+  it('shows the pack picker in the lobby when the host', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        game: null,
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: 'Описание' },
+        ],
+        activePackFilename: 'a.json',
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText('Пак А')).toBeInTheDocument();
+    expect(screen.getByText('Описание')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Пак А/ })).toBeDisabled();
+  });
+
+  it('calls selectPack when the host picks a different pack', async () => {
+    const selectPack = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        game: null,
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+          { filename: 'b.json', title: 'Пак Б', description: null },
+        ],
+        activePackFilename: 'a.json',
+        selectPack,
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: /Пак Б/ }));
+    expect(selectPack).toHaveBeenCalledWith('b.json');
+  });
+
+  it('calls refreshPacks when the host clicks "Обновить" in the lobby', async () => {
+    const refreshPacks = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        game: null,
+        refreshPacks,
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+    expect(refreshPacks).toHaveBeenCalledOnce();
   });
 
   it('shows the question grid when it is my turn to select', () => {

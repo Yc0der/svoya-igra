@@ -46,6 +46,25 @@ describe('validatePack', () => {
     );
   });
 
+  it('accepts a pack with an optional description', () => {
+    const data = validPackData() as Record<string, unknown>;
+    data.description = 'Спорт, кино и музыка для дружеской компании';
+    expect(validatePack(data).description).toBe(
+      'Спорт, кино и музыка для дружеской компании',
+    );
+  });
+
+  it('accepts a pack with no description at all', () => {
+    const data = validPackData();
+    expect(validatePack(data).description).toBeUndefined();
+  });
+
+  it('rejects a non-string description when present', () => {
+    const data = validPackData() as Record<string, unknown>;
+    data.description = 123;
+    expect(() => validatePack(data)).toThrow(/description/);
+  });
+
   it.each([
     ['title', 123],
     ['author', 123],

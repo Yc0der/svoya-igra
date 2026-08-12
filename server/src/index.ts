@@ -1,5 +1,5 @@
 import { networkInterfaces } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Room, type RoomState } from './room.js';
 import { readSnapshot, writeSnapshot } from './snapshot.js';
@@ -7,6 +7,7 @@ import { readLanHostConfig, writeLanHostAddress } from './lan-host.js';
 import { listLanCandidates, pickLanAddress } from './network.js';
 import { createServer } from './server.js';
 import { loadPack } from './pack.js';
+import { listAvailablePacks } from './packs.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
@@ -28,6 +29,7 @@ const CLIENT_DIST_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../client/dist',
 );
+const PACKS_DIR = dirname(PACK_PATH);
 
 async function main(): Promise<void> {
   // Битый снапшот не должен мешать серверу подняться. `writeSnapshot` теперь
@@ -118,10 +120,15 @@ async function main(): Promise<void> {
     }. Выбрать другой можно в /admin, задать вручную — LAN_HOST=<ваш IP>.`,
   );
 
-  const room = new Room(initial ?? undefined, pack, {
-    candidates,
-    address: lanAddress,
-  });
+  const initialAvailablePacks = await listAvailablePacks(PACKS_DIR);
+
+  const room = new Room(
+    initial ?? undefined,
+    pack,
+    { candidates, address: lanAddress },
+    basename(PACK_PATH),
+  );
+  room.refreshAvailablePacks(null, initialAvailablePacks);
 
   // Записи снапшота сериализуются в очередь, чтобы более медленная запись
   // не перезаписала диск устаревшим состоянием после более быстрой поздней записи.
@@ -148,6 +155,7 @@ async function main(): Promise<void> {
     room,
     clientDistPath: CLIENT_DIST_PATH,
     port: PORT,
+    packsDir: PACKS_DIR,
   });
 
   // Без этого обработчика занятый порт (например, процесс, оставшийся от

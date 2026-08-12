@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Room } from './room.js';
+import { Room, type PackInfo } from './room.js';
 import { deserializeSnapshot, serializeSnapshot } from './snapshot.js';
 import { QUESTION_TIMER_MS, REVEAL_TIMER_MS } from './engine.js';
 
@@ -52,6 +52,174 @@ describe('Room.getLanInfo / setLanAddress / onLanChange', () => {
 
     expect(room.getLanInfo().address).toBe('10.0.0.1');
     expect(seen).toEqual([]);
+  });
+});
+
+describe('Room.getPackInfo / refreshAvailablePacks / selectPack / onPackChange', () => {
+  const PACK_A = {
+    title: 'Пак А',
+    author: 'Автор',
+    createdAt: '2026-08-04',
+    rounds: [
+      {
+        themes: [
+          {
+            name: 'Тема',
+            questions: [
+              {
+                id: 'a1',
+                price: 100,
+                text: 'В?',
+                answer: 'О',
+                type: 'обычный' as const,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  const PACK_B = {
+    ...PACK_A,
+    title: 'Пак Б',
+    rounds: [
+      {
+        themes: [
+          {
+            name: 'Тема',
+            questions: [
+              {
+                id: 'b1',
+                price: 100,
+                text: 'В2?',
+                answer: 'О2',
+                type: 'обычный' as const,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it('defaults to no available packs and no active filename', () => {
+    const room = new Room();
+    expect(room.getPackInfo()).toEqual({ available: [], activeFilename: null });
+  });
+
+  it('exposes the initial pack filename passed at construction', () => {
+    const room = new Room(undefined, PACK_A, undefined, 'a.json');
+    expect(room.getPackInfo().activeFilename).toBe('a.json');
+  });
+
+  it('refreshAvailablePacks (admin, requesterId null) updates the list and notifies', () => {
+    const room = new Room();
+    const seen: PackInfo[] = [];
+    room.onPackChange((info) => seen.push(info));
+
+    room.refreshAvailablePacks(null, [
+      { filename: 'a.json', title: 'Пак А', description: null },
+    ]);
+
+    expect(room.getPackInfo().available).toEqual([
+      { filename: 'a.json', title: 'Пак А', description: null },
+    ]);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('refreshAvailablePacks from the host (matching hostParticipantId) succeeds', () => {
+    const room = new Room();
+    room.join('Ваня');
+    const hostId = room.getState().participants[0].id;
+    room.toggleHost(hostId);
+
+    room.refreshAvailablePacks(hostId, [
+      { filename: 'a.json', title: 'Пак А', description: null },
+    ]);
+
+    expect(room.getPackInfo().available).toHaveLength(1);
+  });
+
+  it('refreshAvailablePacks from a non-host participant is a silent no-op', () => {
+    const room = new Room();
+    room.join('Ваня');
+    const other = room.join('Катя');
+    const otherId = (other as { participant: { id: string } }).participant.id;
+
+    room.refreshAvailablePacks(otherId, [
+      { filename: 'a.json', title: 'Пак А', description: null },
+    ]);
+
+    expect(room.getPackInfo().available).toEqual([]);
+  });
+
+  it('selectPack switches the active pack and notifies onPackChange', () => {
+    const room = new Room(undefined, PACK_A, undefined, 'a.json');
+    room.refreshAvailablePacks(null, [
+      { filename: 'a.json', title: 'Пак А', description: null },
+      { filename: 'b.json', title: 'Пак Б', description: null },
+    ]);
+    const seen: PackInfo[] = [];
+    room.onPackChange((info) => seen.push(info));
+
+    const result = room.selectPack(null, 'b.json', PACK_B);
+
+    expect(result).toEqual({ ok: true });
+    expect(room.getPackInfo().activeFilename).toBe('b.json');
+    expect(seen).toHaveLength(1);
+  });
+
+  it('selectPack from the host (matching hostParticipantId) succeeds', () => {
+    const room = new Room(undefined, PACK_A, undefined, 'a.json');
+    room.join('Ваня');
+    const hostId = room.getState().participants[0].id;
+    room.toggleHost(hostId);
+    room.refreshAvailablePacks(null, [
+      { filename: 'b.json', title: 'Пак Б', description: null },
+    ]);
+
+    const result = room.selectPack(hostId, 'b.json', PACK_B);
+
+    expect(result).toEqual({ ok: true });
+    expect(room.getPackInfo().activeFilename).toBe('b.json');
+  });
+
+  it('selectPack from a non-host participant is a silent no-op returning not-host', () => {
+    const room = new Room(undefined, PACK_A, undefined, 'a.json');
+    room.join('Ваня');
+    const other = room.join('Катя');
+    const otherId = (other as { participant: { id: string } }).participant.id;
+    room.refreshAvailablePacks(null, [
+      { filename: 'b.json', title: 'Пак Б', description: null },
+    ]);
+
+    const result = room.selectPack(otherId, 'b.json', PACK_B);
+
+    expect(result).toEqual({ error: 'not-host' });
+    expect(room.getPackInfo().activeFilename).toBe('a.json');
+  });
+
+  it('selectPack with a filename not in the known list returns unknown-file', () => {
+    const room = new Room(undefined, PACK_A, undefined, 'a.json');
+
+    const result = room.selectPack(null, 'ghost.json', PACK_B);
+
+    expect(result).toEqual({ error: 'unknown-file' });
+    expect(room.getPackInfo().activeFilename).toBe('a.json');
+  });
+
+  it('selecting a pack makes it the pack used by the next startGame()', () => {
+    const room = new Room(undefined, PACK_A, undefined, 'a.json');
+    room.refreshAvailablePacks(null, [
+      { filename: 'b.json', title: 'Пак Б', description: null },
+    ]);
+    room.selectPack(null, 'b.json', PACK_B);
+    room.join('Ваня');
+    room.join('Катя');
+
+    room.startGame(null);
+
+    expect(room.getState().game?.pack.title).toBe('Пак Б');
   });
 });
 

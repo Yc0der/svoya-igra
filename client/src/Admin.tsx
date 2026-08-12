@@ -32,6 +32,11 @@ export function Admin() {
     setHost,
     skipToFinal,
     setLanAddress,
+    availablePacks,
+    activePackFilename,
+    selectPackError,
+    refreshPacks,
+    selectPack,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -102,6 +107,47 @@ export function Admin() {
                     disabled={selected}
                   >
                     {c.address} ({c.interfaceName})
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <section className="admin-section">
+        <h2>Пакет</h2>
+        {selectPackError && (
+          <p className="player-alert" role="alert">
+            Не удалось выбрать пакет — файл стал невалиден или исчез.
+          </p>
+        )}
+        <div className="admin-actions">
+          <button className="button" onClick={refreshPacks}>
+            Обновить
+          </button>
+        </div>
+        {availablePacks.length === 0 ? (
+          <p>
+            Пакеты не найдены — положите файлы в packs/ и нажмите «Обновить».
+          </p>
+        ) : (
+          <ul className="admin-packs">
+            {availablePacks.map((p) => {
+              const selected = p.filename === activePackFilename;
+              return (
+                <li key={p.filename}>
+                  <button
+                    className={`button${selected ? ' is-selected' : ''}`}
+                    onClick={() => selectPack(p.filename)}
+                    disabled={selected}
+                  >
+                    <span className="admin-pack-title">{p.title}</span>
+                    {p.description && (
+                      <span className="admin-pack-description">
+                        {p.description}
+                      </span>
+                    )}
                   </button>
                 </li>
               );
