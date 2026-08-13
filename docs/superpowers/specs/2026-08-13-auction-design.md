@@ -191,11 +191,21 @@ function afterBidOrPass(state: EngineState): Result {
   if (active.length === 1 && state.auctionHighestBidderCounterId !== null) {
     // Победитель определён — тот же переход, что у явной передачи кота
     // (assign-cat): 'question-open' с эксклюзивным правом ответа.
+    // auctionHighestBid/auctionHighestBidderCounterId — НЕ через
+    // resetAuctionFields здесь: resolveVote() читает auctionHighestBid как
+    // цену вопроса, когда победитель отвечает, а это случится позже этого
+    // return. revealQuestion() (единственный путь закрытия любого
+    // вопроса-аукциона — верный ответ/неверный/тайм-аут) сама сбросит оба
+    // поля своим общим резетом, но только после того, как resolveVote()
+    // успеет их прочитать.
     return {
       state: {
-        ...resetAuctionFields(state),
+        ...state,
         phase: 'question-open',
         exclusiveAnswererCounterId: active[0],
+        auctionOrder: null,
+        auctionTurnCounterId: null,
+        auctionPassedCounterIds: [],
       },
       effects: [
         { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
