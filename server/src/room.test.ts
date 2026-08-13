@@ -1793,4 +1793,53 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       vi.useRealTimers();
     }
   });
+
+  // Регрессия (финальное ревью, 2026-08-12): ведущий — participant, но
+  // никогда не counter (не входит в game.scores), поэтому одного
+  // `connected` для кандидатности недостаточно. Три участника: один
+  // ведущий, два счётчика. Отключаем одного из счётчиков (в т.ч., возможно,
+  // и самого выбирающего — Room не проверяет онлайн-статус отправителя,
+  // только получателя) так, что онлайн остаются ведущий и ровно один
+  // счётчик. Раз этот оставшийся счётчик — не сам выбирающий, он валидный
+  // получатель, и выбор клетки-«кота» проходит.
+  it('allows selecting a cat question when a host and exactly one non-host counter remain online', () => {
+    const room = new Room(undefined, CAT_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame(petya);
+    const picker = room.toGameStateView()!.turnParticipantId!;
+
+    // Отключаем самого выбирающего — остаются онлайн ведущий и второй
+    // счётчик (тот, что не `picker`).
+    room.disconnect(picker);
+
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView(petya)?.phase).toBe('cat-handoff');
+  });
+
+  // То же построение, но офлайн оба счётчика (и выбирающий, и `other`) —
+  // онлайн остаётся только ведущий. До фикса ведущий засчитывался как
+  // «есть кому отдать» (participants.some без проверки scores), и выбор
+  // молча проходил бы; после фикса ведущий не counter — выбор отклоняется,
+  // как будто вообще никого нет онлайн.
+  it('rejects selecting a cat question when only the host remains online, even though the host is connected', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame(petya);
+    const picker = room.toGameStateView()!.turnParticipantId!;
+    const other = picker === vanya ? katya : vanya;
+
+    room.disconnect(picker);
+    room.disconnect(other);
+
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView(petya)?.phase).toBe('selecting');
+  });
 });

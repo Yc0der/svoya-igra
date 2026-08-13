@@ -405,7 +405,10 @@ export class Room {
   // Тем же способом, что и buzz() ниже решает falsestart до движка: движок
   // не знает об онлайн-статусе (инвариант 1), поэтому «отдать кота некому»
   // отклоняется здесь, ДО dispatch — docs/superpowers/specs/
-  // 2026-08-12-cat-in-bag-design.md, «Комната».
+  // 2026-08-12-cat-in-bag-design.md, «Комната». Ведущий тоже не годится в
+  // получатели — он participant, но никогда не counter (не входит в
+  // this.game.scores), поэтому кандидатность дополнительно проверяется
+  // членством в scores, а не только участием в комнате.
   selectQuestion(
     participantId: string,
     themeIndex: number,
@@ -420,7 +423,8 @@ export class Room {
       );
       if (question?.type === 'кот') {
         const hasRecipient = this.participants.some(
-          (p) => p.connected && p.id !== participantId,
+          (p) =>
+            p.connected && p.id !== participantId && p.id in this.game!.scores,
         );
         if (!hasRecipient) return;
       }
@@ -434,12 +438,17 @@ export class Room {
   }
 
   // Тот же принцип, что у selectQuestion() выше — офлайн-получателя движок
-  // сам отклонить не может, отклоняем здесь.
+  // сам отклонить не может, отклоняем здесь. И тот же нюанс с ведущим: он
+  // participant, но не counter, поэтому кандидатность дополнительно
+  // проверяется членством в this.game.scores.
   assignCat(participantId: string, recipientParticipantId: string): void {
     if (
       this.game?.phase === 'cat-handoff' &&
       !this.participants.some(
-        (p) => p.connected && p.id === recipientParticipantId,
+        (p) =>
+          p.connected &&
+          p.id === recipientParticipantId &&
+          p.id in this.game!.scores,
       )
     ) {
       return;

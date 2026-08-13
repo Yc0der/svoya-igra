@@ -337,7 +337,10 @@ export function Player() {
       case 'cat-handoff': {
         if (game.turnParticipantId === selfId) {
           const candidates = participants.filter(
-            (p) => p.connected && p.id !== selfId,
+            (p) =>
+              p.connected &&
+              p.id !== selfId &&
+              game.scores.some((s) => s.participantId === p.id),
           );
           return (
             <div className="player">

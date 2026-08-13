@@ -447,7 +447,14 @@ describe('Player', () => {
           { id: 'other', name: 'Соперник', connected: true },
           { id: 'offline', name: 'Оффлайн', connected: false },
         ],
-        game: baseGame({ phase: 'cat-handoff', turnParticipantId: 'me' }),
+        game: baseGame({
+          phase: 'cat-handoff',
+          turnParticipantId: 'me',
+          scores: [
+            { participantId: 'me', score: 0 },
+            { participantId: 'other', score: 0 },
+          ],
+        }),
       }),
     );
     render(<Player />);
@@ -469,7 +476,14 @@ describe('Player', () => {
           { id: 'me', name: 'Я', connected: true },
           { id: 'other', name: 'Соперник', connected: true },
         ],
-        game: baseGame({ phase: 'cat-handoff', turnParticipantId: 'me' }),
+        game: baseGame({
+          phase: 'cat-handoff',
+          turnParticipantId: 'me',
+          scores: [
+            { participantId: 'me', score: 0 },
+            { participantId: 'other', score: 0 },
+          ],
+        }),
         assignCat,
       }),
     );

@@ -167,7 +167,8 @@ selectQuestion(
     );
     if (question?.type === 'кот') {
       const hasRecipient = this.participants.some(
-        (p) => p.connected && p.id !== participantId,
+        (p) =>
+          p.connected && p.id !== participantId && p.id in this.game!.scores,
       );
       if (!hasRecipient) return; // тихий no-op — клетка не выбирается
     }
@@ -181,10 +182,13 @@ assignCat(participantId: string, recipientParticipantId: string): void {
   if (
     this.game?.phase === 'cat-handoff' &&
     !this.participants.some(
-      (p) => p.connected && p.id === recipientParticipantId,
+      (p) =>
+        p.connected &&
+        p.id === recipientParticipantId &&
+        p.id in this.game!.scores,
     )
   ) {
-    return; // тихий no-op — офлайн-участника выбрать нельзя
+    return; // тихий no-op — офлайн-участника или ведущего выбрать нельзя
   }
   this.dispatch({
     type: 'assign-cat',
@@ -196,7 +200,11 @@ assignCat(participantId: string, recipientParticipantId: string): void {
 
 `Room` не трогает диск и не хранит собственное состояние ради этой проверки — использует уже
 имеющиеся `this.game` (`EngineState`, включая `pack`/`roundIndex`) и `this.participants`
-(включая `connected`), тем же способом, каким уже читает их для всего остального.
+(включая `connected`), тем же способом, каким уже читает их для всего остального. Оба места
+дополнительно проверяют членство кандидата в `this.game.scores` — ведущий это participant, но
+никогда не counter (не входит в `scores`), поэтому одной проверки `connected` недостаточно: без
+неё ведущий проходит как «валидный получатель», а движок затем всё равно отклонит `assign-cat`
+на него же (id не в `state.scores`), просто молча, без объяснения на уровне `Room`.
 
 ## Протокол и клиент
 
