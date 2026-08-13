@@ -28,10 +28,12 @@ export interface GameStateView {
     themeName: string;
   } | null;
   buzzedParticipantId: string | null;
-  // Не null только для вопроса-«кота», пока фаза question-open/buzzed/
-  // judging — единственный, кому в этот момент можно жать «Ответ» (см.
-  // Room.toGameStateView).
-  catRecipientParticipantId: string | null;
+  // Не null только пока фаза — question-open/buzzed/judging для вопроса,
+  // требующего эксклюзивного права ответа («кот» или «аукцион») —
+  // единственный, кому в этом состоянии можно жать «Ответ» (design.md обеих
+  // вех: 2026-08-12-cat-in-bag-design.md, 2026-08-13-auction-design.md,
+  // «Рефакторинг вехи 4»).
+  exclusiveAnswererParticipantId: string | null;
   // На judging непустой только для одного получателя за раз: при
   // hostParticipantId === null — для всех (двое, открытое судейство), иначе
   // — только для сокета с этим participantId (см. Room.toGameStateView).

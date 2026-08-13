@@ -711,7 +711,7 @@ export class Room {
           }
         : null,
       buzzedParticipantId: game.buzzedCounterId,
-      catRecipientParticipantId: game.catRecipientCounterId,
+      exclusiveAnswererParticipantId: game.exclusiveAnswererCounterId,
       // Не поле движка — Room-состояние, лениво «истекает» по сравнению с
       // Date.now() здесь же, без отдельного сброса по таймеру (см. поля
       // класса выше).

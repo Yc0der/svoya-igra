@@ -1338,10 +1338,10 @@ describe('select-question — вопрос-«кот»', () => {
     ]);
   });
 
-  it('leaves catRecipientCounterId null until a recipient is assigned', () => {
+  it('leaves exclusiveAnswererCounterId null until a recipient is assigned', () => {
     const state = createInitialState(CAT_PACK, ['p1', 'p2']);
     const { state: next } = selectCat(state);
-    expect(next.catRecipientCounterId).toBeNull();
+    expect(next.exclusiveAnswererCounterId).toBeNull();
   });
 });
 
@@ -1356,7 +1356,7 @@ describe('assign-cat', () => {
       recipientCounterId: recipientId,
     });
     expect(next.phase).toBe('question-open');
-    expect(next.catRecipientCounterId).toBe(recipientId);
+    expect(next.exclusiveAnswererCounterId).toBe(recipientId);
     expect(effects).toEqual([
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ]);
@@ -1422,7 +1422,7 @@ describe('buzz — вопрос-«кот»', () => {
 
   it('only the recipient can buzz', () => {
     const opened = assignedState();
-    const giverId = opened.catRecipientCounterId === 'p1' ? 'p2' : 'p1';
+    const giverId = opened.exclusiveAnswererCounterId === 'p1' ? 'p2' : 'p1';
     const { state: next, effects } = reduce(opened, {
       type: 'buzz',
       counterId: giverId,
@@ -1435,10 +1435,10 @@ describe('buzz — вопрос-«кот»', () => {
     const opened = assignedState();
     const { state: next } = reduce(opened, {
       type: 'buzz',
-      counterId: opened.catRecipientCounterId!,
+      counterId: opened.exclusiveAnswererCounterId!,
     });
     expect(next.phase).toBe('buzzed');
-    expect(next.buzzedCounterId).toBe(opened.catRecipientCounterId);
+    expect(next.buzzedCounterId).toBe(opened.exclusiveAnswererCounterId);
   });
 });
 
@@ -1451,8 +1451,8 @@ describe('timer-expired: cat-handoff', () => {
       timer: 'cat-handoff',
     });
     expect(next.phase).toBe('question-open');
-    expect(next.catRecipientCounterId).not.toBe(handoff.turnCounterId);
-    expect(['p1', 'p2']).toContain(next.catRecipientCounterId);
+    expect(next.exclusiveAnswererCounterId).not.toBe(handoff.turnCounterId);
+    expect(['p1', 'p2']).toContain(next.exclusiveAnswererCounterId);
     expect(effects).toEqual([
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ]);
@@ -1520,14 +1520,14 @@ describe('resolveVote — вопрос-«кот»', () => {
     expect(next.turnCounterId).toBe(giverId);
   });
 
-  it('resets catRecipientCounterId to null after the question resolves', () => {
+  it('resets exclusiveAnswererCounterId to null after the question resolves', () => {
     const judging = catJudging('judge', ['p1', 'p2']);
     const { state: next } = reduce(judging, {
       type: 'vote',
       counterId: 'judge',
       correct: false,
     });
-    expect(next.catRecipientCounterId).toBeNull();
+    expect(next.exclusiveAnswererCounterId).toBeNull();
   });
 });
 

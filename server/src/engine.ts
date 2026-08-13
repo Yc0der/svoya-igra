@@ -50,10 +50,12 @@ export interface EngineState {
   turnCounterId: string;
   currentQuestion: { themeIndex: number; questionId: string } | null;
   buzzedCounterId: string | null;
-  // Не null только пока фаза — question-open/buzzed/judging для
-  // вопроса-«кота»: единственный, кому в этом состоянии можно жать «Ответ»
-  // (docs/superpowers/specs/2026-08-12-cat-in-bag-design.md).
-  catRecipientCounterId: string | null;
+  // Не null только пока фаза — question-open/buzzed/judging для вопроса,
+  // требующего эксклюзивного права ответа («кот» или «аукцион») —
+  // единственный, кому в этом состоянии можно жать «Ответ» (design.md обеих
+  // вех: 2026-08-12-cat-in-bag-design.md, 2026-08-13-auction-design.md,
+  // «Рефакторинг вехи 4»).
+  exclusiveAnswererCounterId: string | null;
   votes: Record<string, boolean>;
   scores: Record<string, number>;
   lastCorrectCounterId: string | null;
@@ -134,7 +136,7 @@ export function createInitialState(
     turnCounterId: counterIds[Math.floor(Math.random() * counterIds.length)],
     currentQuestion: null,
     buzzedCounterId: null,
-    catRecipientCounterId: null,
+    exclusiveAnswererCounterId: null,
     votes: {},
     scores,
     lastCorrectCounterId: null,
@@ -267,7 +269,7 @@ function handleAssignCat(
     state: {
       ...state,
       phase: 'question-open',
-      catRecipientCounterId: event.recipientCounterId,
+      exclusiveAnswererCounterId: event.recipientCounterId,
     },
     effects: [
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
@@ -286,8 +288,8 @@ function handleBuzz(
   // и счётчики, для этого конкретного вопроса не считаются (design.md,
   // «Правило»).
   if (
-    state.catRecipientCounterId !== null &&
-    event.counterId !== state.catRecipientCounterId
+    state.exclusiveAnswererCounterId !== null &&
+    event.counterId !== state.exclusiveAnswererCounterId
   ) {
     return unchanged(state);
   }
@@ -420,7 +422,7 @@ function handleSkipToFinal(state: EngineState): Result {
     ...state,
     currentQuestion: null,
     buzzedCounterId: null,
-    catRecipientCounterId: null,
+    exclusiveAnswererCounterId: null,
     votes: {},
   });
 }
@@ -503,12 +505,15 @@ function resolveVote(state: EngineState): Result {
     return revealQuestion({ ...state, scores: penalizedScores }, null);
   }
 
-  if (question.type === 'кот') {
-    // Вопрос-«кот»: получатель отвечает один, перехвата нет даже при
-    // ведущем — единственное отличие «кота» от обычного вопроса в этой
-    // функции (docs/superpowers/specs/2026-08-12-cat-in-bag-design.md,
-    // «Отказы»). Дальше — тот же путь, что у пары без ведущего: закрыть
-    // сразу.
+  if (state.exclusiveAnswererCounterId !== null) {
+    // Вопрос с эксклюзивным правом ответа («кот» или «аукцион»): отвечает
+    // один, перехвата нет даже при ведущем. Проверка по состоянию, а не по
+    // типу вопроса — на этот момент (внутри resolveVote, до вызова
+    // revealQuestion, которая единственная сбрасывает поле) оно ещё не
+    // сброшено для любой механики с этим принципом, так что новой третьей
+    // механике с тем же правилом не придётся дописывать сюда ещё одну
+    // ветку (design.md обеих вех, «Рефакторинг вехи 4»). Дальше — тот же
+    // путь, что у пары без ведущего: закрыть сразу.
     return revealQuestion({ ...state, scores: penalizedScores }, null);
   }
 
@@ -558,7 +563,7 @@ function revealQuestion(
         ? correctResult.counterId
         : state.lastCorrectCounterId,
       buzzedCounterId: null,
-      catRecipientCounterId: null,
+      exclusiveAnswererCounterId: null,
       votes: {},
     },
     effects: [{ type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS }],

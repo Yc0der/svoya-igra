@@ -1735,7 +1735,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     room.assignCat(picker, other);
 
     expect(room.toGameStateView()?.phase).toBe('cat-handoff');
-    expect(room.toGameStateView()?.catRecipientParticipantId).toBeNull();
+    expect(room.toGameStateView()?.exclusiveAnswererParticipantId).toBeNull();
   });
 
   it('allows assignCat to an online participant', () => {
@@ -1751,7 +1751,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     room.assignCat(picker, other);
 
     expect(room.toGameStateView()?.phase).toBe('question-open');
-    expect(room.toGameStateView()?.catRecipientParticipantId).toBe(other);
+    expect(room.toGameStateView()?.exclusiveAnswererParticipantId).toBe(other);
   });
 
   it('hides the question text but shows the price while cat-handoff is in progress, and reveals the text once assigned', () => {

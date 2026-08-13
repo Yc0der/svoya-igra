@@ -904,7 +904,7 @@ describe('createServer cat-in-the-bag', () => {
       game: {
         phase: string;
         currentQuestion: { text: string };
-        catRecipientParticipantId: string;
+        exclusiveAnswererParticipantId: string;
       };
     };
     expect(afterAssign.game.phase).toBe('question-open');
@@ -913,7 +913,7 @@ describe('createServer cat-in-the-bag', () => {
       price: 100,
       themeName: 'Тема',
     });
-    expect(afterAssign.game.catRecipientParticipantId).toBe(
+    expect(afterAssign.game.exclusiveAnswererParticipantId).toBe(
       other.participantId,
     );
 
