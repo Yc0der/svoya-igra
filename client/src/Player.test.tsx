@@ -1413,4 +1413,145 @@ describe('Player', () => {
       expect(screen.getByText(/итог/i)).toBeInTheDocument();
     });
   });
+
+  it('shows the current bid and a form to place a higher one, when it is my turn to bid', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 150,
+          auctionHighestBidderParticipantId: 'other',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/150/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /поставить/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /пас/i })).toBeInTheDocument();
+  });
+
+  it('shows "no bids yet" when it is my turn and nobody has bid', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 0,
+          auctionHighestBidderParticipantId: null,
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/ставок ещё не было/i)).toBeInTheDocument();
+  });
+
+  it('calls placeBid with the entered amount', async () => {
+    const placeBid = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 100,
+          auctionHighestBidderParticipantId: 'other',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+        placeBid,
+      }),
+    );
+    render(<Player />);
+    await userEvent.type(screen.getByLabelText(/ставка/i), '150');
+    await userEvent.click(screen.getByRole('button', { name: /поставить/i }));
+    expect(placeBid).toHaveBeenCalledWith(150);
+  });
+
+  it('calls passBid when the pass button is clicked', async () => {
+    const passBid = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+        passBid,
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: /^пас$/i }));
+    expect(passBid).toHaveBeenCalledOnce();
+  });
+
+  it('shows a waiting message with the current bid to everyone else during bidding', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'other',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 150,
+          auctionHighestBidderParticipantId: 'me',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/ждём.*я/i)).toBeInTheDocument();
+    expect(screen.getByText(/150/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /поставить/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows that I have passed, without a bid form, once I am out of the bidding', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'other',
+          auctionPassedParticipantIds: ['me'],
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/вы спасовали/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /поставить/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the cancel-question button to the host during auction-bidding', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        game: baseGame({ phase: 'auction-bidding', hostId: 'host-id' }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+    expect(
+      screen.getByRole('button', { name: 'Отменить вопрос' }),
+    ).toBeInTheDocument();
+  });
 });

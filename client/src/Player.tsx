@@ -24,6 +24,8 @@ export function Player() {
     startGame,
     toggleHost,
     selectQuestion,
+    placeBid,
+    passBid,
     assignCat,
     buzz,
     saidAnswer,
@@ -51,6 +53,7 @@ export function Player() {
   >({});
   const [wagerInput, setWagerInput] = useState('');
   const [answerInput, setAnswerInput] = useState('');
+  const [bidInput, setBidInput] = useState('');
   // Один раз за подключение ведущий решает, продолжать ли партию, найденную
   // на сервере при заходе (например, восстановленную из снапшота после
   // перезапуска), или отбросить её и начать заново — см. блок ниже
@@ -86,6 +89,10 @@ export function Player() {
   useEffect(() => {
     if (game?.phase !== 'final-wager') setWagerInput('');
     if (game?.phase !== 'final-answer') setAnswerInput('');
+  }, [game?.phase]);
+
+  useEffect(() => {
+    if (game?.phase !== 'auction-bidding') setBidInput('');
   }, [game?.phase]);
 
   function nameOf(participantId: string | null): string {
@@ -258,6 +265,7 @@ export function Player() {
     if (!game) return null;
     const questionActive =
       game.phase === 'cat-handoff' ||
+      game.phase === 'auction-bidding' ||
       game.phase === 'question-open' ||
       game.phase === 'buzzed' ||
       game.phase === 'judging';
@@ -374,6 +382,80 @@ export function Player() {
                 {game.currentQuestion.themeName} за {game.currentQuestion.price}
               </p>
             )}
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
+          </div>
+        );
+      }
+
+      case 'auction-bidding': {
+        const iPassed =
+          selfId !== null &&
+          (game.auctionPassedParticipantIds?.includes(selfId) ?? false);
+        const bidHint =
+          game.auctionHighestBidderParticipantId === null
+            ? 'Ставок ещё не было'
+            : `Текущая ставка: ${game.auctionHighestBid} (${nameOf(
+                game.auctionHighestBidderParticipantId,
+              )})`;
+        if (game.auctionTurnParticipantId === selfId) {
+          const myScore =
+            game.scores.find((s) => s.participantId === selfId)?.score ?? 0;
+          const minBid =
+            game.auctionHighestBidderParticipantId === null
+              ? (game.currentQuestion?.price ?? 0)
+              : (game.auctionHighestBid ?? 0) + 1;
+          return (
+            <div className="player player--center">
+              <h2>Торги</h2>
+              {game.currentQuestion && (
+                <p className="player-answer">
+                  {game.currentQuestion.themeName} за{' '}
+                  {game.currentQuestion.price}
+                </p>
+              )}
+              <p>{bidHint}</p>
+              {remainingSeconds !== null && (
+                <p className="player-timer">{remainingSeconds}с</p>
+              )}
+              <label htmlFor="bid">Ставка</label>
+              <input
+                id="bid"
+                type="number"
+                min={minBid}
+                max={myScore}
+                value={bidInput}
+                onChange={(e) => setBidInput(e.target.value)}
+              />
+              <button
+                className="button button--primary"
+                onClick={() => {
+                  const amount = Number(bidInput);
+                  if (Number.isFinite(amount)) placeBid(amount);
+                }}
+              >
+                Поставить
+              </button>
+              <button className="button button--no" onClick={passBid}>
+                Пас
+              </button>
+            </div>
+          );
+        }
+        return (
+          <div className="player player--center">
+            {iPassed ? (
+              <p>Вы спасовали — ждём остальных</p>
+            ) : (
+              <p>Ждём {nameOf(game.auctionTurnParticipantId)}</p>
+            )}
+            {game.currentQuestion && (
+              <p className="player-answer">
+                {game.currentQuestion.themeName} за {game.currentQuestion.price}
+              </p>
+            )}
+            <p>{bidHint}</p>
             {remainingSeconds !== null && (
               <p className="player-timer">{remainingSeconds}с</p>
             )}
