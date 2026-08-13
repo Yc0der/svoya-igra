@@ -1753,7 +1753,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     expect(room.toGameStateView()?.catRecipientParticipantId).toBe(other);
   });
 
-  it('hides the question text while cat-handoff is in progress, and reveals it once assigned', () => {
+  it('hides the question text but shows the price while cat-handoff is in progress, and reveals the text once assigned', () => {
     const room = new Room(undefined, CAT_PACK);
     const vanya = joinedId(room, 'Ваня');
     const katya = joinedId(room, 'Катя');
@@ -1763,7 +1763,10 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     const other = picker === vanya ? katya : vanya;
     room.selectQuestion(picker, 0, 'cat1');
 
-    expect(room.toGameStateView()?.currentQuestion).toBeNull();
+    expect(room.toGameStateView()?.currentQuestion).toEqual({
+      text: null,
+      price: 100,
+    });
 
     room.assignCat(picker, other);
 

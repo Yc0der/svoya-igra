@@ -345,6 +345,11 @@ export function Player() {
           return (
             <div className="player">
               <h2>Кот в мешке — выбери, кому отдать</h2>
+              {game.currentQuestion && (
+                <p className="player-answer">
+                  Вопрос за {game.currentQuestion.price}
+                </p>
+              )}
               {remainingSeconds !== null && (
                 <p className="player-timer">{remainingSeconds}с</p>
               )}
@@ -363,6 +368,11 @@ export function Player() {
         return (
           <div className="player player--center">
             <p>{nameOf(game.turnParticipantId)} выбирает, кому отдать кота</p>
+            {game.currentQuestion && (
+              <p className="player-answer">
+                Вопрос за {game.currentQuestion.price}
+              </p>
+            )}
             {remainingSeconds !== null && (
               <p className="player-timer">{remainingSeconds}с</p>
             )}
@@ -395,6 +405,11 @@ export function Player() {
           return (
             <div className="player player--center">
               <p>Кот у {nameOf(game.catRecipientParticipantId)} — жди</p>
+              {game.currentQuestion && (
+                <p className="player-answer">
+                  Вопрос за {game.currentQuestion.price}
+                </p>
+              )}
               {remainingSeconds !== null && (
                 <p className="player-timer">{remainingSeconds}с</p>
               )}
@@ -403,8 +418,18 @@ export function Player() {
         }
         const iAmExcluded =
           selfId !== null && game.graceExcludedParticipantId === selfId;
+        // Цена показывается только у вопроса-«кота» — для обычного вопроса
+        // текст/цену и так читают вслух/видят на табло, здесь только кнопка
+        // (design.md, «Клиенты»). Возможно, позже цену станем показывать и
+        // для обычных вопросов — пока не трогаем, чтобы не расширять веху.
+        const isCatQuestion = game.catRecipientParticipantId !== null;
         return (
           <div className="player player--center">
+            {isCatQuestion && game.currentQuestion && (
+              <p className="player-answer">
+                Вопрос за {game.currentQuestion.price}
+              </p>
+            )}
             <button
               className="button button--buzz"
               onClick={buzz}

@@ -31,7 +31,9 @@ export interface GameStateView {
     questions: { id: string; price: number; answered: boolean }[];
   }[];
   turnParticipantId: string;
-  currentQuestion: { text: string; price: number } | null;
+  // text — null только во время cat-handoff: цена не секрет (видна на сетке
+  // ещё до выбора), скрывается только текст, пока получатель не назначен.
+  currentQuestion: { text: string | null; price: number } | null;
   buzzedParticipantId: string | null;
   catRecipientParticipantId: string | null;
   correctAnswer: { text: string; comment?: string } | null;

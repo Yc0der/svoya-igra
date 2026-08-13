@@ -175,10 +175,20 @@ export function Board() {
 
       {game.currentQuestion && (
         <>
-          <p className="board-question">{game.currentQuestion.text}</p>
-          {game.phase === 'question-open' && remainingSeconds !== null && (
-            <p className="board-timer">{remainingSeconds}с</p>
+          {/* text — null во время cat-handoff (текст ещё скрыт, см.
+              Room.toGameStateView) — показываем только цену, не пустой
+              абзац. */}
+          {game.currentQuestion.text !== null ? (
+            <p className="board-question">{game.currentQuestion.text}</p>
+          ) : (
+            <p className="board-question">
+              Вопрос за {game.currentQuestion.price}
+            </p>
           )}
+          {(game.phase === 'question-open' || game.phase === 'cat-handoff') &&
+            remainingSeconds !== null && (
+              <p className="board-timer">{remainingSeconds}с</p>
+            )}
         </>
       )}
 

@@ -888,7 +888,10 @@ describe('createServer cat-in-the-bag', () => {
       game: { phase: string; currentQuestion: unknown };
     };
     expect(afterSelect.game.phase).toBe('cat-handoff');
-    expect(afterSelect.game.currentQuestion).toBeNull();
+    expect(afterSelect.game.currentQuestion).toEqual({
+      text: null,
+      price: 100,
+    });
 
     picker.ws.send(
       JSON.stringify({

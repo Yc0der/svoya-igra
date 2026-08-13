@@ -565,6 +565,97 @@ describe('Player', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the question price while picking a cat recipient', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'cat-handoff',
+          turnParticipantId: 'me',
+          currentQuestion: { text: null, price: 300 },
+          scores: [
+            { participantId: 'me', score: 0 },
+            { participantId: 'other', score: 0 },
+          ],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+  });
+
+  it('shows the question price to everyone else waiting during cat-handoff', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'other',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'cat-handoff',
+          turnParticipantId: 'me',
+          currentQuestion: { text: null, price: 300 },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+  });
+
+  it('shows the question price to the cat recipient alongside the buzz button', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'recipient',
+        game: baseGame({
+          phase: 'question-open',
+          catRecipientParticipantId: 'recipient',
+          currentQuestion: { text: 'Вопрос-кот?', price: 300 },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+  });
+
+  it('shows the question price to a non-recipient waiting during a cat question', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'recipient', name: 'Получатель', connected: true },
+        ],
+        game: baseGame({
+          phase: 'question-open',
+          catRecipientParticipantId: 'recipient',
+          currentQuestion: { text: 'Вопрос-кот?', price: 300 },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+  });
+
+  it('does not show a price for an ordinary (non-cat) question-open', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'question-open',
+          catRecipientParticipantId: null,
+          currentQuestion: { text: 'Обычный вопрос?', price: 300 },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByText(/вопрос за 300/i)).not.toBeInTheDocument();
+  });
+
   it('prompts the buzzed player to say the answer aloud and confirm', async () => {
     const saidAnswer = vi.fn();
     mockedUseRoomConnection.mockReturnValue(

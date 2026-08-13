@@ -226,6 +226,33 @@ describe('Board', () => {
     expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
   });
 
+  it('shows the price instead of the text during cat-handoff', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'cat-handoff',
+          currentQuestion: { text: null, price: 300 },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+  });
+
+  it('shows a countdown during cat-handoff too', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'cat-handoff',
+          currentQuestion: { text: null, price: 300 },
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
   it('shows who buzzed', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({

@@ -697,13 +697,15 @@ export class Room {
         })),
       })),
       turnParticipantId: game.turnCounterId,
-      currentQuestion:
-        currentQuestionData && game.phase !== 'cat-handoff'
-          ? {
-              text: currentQuestionData.text,
-              price: currentQuestionData.price,
-            }
-          : null,
+      // Цена видна сразу — она не секрет, та же цифра уже была на сетке до
+      // выбора. Текст скрыт, пока идёт cat-handoff (design.md, «Правило»).
+      currentQuestion: currentQuestionData
+        ? {
+            text:
+              game.phase === 'cat-handoff' ? null : currentQuestionData.text,
+            price: currentQuestionData.price,
+          }
+        : null,
       buzzedParticipantId: game.buzzedCounterId,
       catRecipientParticipantId: game.catRecipientCounterId,
       // Не поле движка — Room-состояние, лениво «истекает» по сравнению с
