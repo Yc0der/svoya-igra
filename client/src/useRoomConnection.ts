@@ -10,6 +10,7 @@ export interface GameStateView {
   phase:
     | 'selecting'
     | 'cat-handoff'
+    | 'auction-bidding'
     | 'question-open'
     | 'buzzed'
     | 'judging'
@@ -41,6 +42,10 @@ export interface GameStateView {
   } | null;
   buzzedParticipantId: string | null;
   exclusiveAnswererParticipantId: string | null;
+  auctionTurnParticipantId: string | null;
+  auctionHighestBid: number | null;
+  auctionHighestBidderParticipantId: string | null;
+  auctionPassedParticipantIds: string[] | null;
   correctAnswer: { text: string; comment?: string } | null;
   graceExcludedParticipantId: string | null;
   graceExcludedUntil: number | null;
@@ -91,6 +96,8 @@ type ClientMessage =
   | { type: 'start-game' }
   | { type: 'toggle-host' }
   | { type: 'select-question'; themeIndex: number; questionId: string }
+  | { type: 'place-bid'; amount: number }
+  | { type: 'pass-bid' }
   | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
   | { type: 'said-answer' }
@@ -122,6 +129,8 @@ export interface RoomConnection {
   startGame(): void;
   toggleHost(): void;
   selectQuestion(themeIndex: number, questionId: string): void;
+  placeBid(amount: number): void;
+  passBid(): void;
   assignCat(recipientParticipantId: string): void;
   buzz(): void;
   saidAnswer(): void;
@@ -302,6 +311,8 @@ export function useRoomConnection(
     toggleHost: () => send({ type: 'toggle-host' }),
     selectQuestion: (themeIndex, questionId) =>
       send({ type: 'select-question', themeIndex, questionId }),
+    placeBid: (amount) => send({ type: 'place-bid', amount }),
+    passBid: () => send({ type: 'pass-bid' }),
     assignCat: (recipientParticipantId) =>
       send({ type: 'assign-cat', recipientParticipantId }),
     buzz: () => send({ type: 'buzz' }),
