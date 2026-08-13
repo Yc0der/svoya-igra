@@ -396,16 +396,20 @@ export function Player() {
             </div>
           );
         }
-        // Вопрос-«кот»: кнопка «Ответ» существует только для того, кому его
-        // передали — остальные, хоть и счётчики, для этого конкретного
-        // вопроса не в игре (design.md, «Правило»).
-        const isCatRecipient =
-          game.catRecipientParticipantId === null ||
-          game.catRecipientParticipantId === selfId;
-        if (!isCatRecipient) {
+        // Вопрос с эксклюзивным правом ответа («кот» или «аукцион»): кнопка
+        // «Ответ» существует только для того, кому оно досталось — остальные,
+        // хоть и счётчики, для этого конкретного вопроса не в игре
+        // (design.md обеих вех, «Правило»/«Рефакторинг вехи 4»).
+        const isExclusiveAnswerer =
+          game.exclusiveAnswererParticipantId === null ||
+          game.exclusiveAnswererParticipantId === selfId;
+        if (!isExclusiveAnswerer) {
           return (
             <div className="player player--center">
-              <p>Кот у {nameOf(game.catRecipientParticipantId)} — жди</p>
+              <p>
+                Право ответа у {nameOf(game.exclusiveAnswererParticipantId)} —
+                жди
+              </p>
               {game.currentQuestion && (
                 <p className="player-answer">
                   {game.currentQuestion.themeName} за{' '}
@@ -420,14 +424,16 @@ export function Player() {
         }
         const iAmExcluded =
           selfId !== null && game.graceExcludedParticipantId === selfId;
-        // Цена показывается только у вопроса-«кота» — для обычного вопроса
-        // текст/цену и так читают вслух/видят на табло, здесь только кнопка
-        // (design.md, «Клиенты»). Возможно, позже цену станем показывать и
-        // для обычных вопросов — пока не трогаем, чтобы не расширять веху.
-        const isCatQuestion = game.catRecipientParticipantId !== null;
+        // Цена показывается только у вопроса с эксклюзивным правом ответа —
+        // для обычного вопроса текст/цену и так читают вслух/видят на
+        // табло, здесь только кнопка (design.md, «Клиенты»). Возможно,
+        // позже цену станем показывать и для обычных вопросов — пока не
+        // трогаем, чтобы не расширять веху.
+        const hasExclusiveAnswerer =
+          game.exclusiveAnswererParticipantId !== null;
         return (
           <div className="player player--center">
-            {isCatQuestion && game.currentQuestion && (
+            {hasExclusiveAnswerer && game.currentQuestion && (
               <p className="player-answer">
                 {game.currentQuestion.themeName} за {game.currentQuestion.price}
               </p>

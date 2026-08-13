@@ -20,7 +20,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     turnParticipantId: '',
     currentQuestion: null,
     buzzedParticipantId: null,
-    catRecipientParticipantId: null,
+    exclusiveAnswererParticipantId: null,
     correctAnswer: null,
     graceExcludedParticipantId: null,
     graceExcludedUntil: null,
@@ -522,7 +522,7 @@ describe('Player', () => {
         ],
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: 'recipient',
+          exclusiveAnswererParticipantId: 'recipient',
         }),
       }),
     );
@@ -530,7 +530,7 @@ describe('Player', () => {
     expect(
       screen.queryByRole('button', { name: /^ответ$/i }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/кот у получатель/i)).toBeInTheDocument();
+    expect(screen.getByText(/право ответа у получатель/i)).toBeInTheDocument();
   });
 
   it('shows the normal buzz button to the cat recipient', () => {
@@ -539,7 +539,7 @@ describe('Player', () => {
         selfId: 'recipient',
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: 'recipient',
+          exclusiveAnswererParticipantId: 'recipient',
         }),
       }),
     );
@@ -613,7 +613,7 @@ describe('Player', () => {
         selfId: 'recipient',
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: 'recipient',
+          exclusiveAnswererParticipantId: 'recipient',
           currentQuestion: {
             text: 'Вопрос-кот?',
             price: 300,
@@ -636,7 +636,7 @@ describe('Player', () => {
         ],
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: 'recipient',
+          exclusiveAnswererParticipantId: 'recipient',
           currentQuestion: {
             text: 'Вопрос-кот?',
             price: 300,
@@ -655,7 +655,7 @@ describe('Player', () => {
         selfId: 'me',
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: null,
+          exclusiveAnswererParticipantId: null,
           currentQuestion: {
             text: 'Обычный вопрос?',
             price: 300,

@@ -40,7 +40,7 @@ export interface GameStateView {
     themeName: string;
   } | null;
   buzzedParticipantId: string | null;
-  catRecipientParticipantId: string | null;
+  exclusiveAnswererParticipantId: string | null;
   correctAnswer: { text: string; comment?: string } | null;
   graceExcludedParticipantId: string | null;
   graceExcludedUntil: number | null;
