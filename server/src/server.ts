@@ -230,6 +230,16 @@ export function createServer(options: CreateServerOptions): GameServer {
         }
       }
 
+      if (
+        message.type === 'assign-cat' &&
+        typeof message.recipientParticipantId === 'string'
+      ) {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.assignCat(participantId, message.recipientParticipantId);
+        }
+      }
+
       if (message.type === 'buzz') {
         const participantId = connections.get(ws);
         if (participantId && room.buzz(participantId) === 'falsestart') {

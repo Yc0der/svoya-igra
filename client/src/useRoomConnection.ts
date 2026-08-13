@@ -9,6 +9,7 @@ export interface ParticipantView {
 export interface GameStateView {
   phase:
     | 'selecting'
+    | 'cat-handoff'
     | 'question-open'
     | 'buzzed'
     | 'judging'
@@ -30,8 +31,16 @@ export interface GameStateView {
     questions: { id: string; price: number; answered: boolean }[];
   }[];
   turnParticipantId: string;
-  currentQuestion: { text: string; price: number } | null;
+  // text — null только во время cat-handoff: цена и тема не секрет (видны
+  // на сетке ещё до выбора), скрывается только текст, пока получатель не
+  // назначен.
+  currentQuestion: {
+    text: string | null;
+    price: number;
+    themeName: string;
+  } | null;
   buzzedParticipantId: string | null;
+  catRecipientParticipantId: string | null;
   correctAnswer: { text: string; comment?: string } | null;
   graceExcludedParticipantId: string | null;
   graceExcludedUntil: number | null;
@@ -82,6 +91,7 @@ type ClientMessage =
   | { type: 'start-game' }
   | { type: 'toggle-host' }
   | { type: 'select-question'; themeIndex: number; questionId: string }
+  | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
@@ -112,6 +122,7 @@ export interface RoomConnection {
   startGame(): void;
   toggleHost(): void;
   selectQuestion(themeIndex: number, questionId: string): void;
+  assignCat(recipientParticipantId: string): void;
   buzz(): void;
   saidAnswer(): void;
   vote(correct: boolean): void;
@@ -291,6 +302,8 @@ export function useRoomConnection(
     toggleHost: () => send({ type: 'toggle-host' }),
     selectQuestion: (themeIndex, questionId) =>
       send({ type: 'select-question', themeIndex, questionId }),
+    assignCat: (recipientParticipantId) =>
+      send({ type: 'assign-cat', recipientParticipantId }),
     buzz: () => send({ type: 'buzz' }),
     saidAnswer: () => send({ type: 'said-answer' }),
     vote: (correct) => send({ type: 'vote', correct }),

@@ -24,6 +24,7 @@ export function Player() {
     startGame,
     toggleHost,
     selectQuestion,
+    assignCat,
     buzz,
     saidAnswer,
     vote,
@@ -256,6 +257,7 @@ export function Player() {
   function hostAdminPanel() {
     if (!game) return null;
     const questionActive =
+      game.phase === 'cat-handoff' ||
       game.phase === 'question-open' ||
       game.phase === 'buzzed' ||
       game.phase === 'judging';
@@ -332,6 +334,53 @@ export function Player() {
           </div>
         );
 
+      case 'cat-handoff': {
+        if (game.turnParticipantId === selfId) {
+          const candidates = participants.filter(
+            (p) =>
+              p.connected &&
+              p.id !== selfId &&
+              game.scores.some((s) => s.participantId === p.id),
+          );
+          return (
+            <div className="player">
+              <h2>Кот в мешке — выбери, кому отдать</h2>
+              {game.currentQuestion && (
+                <p className="player-answer">
+                  {game.currentQuestion.themeName} за{' '}
+                  {game.currentQuestion.price}
+                </p>
+              )}
+              {remainingSeconds !== null && (
+                <p className="player-timer">{remainingSeconds}с</p>
+              )}
+              <ul className="final-theme-list">
+                {candidates.map((p) => (
+                  <li key={p.id}>
+                    <button className="button" onClick={() => assignCat(p.id)}>
+                      {p.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        }
+        return (
+          <div className="player player--center">
+            <p>{nameOf(game.turnParticipantId)} выбирает, кому отдать кота</p>
+            {game.currentQuestion && (
+              <p className="player-answer">
+                {game.currentQuestion.themeName} за {game.currentQuestion.price}
+              </p>
+            )}
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
+          </div>
+        );
+      }
+
       case 'question-open': {
         if (isHost) {
           // Ведущий не счётчик — не жмёт кнопку и никогда не будет тем, кому
@@ -347,10 +396,42 @@ export function Player() {
             </div>
           );
         }
+        // Вопрос-«кот»: кнопка «Ответ» существует только для того, кому его
+        // передали — остальные, хоть и счётчики, для этого конкретного
+        // вопроса не в игре (design.md, «Правило»).
+        const isCatRecipient =
+          game.catRecipientParticipantId === null ||
+          game.catRecipientParticipantId === selfId;
+        if (!isCatRecipient) {
+          return (
+            <div className="player player--center">
+              <p>Кот у {nameOf(game.catRecipientParticipantId)} — жди</p>
+              {game.currentQuestion && (
+                <p className="player-answer">
+                  {game.currentQuestion.themeName} за{' '}
+                  {game.currentQuestion.price}
+                </p>
+              )}
+              {remainingSeconds !== null && (
+                <p className="player-timer">{remainingSeconds}с</p>
+              )}
+            </div>
+          );
+        }
         const iAmExcluded =
           selfId !== null && game.graceExcludedParticipantId === selfId;
+        // Цена показывается только у вопроса-«кота» — для обычного вопроса
+        // текст/цену и так читают вслух/видят на табло, здесь только кнопка
+        // (design.md, «Клиенты»). Возможно, позже цену станем показывать и
+        // для обычных вопросов — пока не трогаем, чтобы не расширять веху.
+        const isCatQuestion = game.catRecipientParticipantId !== null;
         return (
           <div className="player player--center">
+            {isCatQuestion && game.currentQuestion && (
+              <p className="player-answer">
+                {game.currentQuestion.themeName} за {game.currentQuestion.price}
+              </p>
+            )}
             <button
               className="button button--buzz"
               onClick={buzz}

@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto';
 import {
   createInitialState,
   reduce,
+  findQuestion,
   QUESTION_TIMER_MS,
+  CAT_HANDOFF_TIMER_MS,
   SAID_ANSWER_TIMER_MS,
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
@@ -85,6 +87,7 @@ function normalizeName(name: string): string {
 // таймера (спека не ограничивает время на выбор вопроса).
 const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   'question-open': { timer: 'question', ms: QUESTION_TIMER_MS },
+  'cat-handoff': { timer: 'cat-handoff', ms: CAT_HANDOFF_TIMER_MS },
   buzzed: { timer: 'said-answer', ms: SAID_ANSWER_TIMER_MS },
   judging: { timer: 'vote', ms: VOTE_TIMER_MS },
   reveal: { timer: 'reveal', ms: REVEAL_TIMER_MS },
@@ -399,16 +402,61 @@ export class Room {
     this.graceExcludedUntil = null;
   }
 
+  // Тем же способом, что и buzz() ниже решает falsestart до движка: движок
+  // не знает об онлайн-статусе (инвариант 1), поэтому «отдать кота некому»
+  // отклоняется здесь, ДО dispatch — docs/superpowers/specs/
+  // 2026-08-12-cat-in-bag-design.md, «Комната». Ведущий тоже не годится в
+  // получатели — он participant, но никогда не counter (не входит в
+  // this.game.scores), поэтому кандидатность дополнительно проверяется
+  // членством в scores, а не только участием в комнате.
   selectQuestion(
     participantId: string,
     themeIndex: number,
     questionId: string,
   ): void {
+    if (this.game?.phase === 'selecting') {
+      const question = findQuestion(
+        this.game.pack,
+        this.game.roundIndex,
+        themeIndex,
+        questionId,
+      );
+      if (question?.type === 'кот') {
+        const hasRecipient = this.participants.some(
+          (p) =>
+            p.connected && p.id !== participantId && p.id in this.game!.scores,
+        );
+        if (!hasRecipient) return;
+      }
+    }
     this.dispatch({
       type: 'select-question',
       counterId: participantId,
       themeIndex,
       questionId,
+    });
+  }
+
+  // Тот же принцип, что у selectQuestion() выше — офлайн-получателя движок
+  // сам отклонить не может, отклоняем здесь. И тот же нюанс с ведущим: он
+  // participant, но не counter, поэтому кандидатность дополнительно
+  // проверяется членством в this.game.scores.
+  assignCat(participantId: string, recipientParticipantId: string): void {
+    if (
+      this.game?.phase === 'cat-handoff' &&
+      !this.participants.some(
+        (p) =>
+          p.connected &&
+          p.id === recipientParticipantId &&
+          p.id in this.game!.scores,
+      )
+    ) {
+      return;
+    }
+    this.dispatch({
+      type: 'assign-cat',
+      counterId: participantId,
+      recipientCounterId: recipientParticipantId,
     });
   }
 
@@ -616,6 +664,9 @@ export class Room {
           (q) => q.id === game.currentQuestion!.questionId,
         )
       : undefined;
+    const currentThemeName = game.currentQuestion
+      ? round.themes[game.currentQuestion.themeIndex].name
+      : undefined;
 
     const showAnswer =
       game.phase === 'reveal' ||
@@ -649,10 +700,18 @@ export class Room {
         })),
       })),
       turnParticipantId: game.turnCounterId,
+      // Цена и тема видны сразу — не секрет, те же данные уже были на сетке
+      // до выбора. Текст скрыт, пока идёт cat-handoff (design.md, «Правило»).
       currentQuestion: currentQuestionData
-        ? { text: currentQuestionData.text, price: currentQuestionData.price }
+        ? {
+            text:
+              game.phase === 'cat-handoff' ? null : currentQuestionData.text,
+            price: currentQuestionData.price,
+            themeName: currentThemeName!,
+          }
         : null,
       buzzedParticipantId: game.buzzedCounterId,
+      catRecipientParticipantId: game.catRecipientCounterId,
       // Не поле движка — Room-состояние, лениво «истекает» по сравнению с
       // Date.now() здесь же, без отдельного сброса по таймеру (см. поля
       // класса выше).

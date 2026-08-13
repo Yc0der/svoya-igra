@@ -20,6 +20,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     turnParticipantId: '',
     currentQuestion: null,
     buzzedParticipantId: null,
+    catRecipientParticipantId: null,
     correctAnswer: null,
     graceExcludedParticipantId: null,
     graceExcludedUntil: null,
@@ -51,6 +52,7 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     startGame: vi.fn(),
     toggleHost: vi.fn(),
     selectQuestion: vi.fn(),
+    assignCat: vi.fn(),
     buzz: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
@@ -434,6 +436,236 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByRole('button', { name: /^ответ$/i })).toBeDisabled();
+  });
+
+  it('shows a list of online participants to pick a cat recipient from, when it is my turn', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+          { id: 'offline', name: 'Оффлайн', connected: false },
+        ],
+        game: baseGame({
+          phase: 'cat-handoff',
+          turnParticipantId: 'me',
+          scores: [
+            { participantId: 'me', score: 0 },
+            { participantId: 'other', score: 0 },
+          ],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByRole('button', { name: 'Соперник' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Оффлайн' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Я' })).not.toBeInTheDocument();
+  });
+
+  it('calls assignCat with the chosen recipient', async () => {
+    const assignCat = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'cat-handoff',
+          turnParticipantId: 'me',
+          scores: [
+            { participantId: 'me', score: 0 },
+            { participantId: 'other', score: 0 },
+          ],
+        }),
+        assignCat,
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Соперник' }));
+    expect(assignCat).toHaveBeenCalledWith('other');
+  });
+
+  it('shows a waiting message to everyone else during cat-handoff', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'other',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({ phase: 'cat-handoff', turnParticipantId: 'me' }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByText(/я выбирает, кому отдать кота/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Соперник' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the buzz button and shows who has the cat, for a non-recipient during a cat question', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'recipient', name: 'Получатель', connected: true },
+        ],
+        game: baseGame({
+          phase: 'question-open',
+          catRecipientParticipantId: 'recipient',
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /^ответ$/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/кот у получатель/i)).toBeInTheDocument();
+  });
+
+  it('shows the normal buzz button to the cat recipient', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'recipient',
+        game: baseGame({
+          phase: 'question-open',
+          catRecipientParticipantId: 'recipient',
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.getByRole('button', { name: /^ответ$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the cancel-question button to the host during cat-handoff', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        game: baseGame({ phase: 'cat-handoff', hostId: 'host-id' }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+    expect(
+      screen.getByRole('button', { name: 'Отменить вопрос' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the question theme and price while picking a cat recipient', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'cat-handoff',
+          turnParticipantId: 'me',
+          currentQuestion: { text: null, price: 300, themeName: 'История' },
+          scores: [
+            { participantId: 'me', score: 0 },
+            { participantId: 'other', score: 0 },
+          ],
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
+  });
+
+  it('shows the question theme and price to everyone else waiting during cat-handoff', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'other',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'cat-handoff',
+          turnParticipantId: 'me',
+          currentQuestion: { text: null, price: 300, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
+  });
+
+  it('shows the question theme and price to the cat recipient alongside the buzz button', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'recipient',
+        game: baseGame({
+          phase: 'question-open',
+          catRecipientParticipantId: 'recipient',
+          currentQuestion: {
+            text: 'Вопрос-кот?',
+            price: 300,
+            themeName: 'История',
+          },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
+  });
+
+  it('shows the question theme and price to a non-recipient waiting during a cat question', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'recipient', name: 'Получатель', connected: true },
+        ],
+        game: baseGame({
+          phase: 'question-open',
+          catRecipientParticipantId: 'recipient',
+          currentQuestion: {
+            text: 'Вопрос-кот?',
+            price: 300,
+            themeName: 'История',
+          },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
+  });
+
+  it('does not show a theme/price for an ordinary (non-cat) question-open', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'question-open',
+          catRecipientParticipantId: null,
+          currentQuestion: {
+            text: 'Обычный вопрос?',
+            price: 300,
+            themeName: 'История',
+          },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.queryByText(/история за 300/i)).not.toBeInTheDocument();
   });
 
   it('prompts the buzzed player to say the answer aloud and confirm', async () => {

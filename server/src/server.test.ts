@@ -827,6 +827,118 @@ describe('createServer game flow', () => {
   });
 });
 
+const CAT_TEST_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'cat1',
+              price: 100,
+              text: 'Вопрос-кот?',
+              answer: 'ответ кота',
+              type: 'кот',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+describe('createServer cat-in-the-bag', () => {
+  it('hides the question text during cat-handoff and reveals it after assign-cat, only for the recipient to buzz', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-cat-'));
+    const room = new Room(undefined, CAT_TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage();
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const aState = (await settle(a, b, a)) as {
+      game: { phase: string; turnParticipantId: string };
+    };
+    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+    const other = picker === a ? b : a;
+
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'cat1',
+      }),
+    );
+    const afterSelect = (await settle(a, b, picker)) as {
+      game: { phase: string; currentQuestion: unknown };
+    };
+    expect(afterSelect.game.phase).toBe('cat-handoff');
+    expect(afterSelect.game.currentQuestion).toEqual({
+      text: null,
+      price: 100,
+      themeName: 'Тема',
+    });
+
+    picker.ws.send(
+      JSON.stringify({
+        type: 'assign-cat',
+        recipientParticipantId: other.participantId,
+      }),
+    );
+    const afterAssign = (await settle(a, b, picker)) as {
+      game: {
+        phase: string;
+        currentQuestion: { text: string };
+        catRecipientParticipantId: string;
+      };
+    };
+    expect(afterAssign.game.phase).toBe('question-open');
+    expect(afterAssign.game.currentQuestion).toEqual({
+      text: 'Вопрос-кот?',
+      price: 100,
+      themeName: 'Тема',
+    });
+    expect(afterAssign.game.catRecipientParticipantId).toBe(
+      other.participantId,
+    );
+
+    // Отдавший — не получатель, попытка нажать ничего не меняет (сервер
+    // молча игнорирует на уровне движка — falsestart здесь не при чём, это
+    // не про фазу, а про то, кто именно жмёт).
+    picker.ws.send(JSON.stringify({ type: 'buzz' }));
+    // Отклонённый нажатием не того игрока буз всё равно триггерит рассылку
+    // (Room.dispatch() рассылает безусловно, даже когда движок вернул
+    // unchanged state) — вычитываем её отдельно, прежде чем читать реальный
+    // переход ниже. Тот же паттерн, что уже используется в этом файле для
+    // холостого голоса в 'createServer game flow'.
+    await settle(a, b, picker);
+
+    other.ws.send(JSON.stringify({ type: 'buzz' }));
+    const afterBuzz = (await settle(a, b, other)) as {
+      game: { phase: string; buzzedParticipantId: string };
+    };
+    expect(afterBuzz.game.phase).toBe('buzzed');
+    expect(afterBuzz.game.buzzedParticipantId).toBe(other.participantId);
+
+    server.close();
+  });
+});
+
 describe('createServer host mode', () => {
   it('replies start-game-error to the requester when three join and nobody is host', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-host-required-'));

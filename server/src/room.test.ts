@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Room, type PackInfo } from './room.js';
 import { deserializeSnapshot, serializeSnapshot } from './snapshot.js';
-import { QUESTION_TIMER_MS, REVEAL_TIMER_MS } from './engine.js';
+import {
+  QUESTION_TIMER_MS,
+  REVEAL_TIMER_MS,
+  CAT_HANDOFF_TIMER_MS,
+} from './engine.js';
 
 // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — кандидаты и
 // текущий адрес не часть RoomState (см. room.ts, LanInfo), поэтому и
@@ -385,6 +389,37 @@ const ONE_QUESTION_PACK: Pack = {
               price: 100,
               text: 'Вопрос 1?',
               answer: 'ответ 1',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const CAT_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'cat1',
+              price: 100,
+              text: 'Вопрос-кот?',
+              answer: 'ответ кота',
+              type: 'кот',
+            },
+            {
+              id: 'q2',
+              price: 200,
+              text: 'Вопрос 2?',
+              answer: 'ответ 2',
               type: 'обычный',
             },
           ],
@@ -1216,6 +1251,7 @@ describe('Room game flow', () => {
     expect(room.toGameStateView()?.currentQuestion).toEqual({
       text: 'Вопрос 1?',
       price: 100,
+      themeName: 'Тема',
     });
 
     expect(room.buzz(picker)).toBe('ok');
@@ -1653,5 +1689,163 @@ describe('Room final round', () => {
     expect(restored.getState().game?.phase).toBe('final-wager');
 
     vi.useRealTimers();
+  });
+});
+
+describe('Room — вопрос-«кот» (онлайн-проверки)', () => {
+  it('rejects selecting a cat question when no one else is online', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+    room.disconnect(other);
+
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView()?.phase).toBe('selecting');
+  });
+
+  it('allows selecting a cat question when at least one other participant is online', () => {
+    const room = new Room(undefined, CAT_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView()?.phase).toBe('cat-handoff');
+  });
+
+  it('rejects assignCat to an offline participant', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+    room.selectQuestion(picker, 0, 'cat1');
+    room.disconnect(other);
+
+    room.assignCat(picker, other);
+
+    expect(room.toGameStateView()?.phase).toBe('cat-handoff');
+    expect(room.toGameStateView()?.catRecipientParticipantId).toBeNull();
+  });
+
+  it('allows assignCat to an online participant', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+    room.selectQuestion(picker, 0, 'cat1');
+
+    room.assignCat(picker, other);
+
+    expect(room.toGameStateView()?.phase).toBe('question-open');
+    expect(room.toGameStateView()?.catRecipientParticipantId).toBe(other);
+  });
+
+  it('hides the question text but shows the price while cat-handoff is in progress, and reveals the text once assigned', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    room.startGame('requester');
+    const view = room.toGameStateView()!;
+    const picker = view.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView()?.currentQuestion).toEqual({
+      text: null,
+      price: 100,
+      themeName: 'Тема',
+    });
+
+    room.assignCat(picker, other);
+
+    expect(room.toGameStateView()?.currentQuestion).toEqual({
+      text: 'Вопрос-кот?',
+      price: 100,
+      themeName: 'Тема',
+    });
+  });
+
+  it('re-arms the cat-handoff timer after restoring from a snapshot mid-handoff', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, CAT_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const view = room.toGameStateView()!;
+      const picker = view.turnParticipantId;
+      room.selectQuestion(picker, 0, 'cat1');
+
+      const snapshot = room.getState();
+      const restored = new Room(snapshot, CAT_PACK);
+
+      vi.advanceTimersByTime(CAT_HANDOFF_TIMER_MS);
+      expect(restored.toGameStateView()?.phase).toBe('question-open');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Регрессия (финальное ревью, 2026-08-12): ведущий — participant, но
+  // никогда не counter (не входит в game.scores), поэтому одного
+  // `connected` для кандидатности недостаточно. Три участника: один
+  // ведущий, два счётчика. Отключаем одного из счётчиков (в т.ч., возможно,
+  // и самого выбирающего — Room не проверяет онлайн-статус отправителя,
+  // только получателя) так, что онлайн остаются ведущий и ровно один
+  // счётчик. Раз этот оставшийся счётчик — не сам выбирающий, он валидный
+  // получатель, и выбор клетки-«кота» проходит.
+  it('allows selecting a cat question when a host and exactly one non-host counter remain online', () => {
+    const room = new Room(undefined, CAT_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame(petya);
+    const picker = room.toGameStateView()!.turnParticipantId!;
+
+    // Отключаем самого выбирающего — остаются онлайн ведущий и второй
+    // счётчик (тот, что не `picker`).
+    room.disconnect(picker);
+
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView(petya)?.phase).toBe('cat-handoff');
+  });
+
+  // То же построение, но офлайн оба счётчика (и выбирающий, и `other`) —
+  // онлайн остаётся только ведущий. До фикса ведущий засчитывался как
+  // «есть кому отдать» (participants.some без проверки scores), и выбор
+  // молча проходил бы; после фикса ведущий не counter — выбор отклоняется,
+  // как будто вообще никого нет онлайн.
+  it('rejects selecting a cat question when only the host remains online, even though the host is connected', () => {
+    const room = new Room(undefined, CAT_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    const katya = joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame(petya);
+    const picker = room.toGameStateView()!.turnParticipantId!;
+    const other = picker === vanya ? katya : vanya;
+
+    room.disconnect(picker);
+    room.disconnect(other);
+
+    room.selectQuestion(picker, 0, 'cat1');
+
+    expect(room.toGameStateView(petya)?.phase).toBe('selecting');
   });
 });

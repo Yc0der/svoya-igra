@@ -19,8 +19,19 @@ export interface GameStateView {
     questions: { id: string; price: number; answered: boolean }[];
   }[];
   turnParticipantId: string;
-  currentQuestion: { text: string; price: number } | null;
+  // text — null только во время cat-handoff (см. Room.toGameStateView): цена
+  // и тема не секрет (видны на сетке ещё до выбора вопроса), скрывается
+  // только текст, пока получатель не назначен.
+  currentQuestion: {
+    text: string | null;
+    price: number;
+    themeName: string;
+  } | null;
   buzzedParticipantId: string | null;
+  // Не null только для вопроса-«кота», пока фаза question-open/buzzed/
+  // judging — единственный, кому в этот момент можно жать «Ответ» (см.
+  // Room.toGameStateView).
+  catRecipientParticipantId: string | null;
   // На judging непустой только для одного получателя за раз: при
   // hostParticipantId === null — для всех (двое, открытое судейство), иначе
   // — только для сокета с этим participantId (см. Room.toGameStateView).
@@ -56,6 +67,7 @@ export type ClientMessage =
   | { type: 'start-game' }
   | { type: 'toggle-host' }
   | { type: 'select-question'; themeIndex: number; questionId: string }
+  | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }

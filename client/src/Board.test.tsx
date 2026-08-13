@@ -19,6 +19,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     turnParticipantId: '',
     currentQuestion: null,
     buzzedParticipantId: null,
+    catRecipientParticipantId: null,
     correctAnswer: null,
     graceExcludedParticipantId: null,
     graceExcludedUntil: null,
@@ -50,6 +51,7 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     startGame: vi.fn(),
     toggleHost: vi.fn(),
     selectQuestion: vi.fn(),
+    assignCat: vi.fn(),
     buzz: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
@@ -202,7 +204,11 @@ describe('Board', () => {
       connection({
         game: baseGame({
           phase: 'question-open',
-          currentQuestion: { text: 'Столица Франции?', price: 100 },
+          currentQuestion: {
+            text: 'Столица Франции?',
+            price: 100,
+            themeName: 'Тема',
+          },
         }),
       }),
     );
@@ -215,7 +221,38 @@ describe('Board', () => {
       connection({
         game: baseGame({
           phase: 'question-open',
-          currentQuestion: { text: 'Столица Франции?', price: 100 },
+          currentQuestion: {
+            text: 'Столица Франции?',
+            price: 100,
+            themeName: 'Тема',
+          },
+          timerDeadline: Date.now() + 12000,
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
+  });
+
+  it('shows the theme and price instead of the text during cat-handoff', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'cat-handoff',
+          currentQuestion: { text: null, price: 300, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
+  });
+
+  it('shows a countdown during cat-handoff too', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'cat-handoff',
+          currentQuestion: { text: null, price: 300, themeName: 'История' },
           timerDeadline: Date.now() + 12000,
         }),
       }),

@@ -12,6 +12,7 @@ import {
   FINAL_ANSWER_TIMER_MS,
   FINAL_JUDGING_TIMER_MS,
   FINAL_REVEAL_TIMER_MS,
+  CAT_HANDOFF_TIMER_MS,
   type EngineState,
 } from './engine.js';
 import type { Pack } from './pack.js';
@@ -64,6 +65,43 @@ function makePack(overrides: Partial<Pack> = {}): Pack {
     ],
     ...overrides,
   };
+}
+
+const CAT_PACK = makePack({
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема A',
+          questions: [
+            {
+              id: 'a1',
+              price: 100,
+              text: 'A1?',
+              answer: 'ответ a1',
+              type: 'кот',
+            },
+            {
+              id: 'a2',
+              price: 200,
+              text: 'A2?',
+              answer: 'ответ a2',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+function selectCat(state: EngineState) {
+  return reduce(state, {
+    type: 'select-question',
+    counterId: state.turnCounterId,
+    themeIndex: 0,
+    questionId: 'a1',
+  });
 }
 
 const PACK = makePack();
@@ -1286,5 +1324,233 @@ describe('timer-expired: final-reveal', () => {
     });
     expect(next.phase).toBe('game-end');
     expect(effects).toEqual([]);
+  });
+});
+
+describe('select-question — вопрос-«кот»', () => {
+  it('opens into cat-handoff instead of question-open, and starts the cat-handoff timer', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const { state: next, effects } = selectCat(state);
+    expect(next.phase).toBe('cat-handoff');
+    expect(next.currentQuestion).toEqual({ themeIndex: 0, questionId: 'a1' });
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'cat-handoff', ms: CAT_HANDOFF_TIMER_MS },
+    ]);
+  });
+
+  it('leaves catRecipientCounterId null until a recipient is assigned', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const { state: next } = selectCat(state);
+    expect(next.catRecipientCounterId).toBeNull();
+  });
+});
+
+describe('assign-cat', () => {
+  it('assigns the recipient, opens the question, and starts the question timer', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const handoff = selectCat(state).state;
+    const recipientId = handoff.turnCounterId === 'p1' ? 'p2' : 'p1';
+    const { state: next, effects } = reduce(handoff, {
+      type: 'assign-cat',
+      counterId: handoff.turnCounterId,
+      recipientCounterId: recipientId,
+    });
+    expect(next.phase).toBe('question-open');
+    expect(next.catRecipientCounterId).toBe(recipientId);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+
+  it('is a no-op outside cat-handoff', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const { state: next, effects } = reduce(state, {
+      type: 'assign-cat',
+      counterId: state.turnCounterId,
+      recipientCounterId: state.turnCounterId === 'p1' ? 'p2' : 'p1',
+    });
+    expect(next).toEqual(state);
+    expect(effects).toEqual([]);
+  });
+
+  it('is a no-op from someone other than the giver', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const handoff = selectCat(state).state;
+    const otherId = handoff.turnCounterId === 'p1' ? 'p2' : 'p1';
+    const { state: next } = reduce(handoff, {
+      type: 'assign-cat',
+      counterId: otherId,
+      recipientCounterId: handoff.turnCounterId,
+    });
+    expect(next).toEqual(handoff);
+  });
+
+  it('is a no-op when the giver tries to keep it for themselves', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const handoff = selectCat(state).state;
+    const { state: next } = reduce(handoff, {
+      type: 'assign-cat',
+      counterId: handoff.turnCounterId,
+      recipientCounterId: handoff.turnCounterId,
+    });
+    expect(next).toEqual(handoff);
+  });
+
+  it('is a no-op for an unknown recipient counter id', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const handoff = selectCat(state).state;
+    const { state: next } = reduce(handoff, {
+      type: 'assign-cat',
+      counterId: handoff.turnCounterId,
+      recipientCounterId: 'ghost',
+    });
+    expect(next).toEqual(handoff);
+  });
+});
+
+describe('buzz — вопрос-«кот»', () => {
+  function assignedState(): EngineState {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const handoff = selectCat(state).state;
+    const recipientId = handoff.turnCounterId === 'p1' ? 'p2' : 'p1';
+    return reduce(handoff, {
+      type: 'assign-cat',
+      counterId: handoff.turnCounterId,
+      recipientCounterId: recipientId,
+    }).state;
+  }
+
+  it('only the recipient can buzz', () => {
+    const opened = assignedState();
+    const giverId = opened.catRecipientCounterId === 'p1' ? 'p2' : 'p1';
+    const { state: next, effects } = reduce(opened, {
+      type: 'buzz',
+      counterId: giverId,
+    });
+    expect(next).toEqual(opened);
+    expect(effects).toEqual([]);
+  });
+
+  it('the recipient can buzz normally', () => {
+    const opened = assignedState();
+    const { state: next } = reduce(opened, {
+      type: 'buzz',
+      counterId: opened.catRecipientCounterId!,
+    });
+    expect(next.phase).toBe('buzzed');
+    expect(next.buzzedCounterId).toBe(opened.catRecipientCounterId);
+  });
+});
+
+describe('timer-expired: cat-handoff', () => {
+  it('assigns a random recipient other than the giver when the timer fires unassigned', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const handoff = selectCat(state).state;
+    const { state: next, effects } = reduce(handoff, {
+      type: 'timer-expired',
+      timer: 'cat-handoff',
+    });
+    expect(next.phase).toBe('question-open');
+    expect(next.catRecipientCounterId).not.toBe(handoff.turnCounterId);
+    expect(['p1', 'p2']).toContain(next.catRecipientCounterId);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+});
+
+describe('resolveVote — вопрос-«кот»', () => {
+  function catJudging(
+    hostId: string | null,
+    counterIds: string[],
+  ): EngineState {
+    const state = createInitialState(CAT_PACK, counterIds, hostId);
+    const handoff = selectCat(state).state;
+    const recipientId = counterIds.find((id) => id !== handoff.turnCounterId)!;
+    const opened = reduce(handoff, {
+      type: 'assign-cat',
+      counterId: handoff.turnCounterId,
+      recipientCounterId: recipientId,
+    }).state;
+    const buzzed = reduce(opened, {
+      type: 'buzz',
+      counterId: recipientId,
+    }).state;
+    return reduce(buzzed, {
+      type: 'said-answer',
+      counterId: recipientId,
+    }).state;
+  }
+
+  it('closes immediately on an incorrect vote even with a host — no reopen, unlike a normal question', () => {
+    const judging = catJudging('judge', ['p1', 'p2']);
+    const recipientId = judging.buzzedCounterId!;
+    const scoreBefore = judging.scores[recipientId];
+    const { state: next, effects } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: false,
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.scores[recipientId]).toBe(scoreBefore - 100);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
+    ]);
+  });
+
+  it('passes the turn to the recipient on a correct answer', () => {
+    const judging = catJudging('judge', ['p1', 'p2']);
+    const recipientId = judging.buzzedCounterId!;
+    const { state: next } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: true,
+    });
+    expect(next.turnCounterId).toBe(recipientId);
+  });
+
+  it('leaves the turn with the giver on an incorrect answer', () => {
+    const judging = catJudging('judge', ['p1', 'p2']);
+    const giverId = judging.turnCounterId;
+    const { state: next } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: false,
+    });
+    expect(next.turnCounterId).toBe(giverId);
+  });
+
+  it('resets catRecipientCounterId to null after the question resolves', () => {
+    const judging = catJudging('judge', ['p1', 'p2']);
+    const { state: next } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: false,
+    });
+    expect(next.catRecipientCounterId).toBeNull();
+  });
+});
+
+describe('cancel-question — во время cat-handoff', () => {
+  it('lets the host cancel a cat question before it is even handed off', () => {
+    const state = createInitialState(CAT_PACK, ['p1', 'p2'], 'judge');
+    const handoff = selectCat(state).state;
+    const { state: next } = reduce(handoff, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.answeredQuestionIds).toContain('a1');
+  });
+});
+
+describe('select-question — некому отдать кота (только у Комнаты есть онлайн-статус)', () => {
+  it('does not itself reject a lone counter — Room is responsible for that check (see room.test.ts)', () => {
+    // handleSelectQuestion не знает об онлайн-статусе (design.md, инвариант
+    // 1) — оно принимает выбор кота и с одним-единственным счётчиком в игре.
+    // «Некому отдать» проверяет Room ДО вызова reduce() (см. Task 2).
+    const state = createInitialState(CAT_PACK, ['p1']);
+    const { state: next } = selectCat(state);
+    expect(next.phase).toBe('cat-handoff');
   });
 });
