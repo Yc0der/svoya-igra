@@ -5,6 +5,7 @@ import {
   QUESTION_TIMER_MS,
   REVEAL_TIMER_MS,
   CAT_HANDOFF_TIMER_MS,
+  AUCTION_BID_TIMER_MS,
 } from './engine.js';
 
 // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — кандидаты и
@@ -414,6 +415,37 @@ const CAT_PACK: Pack = {
               text: 'Вопрос-кот?',
               answer: 'ответ кота',
               type: 'кот',
+            },
+            {
+              id: 'q2',
+              price: 200,
+              text: 'Вопрос 2?',
+              answer: 'ответ 2',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const AUCTION_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'auc1',
+              price: 100,
+              text: 'Вопрос-аукцион?',
+              answer: 'ответ аукциона',
+              type: 'аукцион',
             },
             {
               id: 'q2',
@@ -1847,5 +1879,65 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     room.selectQuestion(picker, 0, 'cat1');
 
     expect(room.toGameStateView(petya)?.phase).toBe('selecting');
+  });
+});
+
+describe('Room — вопрос-аукцион', () => {
+  it('placeBid and passBid reach the engine and drive the auction to a winner', () => {
+    const lobby = new Room(undefined, AUCTION_PACK);
+    const vanya = joinedId(lobby, 'Ваня');
+    const katya = joinedId(lobby, 'Катя');
+    lobby.startGame('requester');
+
+    // Фандим счета через снапшот, прежде чем торговаться — handlePlaceBid
+    // отклоняет ставку выше собственного счёта (design.md, «ва-банк» —
+    // потолок, не пол), а startGame() всегда начинает с 0 у всех, тем же
+    // способом, каким engine.test.ts фандит EngineState.scores напрямую в
+    // своих auction-тестах (Task 3, describe('place-bid')/describe('pass-bid')).
+    const snapshot = lobby.getState();
+    snapshot.game!.scores = { [vanya]: 1000, [katya]: 1000 };
+    const room = new Room(snapshot, AUCTION_PACK);
+
+    const picker = room.toGameStateView()!.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+
+    room.selectQuestion(picker, 0, 'auc1');
+    expect(room.toGameStateView()?.phase).toBe('auction-bidding');
+    expect(room.toGameStateView()?.auctionTurnParticipantId).toBe(picker);
+
+    room.placeBid(picker, 150);
+    expect(room.toGameStateView()?.auctionHighestBid).toBe(150);
+    expect(room.toGameStateView()?.auctionHighestBidderParticipantId).toBe(
+      picker,
+    );
+    expect(room.toGameStateView()?.auctionTurnParticipantId).toBe(other);
+
+    room.passBid(other);
+    expect(room.toGameStateView()?.phase).toBe('question-open');
+    expect(room.toGameStateView()?.exclusiveAnswererParticipantId).toBe(picker);
+  });
+
+  it('re-arms the auction-bid timer after restoring from a snapshot mid-auction', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, AUCTION_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = room.toGameStateView()!.turnParticipantId;
+      room.selectQuestion(picker, 0, 'auc1');
+
+      const snapshot = room.getState();
+      const restored = new Room(snapshot, AUCTION_PACK);
+
+      vi.advanceTimersByTime(AUCTION_BID_TIMER_MS);
+      // Авто-пас за того, чей был ход — торги продолжаются со вторым
+      // участником, фаза остаётся 'auction-bidding' (двое участников,
+      // после одного паса без ставки остаётся один активный, но ставок
+      // ещё не было — см. design.md, «Общий переход хода торгов»).
+      expect(restored.toGameStateView()?.phase).toBe('auction-bidding');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

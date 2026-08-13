@@ -36,6 +36,14 @@ export function deserializeSnapshot(json: string): RoomState {
           // до него, не содержат этого поля вовсе.
           exclusiveAnswererCounterId:
             parsed.game.exclusiveAnswererCounterId ?? null,
+          // "Вопрос-аукцион" (веха 5) появился позже — снапшоты, записанные
+          // до него, не содержат этих пяти полей вовсе.
+          auctionOrder: parsed.game.auctionOrder ?? null,
+          auctionTurnCounterId: parsed.game.auctionTurnCounterId ?? null,
+          auctionPassedCounterIds: parsed.game.auctionPassedCounterIds ?? [],
+          auctionHighestBid: parsed.game.auctionHighestBid ?? 0,
+          auctionHighestBidderCounterId:
+            parsed.game.auctionHighestBidderCounterId ?? null,
         }
       : null,
     // Тот же паттерн, что у `game` строкой выше: снапшоты, записанные до

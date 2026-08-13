@@ -265,4 +265,37 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
     const restored = deserializeSnapshot(rawJson);
     expect(restored.game).toMatchObject({ exclusiveAnswererCounterId: null });
   });
+
+  // Та же причина, что у теста pre-cat-in-bag выше, но для пяти полей вехи
+  // 5 ("вопрос-аукцион") — снапшот, записанный до неё, не содержит их
+  // вовсе. Без дефолта первое же действие в аукционе после рестарта с
+  // такого снапшота падает с TypeError (afterBidOrPass в engine.ts —
+  // auctionOrder!.filter на undefined).
+  it('migrates a pre-auction snapshot (game missing the five auction fields) to their defaults', () => {
+    const game = createInitialState(TEST_PACK, ['1', '2']);
+    const preAuction = { ...game } as Record<string, unknown>;
+    delete preAuction.auctionOrder;
+    delete preAuction.auctionTurnCounterId;
+    delete preAuction.auctionPassedCounterIds;
+    delete preAuction.auctionHighestBid;
+    delete preAuction.auctionHighestBidderCounterId;
+
+    const rawJson = JSON.stringify({
+      participants: [
+        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+        { id: '2', name: 'Катя', token: 'tok-2', connected: true },
+      ],
+      game: preAuction,
+      hostParticipantId: null,
+    });
+
+    const restored = deserializeSnapshot(rawJson);
+    expect(restored.game).toMatchObject({
+      auctionOrder: null,
+      auctionTurnCounterId: null,
+      auctionPassedCounterIds: [],
+      auctionHighestBid: 0,
+      auctionHighestBidderCounterId: null,
+    });
+  });
 });

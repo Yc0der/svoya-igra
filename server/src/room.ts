@@ -6,6 +6,7 @@ import {
   findQuestion,
   QUESTION_TIMER_MS,
   CAT_HANDOFF_TIMER_MS,
+  AUCTION_BID_TIMER_MS,
   SAID_ANSWER_TIMER_MS,
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
@@ -88,6 +89,7 @@ function normalizeName(name: string): string {
 const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   'question-open': { timer: 'question', ms: QUESTION_TIMER_MS },
   'cat-handoff': { timer: 'cat-handoff', ms: CAT_HANDOFF_TIMER_MS },
+  'auction-bidding': { timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
   buzzed: { timer: 'said-answer', ms: SAID_ANSWER_TIMER_MS },
   judging: { timer: 'vote', ms: VOTE_TIMER_MS },
   reveal: { timer: 'reveal', ms: REVEAL_TIMER_MS },
@@ -460,6 +462,19 @@ export class Room {
     });
   }
 
+  // В отличие от selectQuestion()/assignCat() выше, здесь нет собственной
+  // проверки — движок сам знает, чей ход (auctionTurnCounterId), а онлайн-
+  // статус для аукциона не нужен (design.md, «Тайм-аут хода торгов»):
+  // бездействие уже само по себе штатный исход (авто-пас по таймеру), а не
+  // тупик, который надо было бы предотвратить заранее.
+  placeBid(participantId: string, amount: number): void {
+    this.dispatch({ type: 'place-bid', counterId: participantId, amount });
+  }
+
+  passBid(participantId: string): void {
+    this.dispatch({ type: 'pass-bid', counterId: participantId });
+  }
+
   // Возвращает 'falsestart', когда нажатие пришло вне фазы «вопрос открыт» —
   // движок о таких нажатиях никогда не узнаёт (design.md, «Комната»),
   // потому что здесь для них нет смысла ни в каком состоянии.
@@ -712,6 +727,12 @@ export class Room {
         : null,
       buzzedParticipantId: game.buzzedCounterId,
       exclusiveAnswererParticipantId: game.exclusiveAnswererCounterId,
+      auctionTurnParticipantId: game.auctionTurnCounterId,
+      auctionHighestBid: game.auctionOrder ? game.auctionHighestBid : null,
+      auctionHighestBidderParticipantId: game.auctionHighestBidderCounterId,
+      auctionPassedParticipantIds: game.auctionOrder
+        ? game.auctionPassedCounterIds
+        : null,
       // Не поле движка — Room-состояние, лениво «истекает» по сравнению с
       // Date.now() здесь же, без отдельного сброса по таймеру (см. поля
       // класса выше).

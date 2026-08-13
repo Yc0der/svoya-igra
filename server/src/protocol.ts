@@ -34,6 +34,15 @@ export interface GameStateView {
   // вех: 2026-08-12-cat-in-bag-design.md, 2026-08-13-auction-design.md,
   // «Рефакторинг вехи 4»).
   exclusiveAnswererParticipantId: string | null;
+  // Чей сейчас ход в торгах по вопросу-аукциону; null вне auction-bidding.
+  auctionTurnParticipantId: string | null;
+  // Текущая наивысшая ставка — null, пока торги не идут (auctionOrder на
+  // движке ещё/уже пуст), не 0: 0 — валидная ставка внутри самих торгов.
+  auctionHighestBid: number | null;
+  auctionHighestBidderParticipantId: string | null;
+  // Кто уже спасовал в текущем раунде торгов — null вне auction-bidding, по
+  // тому же принципу, что auctionHighestBid выше.
+  auctionPassedParticipantIds: string[] | null;
   // На judging непустой только для одного получателя за раз: при
   // hostParticipantId === null — для всех (двое, открытое судейство), иначе
   // — только для сокета с этим participantId (см. Room.toGameStateView).
