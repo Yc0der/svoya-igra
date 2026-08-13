@@ -939,6 +939,140 @@ describe('createServer cat-in-the-bag', () => {
   });
 });
 
+const AUCTION_TEST_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'auc1',
+              price: 100,
+              text: 'Вопрос-аукцион?',
+              answer: 'ответ аукциона',
+              type: 'аукцион',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+describe('createServer auction', () => {
+  it('drives a full auction from selection through the winner buzzing in', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-auction-'));
+    const room = new Room(undefined, AUCTION_TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage();
+    // Ведущий здесь не для судейства (тест до голосования не доходит) — это
+    // единственный способ зафандить счёт picker'а перед торгами через
+    // настоящий протокол, а не напрямую в состоянии: handlePlaceBid
+    // отклоняет ставку выше собственного счёта (design.md, «ва-банк» —
+    // потолок, не пол), а у только что созданной партии у всех 0 (тот же
+    // паттерн уже потребовался в engine.test.ts/room.test.ts выше).
+    const c = await joinPlayer(url, 'Ведущий');
+    await a.nextMessage();
+    await b.nextMessage();
+
+    c.ws.send(JSON.stringify({ type: 'toggle-host' }));
+    await Promise.all([a.nextMessage(), b.nextMessage(), c.nextMessage()]);
+
+    c.ws.send(JSON.stringify({ type: 'start-game' }));
+    const aState = (await settle(a, b, a)) as {
+      game: { phase: string; turnParticipantId: string };
+    };
+    await c.nextMessage(); // тот же бродкаст, доходит и до ведущего
+    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+    const other = picker === a ? b : a;
+
+    c.ws.send(
+      JSON.stringify({
+        type: 'adjust-score',
+        participantId: picker.participantId,
+        delta: 200,
+      }),
+    );
+    await settle(a, b, picker);
+    await c.nextMessage();
+
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'auc1',
+      }),
+    );
+    const afterSelect = (await settle(a, b, picker)) as {
+      game: { phase: string; auctionTurnParticipantId: string };
+    };
+    await c.nextMessage();
+    expect(afterSelect.game.phase).toBe('auction-bidding');
+    expect(afterSelect.game.auctionTurnParticipantId).toBe(
+      picker.participantId,
+    );
+
+    picker.ws.send(JSON.stringify({ type: 'place-bid', amount: 150 }));
+    const afterBid = (await settle(a, b, picker)) as {
+      game: {
+        auctionHighestBid: number;
+        auctionHighestBidderParticipantId: string;
+        auctionTurnParticipantId: string;
+      };
+    };
+    await c.nextMessage();
+    expect(afterBid.game.auctionHighestBid).toBe(150);
+    expect(afterBid.game.auctionHighestBidderParticipantId).toBe(
+      picker.participantId,
+    );
+    expect(afterBid.game.auctionTurnParticipantId).toBe(other.participantId);
+
+    other.ws.send(JSON.stringify({ type: 'pass-bid' }));
+    const afterPass = (await settle(a, b, other)) as {
+      game: { phase: string; exclusiveAnswererParticipantId: string };
+    };
+    await c.nextMessage();
+    expect(afterPass.game.phase).toBe('question-open');
+    expect(afterPass.game.exclusiveAnswererParticipantId).toBe(
+      picker.participantId,
+    );
+
+    // Раздающий (не победитель торгов) — не может нажать; проигрышный
+    // нажим всё равно вызывает рассылку (Room.dispatch() безусловен), её
+    // нужно вычитать отдельно, прежде чем читать реальный переход ниже —
+    // тот же паттерн, что уже используется в 'createServer cat-in-the-bag'.
+    other.ws.send(JSON.stringify({ type: 'buzz' }));
+    await settle(a, b, other);
+    await c.nextMessage();
+
+    picker.ws.send(JSON.stringify({ type: 'buzz' }));
+    const afterBuzz = (await settle(a, b, picker)) as {
+      game: { phase: string; buzzedParticipantId: string };
+    };
+    await c.nextMessage();
+    expect(afterBuzz.game.phase).toBe('buzzed');
+    expect(afterBuzz.game.buzzedParticipantId).toBe(picker.participantId);
+
+    server.close();
+  });
+});
+
 describe('createServer host mode', () => {
   it('replies start-game-error to the requester when three join and nobody is host', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-host-required-'));

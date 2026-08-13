@@ -78,6 +78,8 @@ export type ClientMessage =
   | { type: 'start-game' }
   | { type: 'toggle-host' }
   | { type: 'select-question'; themeIndex: number; questionId: string }
+  | { type: 'place-bid'; amount: number }
+  | { type: 'pass-bid' }
   | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
   | { type: 'said-answer' }
