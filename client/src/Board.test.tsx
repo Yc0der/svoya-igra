@@ -204,7 +204,11 @@ describe('Board', () => {
       connection({
         game: baseGame({
           phase: 'question-open',
-          currentQuestion: { text: 'Столица Франции?', price: 100 },
+          currentQuestion: {
+            text: 'Столица Франции?',
+            price: 100,
+            themeName: 'Тема',
+          },
         }),
       }),
     );
@@ -217,7 +221,11 @@ describe('Board', () => {
       connection({
         game: baseGame({
           phase: 'question-open',
-          currentQuestion: { text: 'Столица Франции?', price: 100 },
+          currentQuestion: {
+            text: 'Столица Франции?',
+            price: 100,
+            themeName: 'Тема',
+          },
           timerDeadline: Date.now() + 12000,
         }),
       }),
@@ -226,17 +234,17 @@ describe('Board', () => {
     expect(screen.getByText(/^\d+с$/)).toBeInTheDocument();
   });
 
-  it('shows the price instead of the text during cat-handoff', () => {
+  it('shows the theme and price instead of the text during cat-handoff', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         game: baseGame({
           phase: 'cat-handoff',
-          currentQuestion: { text: null, price: 300 },
+          currentQuestion: { text: null, price: 300, themeName: 'История' },
         }),
       }),
     );
     render(<Board />);
-    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
   });
 
   it('shows a countdown during cat-handoff too', () => {
@@ -244,7 +252,7 @@ describe('Board', () => {
       connection({
         game: baseGame({
           phase: 'cat-handoff',
-          currentQuestion: { text: null, price: 300 },
+          currentQuestion: { text: null, price: 300, themeName: 'История' },
           timerDeadline: Date.now() + 12000,
         }),
       }),

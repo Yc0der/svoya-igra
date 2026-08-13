@@ -565,7 +565,7 @@ describe('Player', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows the question price while picking a cat recipient', () => {
+  it('shows the question theme and price while picking a cat recipient', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'me',
@@ -576,7 +576,7 @@ describe('Player', () => {
         game: baseGame({
           phase: 'cat-handoff',
           turnParticipantId: 'me',
-          currentQuestion: { text: null, price: 300 },
+          currentQuestion: { text: null, price: 300, themeName: 'История' },
           scores: [
             { participantId: 'me', score: 0 },
             { participantId: 'other', score: 0 },
@@ -585,10 +585,10 @@ describe('Player', () => {
       }),
     );
     render(<Player />);
-    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
   });
 
-  it('shows the question price to everyone else waiting during cat-handoff', () => {
+  it('shows the question theme and price to everyone else waiting during cat-handoff', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'other',
@@ -599,30 +599,34 @@ describe('Player', () => {
         game: baseGame({
           phase: 'cat-handoff',
           turnParticipantId: 'me',
-          currentQuestion: { text: null, price: 300 },
+          currentQuestion: { text: null, price: 300, themeName: 'История' },
         }),
       }),
     );
     render(<Player />);
-    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
   });
 
-  it('shows the question price to the cat recipient alongside the buzz button', () => {
+  it('shows the question theme and price to the cat recipient alongside the buzz button', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'recipient',
         game: baseGame({
           phase: 'question-open',
           catRecipientParticipantId: 'recipient',
-          currentQuestion: { text: 'Вопрос-кот?', price: 300 },
+          currentQuestion: {
+            text: 'Вопрос-кот?',
+            price: 300,
+            themeName: 'История',
+          },
         }),
       }),
     );
     render(<Player />);
-    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
   });
 
-  it('shows the question price to a non-recipient waiting during a cat question', () => {
+  it('shows the question theme and price to a non-recipient waiting during a cat question', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'me',
@@ -633,27 +637,35 @@ describe('Player', () => {
         game: baseGame({
           phase: 'question-open',
           catRecipientParticipantId: 'recipient',
-          currentQuestion: { text: 'Вопрос-кот?', price: 300 },
+          currentQuestion: {
+            text: 'Вопрос-кот?',
+            price: 300,
+            themeName: 'История',
+          },
         }),
       }),
     );
     render(<Player />);
-    expect(screen.getByText(/вопрос за 300/i)).toBeInTheDocument();
+    expect(screen.getByText(/история за 300/i)).toBeInTheDocument();
   });
 
-  it('does not show a price for an ordinary (non-cat) question-open', () => {
+  it('does not show a theme/price for an ordinary (non-cat) question-open', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
         selfId: 'me',
         game: baseGame({
           phase: 'question-open',
           catRecipientParticipantId: null,
-          currentQuestion: { text: 'Обычный вопрос?', price: 300 },
+          currentQuestion: {
+            text: 'Обычный вопрос?',
+            price: 300,
+            themeName: 'История',
+          },
         }),
       }),
     );
     render(<Player />);
-    expect(screen.queryByText(/вопрос за 300/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/история за 300/i)).not.toBeInTheDocument();
   });
 
   it('prompts the buzzed player to say the answer aloud and confirm', async () => {

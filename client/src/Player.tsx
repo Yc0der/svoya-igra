@@ -347,7 +347,8 @@ export function Player() {
               <h2>Кот в мешке — выбери, кому отдать</h2>
               {game.currentQuestion && (
                 <p className="player-answer">
-                  Вопрос за {game.currentQuestion.price}
+                  {game.currentQuestion.themeName} за{' '}
+                  {game.currentQuestion.price}
                 </p>
               )}
               {remainingSeconds !== null && (
@@ -370,7 +371,7 @@ export function Player() {
             <p>{nameOf(game.turnParticipantId)} выбирает, кому отдать кота</p>
             {game.currentQuestion && (
               <p className="player-answer">
-                Вопрос за {game.currentQuestion.price}
+                {game.currentQuestion.themeName} за {game.currentQuestion.price}
               </p>
             )}
             {remainingSeconds !== null && (
@@ -407,7 +408,8 @@ export function Player() {
               <p>Кот у {nameOf(game.catRecipientParticipantId)} — жди</p>
               {game.currentQuestion && (
                 <p className="player-answer">
-                  Вопрос за {game.currentQuestion.price}
+                  {game.currentQuestion.themeName} за{' '}
+                  {game.currentQuestion.price}
                 </p>
               )}
               {remainingSeconds !== null && (
@@ -427,7 +429,7 @@ export function Player() {
           <div className="player player--center">
             {isCatQuestion && game.currentQuestion && (
               <p className="player-answer">
-                Вопрос за {game.currentQuestion.price}
+                {game.currentQuestion.themeName} за {game.currentQuestion.price}
               </p>
             )}
             <button

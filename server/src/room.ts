@@ -664,6 +664,9 @@ export class Room {
           (q) => q.id === game.currentQuestion!.questionId,
         )
       : undefined;
+    const currentThemeName = game.currentQuestion
+      ? round.themes[game.currentQuestion.themeIndex].name
+      : undefined;
 
     const showAnswer =
       game.phase === 'reveal' ||
@@ -697,13 +700,14 @@ export class Room {
         })),
       })),
       turnParticipantId: game.turnCounterId,
-      // Цена видна сразу — она не секрет, та же цифра уже была на сетке до
-      // выбора. Текст скрыт, пока идёт cat-handoff (design.md, «Правило»).
+      // Цена и тема видны сразу — не секрет, те же данные уже были на сетке
+      // до выбора. Текст скрыт, пока идёт cat-handoff (design.md, «Правило»).
       currentQuestion: currentQuestionData
         ? {
             text:
               game.phase === 'cat-handoff' ? null : currentQuestionData.text,
             price: currentQuestionData.price,
+            themeName: currentThemeName!,
           }
         : null,
       buzzedParticipantId: game.buzzedCounterId,

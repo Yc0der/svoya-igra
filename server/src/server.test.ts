@@ -891,6 +891,7 @@ describe('createServer cat-in-the-bag', () => {
     expect(afterSelect.game.currentQuestion).toEqual({
       text: null,
       price: 100,
+      themeName: 'Тема',
     });
 
     picker.ws.send(
@@ -910,6 +911,7 @@ describe('createServer cat-in-the-bag', () => {
     expect(afterAssign.game.currentQuestion).toEqual({
       text: 'Вопрос-кот?',
       price: 100,
+      themeName: 'Тема',
     });
     expect(afterAssign.game.catRecipientParticipantId).toBe(
       other.participantId,

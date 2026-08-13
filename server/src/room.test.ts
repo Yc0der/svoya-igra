@@ -1251,6 +1251,7 @@ describe('Room game flow', () => {
     expect(room.toGameStateView()?.currentQuestion).toEqual({
       text: 'Вопрос 1?',
       price: 100,
+      themeName: 'Тема',
     });
 
     expect(room.buzz(picker)).toBe('ok');
@@ -1766,6 +1767,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     expect(room.toGameStateView()?.currentQuestion).toEqual({
       text: null,
       price: 100,
+      themeName: 'Тема',
     });
 
     room.assignCat(picker, other);
@@ -1773,6 +1775,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     expect(room.toGameStateView()?.currentQuestion).toEqual({
       text: 'Вопрос-кот?',
       price: 100,
+      themeName: 'Тема',
     });
   });
 

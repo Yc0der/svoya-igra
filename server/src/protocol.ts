@@ -20,9 +20,13 @@ export interface GameStateView {
   }[];
   turnParticipantId: string;
   // text — null только во время cat-handoff (см. Room.toGameStateView): цена
-  // не секрет (видна на сетке ещё до выбора вопроса), скрывается только
-  // текст, пока получатель не назначен.
-  currentQuestion: { text: string | null; price: number } | null;
+  // и тема не секрет (видны на сетке ещё до выбора вопроса), скрывается
+  // только текст, пока получатель не назначен.
+  currentQuestion: {
+    text: string | null;
+    price: number;
+    themeName: string;
+  } | null;
   buzzedParticipantId: string | null;
   // Не null только для вопроса-«кота», пока фаза question-open/buzzed/
   // judging — единственный, кому в этот момент можно жать «Ответ» (см.
