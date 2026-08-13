@@ -3,6 +3,7 @@ import type { Pack, Question } from './pack.js';
 export type Phase =
   | 'selecting'
   | 'cat-handoff'
+  | 'auction-bidding'
   | 'question-open'
   | 'buzzed'
   | 'judging'
@@ -18,6 +19,7 @@ export type Phase =
 export type TimerName =
   | 'question'
   | 'cat-handoff'
+  | 'auction-bid'
   | 'said-answer'
   | 'vote'
   | 'reveal'
@@ -30,6 +32,7 @@ export type TimerName =
 
 export const QUESTION_TIMER_MS = 30_000;
 export const CAT_HANDOFF_TIMER_MS = 15_000;
+export const AUCTION_BID_TIMER_MS = 20_000;
 export const SAID_ANSWER_TIMER_MS = 10_000;
 export const VOTE_TIMER_MS = 10_000;
 export const REVEAL_TIMER_MS = 4_000;
@@ -56,6 +59,18 @@ export interface EngineState {
   // вех: 2026-08-12-cat-in-bag-design.md, 2026-08-13-auction-design.md,
   // «Рефакторинг вехи 4»).
   exclusiveAnswererCounterId: string | null;
+  // Порядок торгов — все счётчики партии по кругу, начиная с выбравшего
+  // (включая его самого — design.md, «Правило»). Фиксируется один раз при
+  // старте торгов.
+  auctionOrder: string[] | null;
+  auctionTurnCounterId: string | null;
+  // Пас окончателен — раз добавленный сюда счётчик до конца этого раунда
+  // торгов больше не может ходить (design.md, «Правило»).
+  auctionPassedCounterIds: string[];
+  // 0 = ни одной ставки ещё не было. Отличать от «нет торгов вообще»
+  // (auctionOrder === null).
+  auctionHighestBid: number;
+  auctionHighestBidderCounterId: string | null;
   votes: Record<string, boolean>;
   scores: Record<string, number>;
   lastCorrectCounterId: string | null;
@@ -83,6 +98,8 @@ export type EngineEvent =
       counterId: string;
       recipientCounterId: string;
     }
+  | { type: 'place-bid'; counterId: string; amount: number }
+  | { type: 'pass-bid'; counterId: string }
   | { type: 'buzz'; counterId: string }
   | { type: 'said-answer'; counterId: string }
   | { type: 'vote'; counterId: string; correct: boolean }
@@ -137,6 +154,11 @@ export function createInitialState(
     currentQuestion: null,
     buzzedCounterId: null,
     exclusiveAnswererCounterId: null,
+    auctionOrder: null,
+    auctionTurnCounterId: null,
+    auctionPassedCounterIds: [],
+    auctionHighestBid: 0,
+    auctionHighestBidderCounterId: null,
     votes: {},
     scores,
     lastCorrectCounterId: null,
@@ -182,6 +204,10 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
       return handleSelectQuestion(state, event);
     case 'assign-cat':
       return handleAssignCat(state, event);
+    case 'place-bid':
+      return handlePlaceBid(state, event);
+    case 'pass-bid':
+      return handlePassBid(state, event);
     case 'buzz':
       return handleBuzz(state, event);
     case 'said-answer':
@@ -242,6 +268,26 @@ function handleSelectQuestion(
       ],
     };
   }
+  if (question.type === 'аукцион') {
+    const ids = Object.keys(state.scores);
+    const startIndex = ids.indexOf(event.counterId);
+    const auctionOrder = [
+      ...ids.slice(startIndex),
+      ...ids.slice(0, startIndex),
+    ];
+    return {
+      state: {
+        ...state,
+        phase: 'auction-bidding',
+        currentQuestion,
+        auctionOrder,
+        auctionTurnCounterId: auctionOrder[0],
+      },
+      effects: [
+        { type: 'start-timer', timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
+      ],
+    };
+  }
   return {
     state: { ...state, phase: 'question-open', currentQuestion },
     effects: [
@@ -274,6 +320,116 @@ function handleAssignCat(
     effects: [
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ],
+  };
+}
+
+function handlePlaceBid(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'place-bid' }>,
+): Result {
+  if (
+    state.phase !== 'auction-bidding' ||
+    event.counterId !== state.auctionTurnCounterId ||
+    !Number.isFinite(event.amount)
+  ) {
+    return unchanged(state);
+  }
+  const question = findQuestion(
+    state.pack,
+    state.roundIndex,
+    state.currentQuestion!.themeIndex,
+    state.currentQuestion!.questionId,
+  )!;
+  const minBid =
+    state.auctionHighestBidderCounterId === null
+      ? question.price
+      : state.auctionHighestBid + 1;
+  if (event.amount < minBid || event.amount > state.scores[event.counterId]) {
+    return unchanged(state);
+  }
+  return afterBidOrPass({
+    ...state,
+    auctionHighestBid: event.amount,
+    auctionHighestBidderCounterId: event.counterId,
+  });
+}
+
+function handlePassBid(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'pass-bid' }>,
+): Result {
+  if (
+    state.phase !== 'auction-bidding' ||
+    event.counterId !== state.auctionTurnCounterId
+  ) {
+    return unchanged(state);
+  }
+  return afterBidOrPass({
+    ...state,
+    auctionPassedCounterIds: [
+      ...state.auctionPassedCounterIds,
+      event.counterId,
+    ],
+  });
+}
+
+// Общий переход хода торгов после ставки или паса (design.md, «Общий
+// переход хода торгов»). active.length === 1 без ставки — НЕ конец торгов:
+// последнему оставшемуся ещё не дали собственный ход (пас или ставка),
+// он не выигрывает и не проигрывает автоматически по факту, что остался
+// один — см. развёрнутое объяснение в дизайне.
+function afterBidOrPass(state: EngineState): Result {
+  const active = state.auctionOrder!.filter(
+    (id) => !state.auctionPassedCounterIds.includes(id),
+  );
+  if (active.length === 0) {
+    return revealQuestion(resetAuctionFields(state), null);
+  }
+  if (active.length === 1 && state.auctionHighestBidderCounterId !== null) {
+    // auctionHighestBid/auctionHighestBidderCounterId НЕ сбрасываются здесь,
+    // в отличие от остальных трёх полей ниже — resolveVote() читает
+    // auctionHighestBid как цену вопроса, когда победитель отвечает, а это
+    // случится ПОЗЖЕ этого return (buzz → said-answer → vote). revealQuestion()
+    // — единственный путь, которым в итоге закрывается любой вопрос-аукцион
+    // (верный ответ, неверный, тайм-аут) — сама сбросит оба поля своим общим
+    // резетом, но только после того, как resolveVote() успеет их прочитать.
+    return {
+      state: {
+        ...state,
+        phase: 'question-open',
+        exclusiveAnswererCounterId: active[0],
+        auctionOrder: null,
+        auctionTurnCounterId: null,
+        auctionPassedCounterIds: [],
+      },
+      effects: [
+        { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      ],
+    };
+  }
+  const currentIndex = state.auctionOrder!.indexOf(state.auctionTurnCounterId!);
+  let nextIndex = currentIndex;
+  do {
+    nextIndex = (nextIndex + 1) % state.auctionOrder!.length;
+  } while (
+    state.auctionPassedCounterIds.includes(state.auctionOrder![nextIndex])
+  );
+  return {
+    state: { ...state, auctionTurnCounterId: state.auctionOrder![nextIndex] },
+    effects: [
+      { type: 'start-timer', timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
+    ],
+  };
+}
+
+function resetAuctionFields(state: EngineState): EngineState {
+  return {
+    ...state,
+    auctionOrder: null,
+    auctionTurnCounterId: null,
+    auctionPassedCounterIds: [],
+    auctionHighestBid: 0,
+    auctionHighestBidderCounterId: null,
   };
 }
 
@@ -423,6 +579,11 @@ function handleSkipToFinal(state: EngineState): Result {
     currentQuestion: null,
     buzzedCounterId: null,
     exclusiveAnswererCounterId: null,
+    auctionOrder: null,
+    auctionTurnCounterId: null,
+    auctionPassedCounterIds: [],
+    auctionHighestBid: 0,
+    auctionHighestBidderCounterId: null,
     votes: {},
   });
 }
@@ -446,6 +607,11 @@ function handleTimerExpired(
         recipientCounterId,
       });
     }
+    case 'auction-bid':
+      return handlePassBid(state, {
+        type: 'pass-bid',
+        counterId: state.auctionTurnCounterId!,
+      });
     case 'said-answer':
       return startJudging(state);
     case 'vote':
@@ -482,17 +648,19 @@ function resolveVote(state: EngineState): Result {
   const yes = Object.values(state.votes).filter((v) => v).length;
   const no = Object.values(state.votes).filter((v) => !v).length;
   const correct = yes >= no;
+  const price =
+    question.type === 'аукцион' ? state.auctionHighestBid : question.price;
 
   if (correct) {
     return revealQuestion(state, {
       counterId: buzzedCounterId,
-      delta: question.price,
+      delta: price,
     });
   }
 
   const penalizedScores = {
     ...state.scores,
-    [buzzedCounterId]: state.scores[buzzedCounterId] - question.price,
+    [buzzedCounterId]: state.scores[buzzedCounterId] - price,
   };
 
   if (state.hostId === null) {
@@ -564,6 +732,11 @@ function revealQuestion(
         : state.lastCorrectCounterId,
       buzzedCounterId: null,
       exclusiveAnswererCounterId: null,
+      auctionOrder: null,
+      auctionTurnCounterId: null,
+      auctionPassedCounterIds: [],
+      auctionHighestBid: 0,
+      auctionHighestBidderCounterId: null,
       votes: {},
     },
     effects: [{ type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS }],

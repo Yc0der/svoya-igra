@@ -13,6 +13,7 @@ import {
   FINAL_JUDGING_TIMER_MS,
   FINAL_REVEAL_TIMER_MS,
   CAT_HANDOFF_TIMER_MS,
+  AUCTION_BID_TIMER_MS,
   type EngineState,
 } from './engine.js';
 import type { Pack } from './pack.js';
@@ -94,6 +95,43 @@ const CAT_PACK = makePack({
     },
   ],
 });
+
+const AUCTION_PACK = makePack({
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема A',
+          questions: [
+            {
+              id: 'a1',
+              price: 100,
+              text: 'A1?',
+              answer: 'ответ a1',
+              type: 'аукцион',
+            },
+            {
+              id: 'a2',
+              price: 200,
+              text: 'A2?',
+              answer: 'ответ a2',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+function selectAuction(state: EngineState) {
+  return reduce(state, {
+    type: 'select-question',
+    counterId: state.turnCounterId,
+    themeIndex: 0,
+    questionId: 'a1',
+  });
+}
 
 function selectCat(state: EngineState) {
   return reduce(state, {
@@ -1552,5 +1590,303 @@ describe('select-question — некому отдать кота (только �
     const state = createInitialState(CAT_PACK, ['p1']);
     const { state: next } = selectCat(state);
     expect(next.phase).toBe('cat-handoff');
+  });
+});
+
+describe('select-question — вопрос-аукцион', () => {
+  it('opens into auction-bidding, builds auctionOrder starting from the picker, and starts the auction-bid timer', () => {
+    const state = createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3']);
+    const { state: next, effects } = selectAuction(state);
+    expect(next.phase).toBe('auction-bidding');
+    expect(next.auctionOrder).toHaveLength(3);
+    expect(next.auctionOrder![0]).toBe(state.turnCounterId);
+    expect(new Set(next.auctionOrder)).toEqual(new Set(['p1', 'p2', 'p3']));
+    expect(next.auctionTurnCounterId).toBe(state.turnCounterId);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
+    ]);
+  });
+
+  it('includes the picker in auctionOrder, unlike the cat mechanic', () => {
+    const state = createInitialState(AUCTION_PACK, ['p1', 'p2']);
+    const { state: next } = selectAuction(state);
+    expect(next.auctionOrder).toContain(state.turnCounterId);
+  });
+});
+
+describe('place-bid', () => {
+  function biddingState(): EngineState {
+    const initial = createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3']);
+    const funded = { ...initial, scores: { p1: 1000, p2: 1000, p3: 1000 } };
+    return selectAuction(funded).state;
+  }
+
+  it('is a no-op outside auction-bidding', () => {
+    const state = createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3']);
+    const { state: next, effects } = reduce(state, {
+      type: 'place-bid',
+      counterId: state.turnCounterId,
+      amount: 100,
+    });
+    expect(next).toEqual(state);
+    expect(effects).toEqual([]);
+  });
+
+  it('is a no-op from someone other than the current bidder', () => {
+    const state = biddingState();
+    const otherId = state.auctionOrder!.find(
+      (id) => id !== state.auctionTurnCounterId,
+    )!;
+    const { state: next } = reduce(state, {
+      type: 'place-bid',
+      counterId: otherId,
+      amount: 100,
+    });
+    expect(next).toEqual(state);
+  });
+
+  it('is a no-op for a first bid below the pack price', () => {
+    const state = biddingState();
+    const { state: next } = reduce(state, {
+      type: 'place-bid',
+      counterId: state.auctionTurnCounterId!,
+      amount: 99,
+    });
+    expect(next).toEqual(state);
+  });
+
+  it('is a no-op for a bid not exceeding the current highest', () => {
+    const state = biddingState();
+    const afterFirst = reduce(state, {
+      type: 'place-bid',
+      counterId: state.auctionTurnCounterId!,
+      amount: 150,
+    }).state;
+    const { state: next } = reduce(afterFirst, {
+      type: 'place-bid',
+      counterId: afterFirst.auctionTurnCounterId!,
+      amount: 150,
+    });
+    expect(next).toEqual(afterFirst);
+  });
+
+  it('is a no-op for a bid above the bidder’s own score', () => {
+    const state = biddingState();
+    const { state: next } = reduce(state, {
+      type: 'place-bid',
+      counterId: state.auctionTurnCounterId!,
+      amount: state.scores[state.auctionTurnCounterId!] + 1,
+    });
+    expect(next).toEqual(state);
+  });
+
+  it('is a no-op for NaN or Infinity', () => {
+    const state = biddingState();
+    const nanResult = reduce(state, {
+      type: 'place-bid',
+      counterId: state.auctionTurnCounterId!,
+      amount: NaN,
+    });
+    expect(nanResult.state).toEqual(state);
+    const infResult = reduce(state, {
+      type: 'place-bid',
+      counterId: state.auctionTurnCounterId!,
+      amount: Infinity,
+    });
+    expect(infResult.state).toEqual(state);
+  });
+
+  it('accepts a valid bid, records it, and advances the turn to the next bidder', () => {
+    const state = biddingState();
+    const bidderId = state.auctionTurnCounterId!;
+    const { state: next, effects } = reduce(state, {
+      type: 'place-bid',
+      counterId: bidderId,
+      amount: 150,
+    });
+    expect(next.auctionHighestBid).toBe(150);
+    expect(next.auctionHighestBidderCounterId).toBe(bidderId);
+    expect(next.phase).toBe('auction-bidding');
+    expect(next.auctionTurnCounterId).not.toBe(bidderId);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
+    ]);
+  });
+});
+
+describe('pass-bid', () => {
+  function biddingState(): EngineState {
+    const initial = createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3']);
+    const funded = { ...initial, scores: { p1: 1000, p2: 1000, p3: 1000 } };
+    return selectAuction(funded).state;
+  }
+
+  it('is a no-op outside auction-bidding', () => {
+    const state = createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3']);
+    const { state: next } = reduce(state, {
+      type: 'pass-bid',
+      counterId: state.turnCounterId,
+    });
+    expect(next).toEqual(state);
+  });
+
+  it('is a no-op from someone other than the current bidder', () => {
+    const state = biddingState();
+    const otherId = state.auctionOrder!.find(
+      (id) => id !== state.auctionTurnCounterId,
+    )!;
+    const { state: next } = reduce(state, {
+      type: 'pass-bid',
+      counterId: otherId,
+    });
+    expect(next).toEqual(state);
+  });
+
+  it('is permanent — a passed bidder cannot bid or pass again even while bidding continues', () => {
+    let state = biddingState();
+    const firstBidder = state.auctionTurnCounterId!;
+    state = reduce(state, { type: 'pass-bid', counterId: firstBidder }).state;
+    expect(state.auctionPassedCounterIds).toContain(firstBidder);
+    const { state: next } = reduce(state, {
+      type: 'pass-bid',
+      counterId: firstBidder,
+    });
+    expect(next).toEqual(state);
+  });
+
+  it('does not end the auction when one bidder remains but nobody has bid yet — gives them their own turn', () => {
+    let state = biddingState();
+    const order = state.auctionOrder!;
+    state = reduce(state, { type: 'pass-bid', counterId: order[0] }).state;
+    state = reduce(state, { type: 'pass-bid', counterId: order[1] }).state;
+    expect(state.phase).toBe('auction-bidding');
+    expect(state.auctionTurnCounterId).toBe(order[2]);
+    expect(state.auctionHighestBidderCounterId).toBeNull();
+  });
+
+  it('closes the question unanswered when everyone passes without ever bidding', () => {
+    let state = biddingState();
+    const order = state.auctionOrder!;
+    state = reduce(state, { type: 'pass-bid', counterId: order[0] }).state;
+    state = reduce(state, { type: 'pass-bid', counterId: order[1] }).state;
+    const { state: next } = reduce(state, {
+      type: 'pass-bid',
+      counterId: order[2],
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.answeredQuestionIds).toContain('a1');
+    expect(next.turnCounterId).toBe(state.turnCounterId);
+    expect(next.auctionOrder).toBeNull();
+    expect(next.auctionTurnCounterId).toBeNull();
+    expect(next.auctionPassedCounterIds).toEqual([]);
+    expect(next.auctionHighestBid).toBe(0);
+    expect(next.auctionHighestBidderCounterId).toBeNull();
+  });
+
+  it('lets the last remaining bidder win after everyone else passes following a bid', () => {
+    let state = biddingState();
+    const order = state.auctionOrder!;
+    state = reduce(state, {
+      type: 'place-bid',
+      counterId: order[0],
+      amount: 150,
+    }).state;
+    state = reduce(state, { type: 'pass-bid', counterId: order[1] }).state;
+    const { state: next, effects } = reduce(state, {
+      type: 'pass-bid',
+      counterId: order[2],
+    });
+    expect(next.phase).toBe('question-open');
+    expect(next.exclusiveAnswererCounterId).toBe(order[0]);
+    expect(next.auctionOrder).toBeNull();
+    expect(next.auctionHighestBid).toBe(150);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+
+  it('lets the picker win their own auction', () => {
+    let state = biddingState();
+    const picker = state.turnCounterId;
+    const order = state.auctionOrder!;
+    expect(order[0]).toBe(picker);
+    state = reduce(state, {
+      type: 'place-bid',
+      counterId: picker,
+      amount: 150,
+    }).state;
+    state = reduce(state, { type: 'pass-bid', counterId: order[1] }).state;
+    const { state: next } = reduce(state, {
+      type: 'pass-bid',
+      counterId: order[2],
+    });
+    expect(next.exclusiveAnswererCounterId).toBe(picker);
+  });
+});
+
+describe('timer-expired: auction-bid', () => {
+  it('auto-passes for whoever’s turn it is', () => {
+    const state = selectAuction(
+      createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3']),
+    ).state;
+    const bidderId = state.auctionTurnCounterId!;
+    const { state: next } = reduce(state, {
+      type: 'timer-expired',
+      timer: 'auction-bid',
+    });
+    expect(next.auctionPassedCounterIds).toContain(bidderId);
+    expect(next.auctionTurnCounterId).not.toBe(bidderId);
+  });
+});
+
+describe('resolveVote — вопрос-аукцион', () => {
+  function auctionJudging(
+    hostId: string | null,
+    counterIds: string[],
+    winningBid: number,
+  ): EngineState {
+    const initial = createInitialState(AUCTION_PACK, counterIds, hostId);
+    const scores = Object.fromEntries(counterIds.map((id) => [id, 1000]));
+    let state = selectAuction({ ...initial, scores }).state;
+    const order = state.auctionOrder!;
+    state = reduce(state, {
+      type: 'place-bid',
+      counterId: order[0],
+      amount: winningBid,
+    }).state;
+    for (const id of order.slice(1)) {
+      state = reduce(state, { type: 'pass-bid', counterId: id }).state;
+    }
+    const winnerId = state.exclusiveAnswererCounterId!;
+    const buzzed = reduce(state, { type: 'buzz', counterId: winnerId }).state;
+    return reduce(buzzed, { type: 'said-answer', counterId: winnerId }).state;
+  }
+
+  it('credits the winner with their winning bid amount, not the pack price, on a correct answer', () => {
+    const judging = auctionJudging('judge', ['p1', 'p2'], 350);
+    const winnerId = judging.buzzedCounterId!;
+    const before = judging.scores[winnerId];
+    const { state: next } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: true,
+    });
+    expect(next.scores[winnerId]).toBe(before + 350);
+  });
+
+  it('deducts the winning bid amount, not the pack price, on an incorrect answer, and does not reopen', () => {
+    const judging = auctionJudging('judge', ['p1', 'p2'], 350);
+    const winnerId = judging.buzzedCounterId!;
+    const before = judging.scores[winnerId];
+    const { state: next, effects } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: false,
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.scores[winnerId]).toBe(before - 350);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
+    ]);
   });
 });
