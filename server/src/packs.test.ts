@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { listAvailablePacks } from './packs.js';
+import { deleteQuestion, listAvailablePacks, updateQuestion } from './packs.js';
 
 const VALID_PACK = {
   title: 'Тест',
@@ -15,6 +15,37 @@ const VALID_PACK = {
           name: 'Тема',
           questions: [
             { id: 'q1', price: 100, text: 'В?', answer: 'О', type: 'обычный' },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const TWO_QUESTION_PACK = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'q1',
+              price: 100,
+              text: 'В1?',
+              answer: 'О1',
+              type: 'обычный',
+            },
+            {
+              id: 'q2',
+              price: 200,
+              text: 'В2?',
+              answer: 'О2',
+              type: 'обычный',
+            },
           ],
         },
       ],
@@ -117,5 +148,215 @@ describe('listAvailablePacks', () => {
     expect(await listAvailablePacks(dir)).toEqual([]);
     expect(errorSpy).toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+});
+
+describe('updateQuestion', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-packs-update-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('updates the fields of an existing question and writes them to disk', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(VALID_PACK),
+      'utf8',
+    );
+
+    const updated = await updateQuestion(dir, 'sport.json', 'q1', {
+      price: 200,
+      text: 'Новый текст?',
+      answer: 'Новый ответ',
+      questionType: 'обычный',
+    });
+
+    expect(updated.rounds[0].themes[0].questions[0]).toMatchObject({
+      id: 'q1',
+      price: 200,
+      text: 'Новый текст?',
+      answer: 'Новый ответ',
+      type: 'обычный',
+    });
+    const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
+    expect(onDisk.rounds[0].themes[0].questions[0].price).toBe(200);
+  });
+
+  it('sets and clears the optional comment field', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(VALID_PACK),
+      'utf8',
+    );
+
+    const withComment = await updateQuestion(dir, 'sport.json', 'q1', {
+      price: 100,
+      text: 'В?',
+      answer: 'О',
+      comment: 'Пояснение',
+      questionType: 'обычный',
+    });
+    expect(withComment.rounds[0].themes[0].questions[0].comment).toBe(
+      'Пояснение',
+    );
+
+    const withoutComment = await updateQuestion(dir, 'sport.json', 'q1', {
+      price: 100,
+      text: 'В?',
+      answer: 'О',
+      questionType: 'обычный',
+    });
+    expect(
+      withoutComment.rounds[0].themes[0].questions[0].comment,
+    ).toBeUndefined();
+  });
+
+  it('can change the question type', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(VALID_PACK),
+      'utf8',
+    );
+
+    const updated = await updateQuestion(dir, 'sport.json', 'q1', {
+      price: 100,
+      text: 'В?',
+      answer: 'О',
+      questionType: 'аукцион',
+    });
+    expect(updated.rounds[0].themes[0].questions[0].type).toBe('аукцион');
+  });
+
+  it('throws and does not write when the question id is not found', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(VALID_PACK),
+      'utf8',
+    );
+
+    await expect(
+      updateQuestion(dir, 'sport.json', 'ghost', {
+        price: 100,
+        text: 'В?',
+        answer: 'О',
+        questionType: 'обычный',
+      }),
+    ).rejects.toThrow(/не найден/);
+    const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
+    expect(onDisk).toEqual(VALID_PACK);
+  });
+
+  it('throws and does not write when the new price is invalid', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(VALID_PACK),
+      'utf8',
+    );
+
+    await expect(
+      updateQuestion(dir, 'sport.json', 'q1', {
+        price: 0,
+        text: 'В?',
+        answer: 'О',
+        questionType: 'обычный',
+      }),
+    ).rejects.toThrow();
+    const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
+    expect(onDisk).toEqual(VALID_PACK);
+  });
+
+  it('throws and does not write when the new text is empty', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(VALID_PACK),
+      'utf8',
+    );
+
+    await expect(
+      updateQuestion(dir, 'sport.json', 'q1', {
+        price: 100,
+        text: '',
+        answer: 'О',
+        questionType: 'обычный',
+      }),
+    ).rejects.toThrow();
+    const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
+    expect(onDisk).toEqual(VALID_PACK);
+  });
+
+  it('writes the file pretty-printed with 2-space indentation, matching the hand-editable format', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(VALID_PACK),
+      'utf8',
+    );
+
+    await updateQuestion(dir, 'sport.json', 'q1', {
+      price: 200,
+      text: 'В?',
+      answer: 'О',
+      questionType: 'обычный',
+    });
+
+    const raw = await readFile(join(dir, 'sport.json'), 'utf8');
+    expect(raw).toContain('\n  "title"');
+  });
+});
+
+describe('deleteQuestion', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-packs-delete-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('removes the question from its theme and writes the result to disk', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(TWO_QUESTION_PACK),
+      'utf8',
+    );
+
+    const updated = await deleteQuestion(dir, 'sport.json', 'q2');
+    expect(updated.rounds[0].themes[0].questions).toHaveLength(1);
+    expect(updated.rounds[0].themes[0].questions[0].id).toBe('q1');
+
+    const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
+    expect(onDisk.rounds[0].themes[0].questions).toHaveLength(1);
+  });
+
+  it('throws and does not write when the question id is not found', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(TWO_QUESTION_PACK),
+      'utf8',
+    );
+
+    await expect(deleteQuestion(dir, 'sport.json', 'ghost')).rejects.toThrow(
+      /не найден/,
+    );
+    const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
+    expect(onDisk).toEqual(TWO_QUESTION_PACK);
+  });
+
+  it('throws and does not write when deleting would leave the theme with zero questions', async () => {
+    await writeFile(
+      join(dir, 'sport.json'),
+      JSON.stringify(VALID_PACK),
+      'utf8',
+    );
+
+    await expect(deleteQuestion(dir, 'sport.json', 'q1')).rejects.toThrow();
+    const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
+    expect(onDisk).toEqual(VALID_PACK);
   });
 });
