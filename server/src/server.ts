@@ -11,8 +11,9 @@ import type {
   ParticipantView,
   ServerMessage,
 } from './protocol.js';
-import { listAvailablePacks } from './packs.js';
+import { listAvailablePacks, updateQuestion, deleteQuestion } from './packs.js';
 import { loadPack } from './pack.js';
+import type { Question } from './pack.js';
 
 export interface CreateServerOptions {
   room: Room;
@@ -140,6 +141,25 @@ export function createServer(options: CreateServerOptions): GameServer {
   // Сокеты, ответившие на последний пинг (или только что подключившиеся).
   // WeakSet, чтобы закрытые сокеты не удерживались в памяти.
   const alive = new WeakSet<WebSocket>();
+
+  // Сериализует updateQuestion/deleteQuestion между собой. Оба — read
+  // (loadPack) → modify → write поверх файла в packsDir, а
+  // ws.on('message', ...) ниже не ждёт завершения предыдущего
+  // handleMessage перед тем, как начать следующий: два admin-*-question
+  // сообщения, пришедшие подряд (тот же сокет или разные), иначе читают
+  // один и тот же ещё не перезаписанный файл и теряют правку друг друга
+  // (последняя запись побеждает, ни одна из проверок validatePack этого не
+  // ловит, если оба результата по отдельности валидны). Каждый вызов
+  // дожидается своей очереди в цепочке независимо от результата
+  // предыдущего — .catch(() => {}) не глотает ошибку вызывающего (она уже
+  // ушла через результат withPackWriteLock), а не даёт отклонённому
+  // промису прервать очередь для следующих операций.
+  let packWriteQueue: Promise<unknown> = Promise.resolve();
+  function withPackWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    const result = packWriteQueue.then(fn, fn);
+    packWriteQueue = result.catch(() => {});
+    return result;
+  }
 
   wss.on('connection', (ws) => {
     alive.add(ws);
@@ -407,6 +427,104 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.filename === 'string'
       ) {
         await handleSelectPack(null, message.filename);
+      }
+
+      if (
+        message.type === 'admin-get-pack' &&
+        typeof message.filename === 'string'
+      ) {
+        await handleGetPack(message.filename);
+      }
+
+      if (
+        message.type === 'admin-update-question' &&
+        typeof message.filename === 'string' &&
+        typeof message.questionId === 'string' &&
+        typeof message.price === 'number' &&
+        typeof message.text === 'string' &&
+        typeof message.answer === 'string' &&
+        (message.comment === undefined ||
+          typeof message.comment === 'string') &&
+        typeof message.questionType === 'string'
+      ) {
+        await handleUpdateQuestion(message.filename, message.questionId, {
+          price: message.price,
+          text: message.text,
+          answer: message.answer,
+          comment: message.comment,
+          questionType: message.questionType as Question['type'],
+        });
+      }
+
+      if (
+        message.type === 'admin-delete-question' &&
+        typeof message.filename === 'string' &&
+        typeof message.questionId === 'string'
+      ) {
+        await handleDeleteQuestion(message.filename, message.questionId);
+      }
+
+      // Тот же приём, что у handleSelectPack: легитимный клиент никогда сам
+      // не конструирует filename — эхом отправляет то, что уже видел в
+      // availablePacks. Значение, не прошедшее эту проверку, может прийти
+      // только от нестандартного отправителя — тихий no-op.
+      async function handleGetPack(filename: string): Promise<void> {
+        if (basename(filename) !== filename) return;
+        try {
+          const pack = await loadPack(join(packsDir, filename));
+          send(ws, { type: 'admin-pack', filename, pack });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: (err as Error).message,
+          });
+        }
+      }
+
+      async function handleUpdateQuestion(
+        filename: string,
+        questionId: string,
+        fields: {
+          price: number;
+          text: string;
+          answer: string;
+          comment?: string;
+          questionType: Question['type'];
+        },
+      ): Promise<void> {
+        if (basename(filename) !== filename) return;
+        try {
+          const pack = await withPackWriteLock(() =>
+            updateQuestion(packsDir, filename, questionId, fields),
+          );
+          send(ws, { type: 'admin-pack', filename, pack });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: (err as Error).message,
+          });
+        }
+      }
+
+      async function handleDeleteQuestion(
+        filename: string,
+        questionId: string,
+      ): Promise<void> {
+        if (basename(filename) !== filename) return;
+        try {
+          const pack = await withPackWriteLock(() =>
+            deleteQuestion(packsDir, filename, questionId),
+          );
+          send(ws, { type: 'admin-pack', filename, pack });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: (err as Error).message,
+          });
+        }
       }
 
       async function handleSelectPack(

@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -2012,6 +2012,219 @@ describe('createServer pack picker', () => {
       type: 'select-pack-error',
       reason: 'unknown-file',
     });
+    admin.ws.close();
+  });
+});
+
+describe('createServer pack editor', () => {
+  let server: GameServer;
+  let dir: string;
+  let packsDir: string;
+  let baseUrl: string;
+
+  const PACK_A: Pack = {
+    title: 'Пак А',
+    author: 'Автор',
+    createdAt: '2026-08-04',
+    rounds: [
+      {
+        themes: [
+          {
+            name: 'Тема',
+            questions: [
+              {
+                id: 'a1',
+                price: 100,
+                text: 'В?',
+                answer: 'О',
+                type: 'обычный',
+              },
+              {
+                id: 'a2',
+                price: 200,
+                text: 'В2?',
+                answer: 'О2',
+                type: 'обычный',
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-pack-editor-'));
+    packsDir = await mkdtemp(join(tmpdir(), 'svoya-igra-pack-editor-packs-'));
+    await writeFile(join(packsDir, 'a.json'), JSON.stringify(PACK_A), 'utf8');
+    const room = new Room(undefined, PACK_A, undefined, 'a.json');
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+    await rm(packsDir, { recursive: true, force: true });
+  });
+
+  it('admin-get-pack returns the full pack content', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string; pack: Pack };
+    expect(reply.type).toBe('admin-pack');
+    expect(reply.pack.title).toBe('Пак А');
+    expect(reply.pack.rounds[0].themes[0].questions).toHaveLength(2);
+    admin.ws.close();
+  });
+
+  it('admin-get-pack on an unknown file returns admin-pack-error', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'ghost.json' }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toMatchObject({
+      type: 'admin-pack-error',
+      filename: 'ghost.json',
+    });
+    admin.ws.close();
+  });
+
+  it('admin-get-pack with a path-traversal filename is a silent no-op', async () => {
+    const admin = await connectAdmin(baseUrl);
+    // Тот же приём, что уже используется в 'admin-select-pack with a
+    // path-traversal filename' — легитимное действие после подозрительного
+    // доказывает, что сокет жив и молчание не было случайностью.
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: '../a.json' }),
+    );
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string };
+    expect(reply.type).toBe('admin-pack');
+    admin.ws.close();
+  });
+
+  it('admin-update-question changes the question and returns the updated pack', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-update-question',
+        filename: 'a.json',
+        questionId: 'a1',
+        price: 300,
+        text: 'Новый текст?',
+        answer: 'Новый ответ',
+        questionType: 'обычный',
+      }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string; pack: Pack };
+    expect(reply.type).toBe('admin-pack');
+    const updated = reply.pack.rounds[0].themes[0].questions.find(
+      (q) => q.id === 'a1',
+    );
+    expect(updated).toMatchObject({ price: 300, text: 'Новый текст?' });
+
+    const onDisk: Pack = JSON.parse(
+      await readFile(join(packsDir, 'a.json'), 'utf8'),
+    );
+    expect(
+      onDisk.rounds[0].themes[0].questions.find((q) => q.id === 'a1')?.price,
+    ).toBe(300);
+    admin.ws.close();
+  });
+
+  it('admin-update-question with an invalid price returns admin-pack-error and does not write', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-update-question',
+        filename: 'a.json',
+        questionId: 'a1',
+        price: 0,
+        text: 'В?',
+        answer: 'О',
+        questionType: 'обычный',
+      }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toMatchObject({
+      type: 'admin-pack-error',
+      filename: 'a.json',
+    });
+
+    const onDisk: Pack = JSON.parse(
+      await readFile(join(packsDir, 'a.json'), 'utf8'),
+    );
+    expect(
+      onDisk.rounds[0].themes[0].questions.find((q) => q.id === 'a1')?.price,
+    ).toBe(100);
+    admin.ws.close();
+  });
+
+  it('admin-delete-question removes the question and returns the updated pack', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-delete-question',
+        filename: 'a.json',
+        questionId: 'a2',
+      }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string; pack: Pack };
+    expect(reply.type).toBe('admin-pack');
+    expect(reply.pack.rounds[0].themes[0].questions).toHaveLength(1);
+
+    const onDisk: Pack = JSON.parse(
+      await readFile(join(packsDir, 'a.json'), 'utf8'),
+    );
+    expect(onDisk.rounds[0].themes[0].questions).toHaveLength(1);
+    admin.ws.close();
+  });
+
+  it('admin-delete-question on the last question in a theme returns admin-pack-error and does not write', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-delete-question',
+        filename: 'a.json',
+        questionId: 'a1',
+      }),
+    );
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-delete-question',
+        filename: 'a.json',
+        questionId: 'a2',
+      }),
+    );
+    // Первое удаление (a1) проходит нормально — из двух вопросов остаётся
+    // один. Второе (a2) оставило бы тему пустой и должно быть отклонено;
+    // не вычитываем ответ на первое отдельно, а сразу проверяем итог по
+    // диску — после обоих сообщений должен остаться ровно вопрос a2.
+    await admin.nextMessage(); // ответ на первое удаление
+    const reply = await admin.nextMessage(); // ответ на второе
+    expect(reply).toMatchObject({
+      type: 'admin-pack-error',
+      filename: 'a.json',
+    });
+
+    const onDisk: Pack = JSON.parse(
+      await readFile(join(packsDir, 'a.json'), 'utf8'),
+    );
+    expect(onDisk.rounds[0].themes[0].questions).toHaveLength(1);
+    expect(onDisk.rounds[0].themes[0].questions[0].id).toBe('a2');
     admin.ws.close();
   });
 });
