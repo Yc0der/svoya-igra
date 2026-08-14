@@ -1917,6 +1917,59 @@ describe('Room — вопрос-аукцион', () => {
     expect(room.toGameStateView()?.exclusiveAnswererParticipantId).toBe(picker);
   });
 
+  // Регрессия (финальное ревью, 2026-08-14): auctionOrder обнуляется в тот
+  // же момент, когда победитель определён, и гейт по нему прятал выигрышную
+  // сумму от клиентов ровно на время ответа — там, где она и нужна.
+  it('keeps the winning bid visible after the auction resolves into question-open', () => {
+    const lobby = new Room(undefined, AUCTION_PACK);
+    const vanya = joinedId(lobby, 'Ваня');
+    const katya = joinedId(lobby, 'Катя');
+    lobby.startGame('requester');
+    const snapshot = lobby.getState();
+    snapshot.game!.scores = { [vanya]: 1000, [katya]: 1000 };
+    const room = new Room(snapshot, AUCTION_PACK);
+    const picker = room.toGameStateView()!.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+
+    room.selectQuestion(picker, 0, 'auc1');
+    room.placeBid(picker, 350);
+    room.passBid(other);
+
+    const view = room.toGameStateView()!;
+    expect(view.phase).toBe('question-open');
+    expect(view.auctionHighestBid).toBe(350);
+    expect(view.auctionHighestBidderParticipantId).toBe(picker);
+  });
+
+  it('hides the question text while bidding is in progress and reveals it once the auction resolves', () => {
+    const lobby = new Room(undefined, AUCTION_PACK);
+    const vanya = joinedId(lobby, 'Ваня');
+    const katya = joinedId(lobby, 'Катя');
+    lobby.startGame('requester');
+    const snapshot = lobby.getState();
+    snapshot.game!.scores = { [vanya]: 1000, [katya]: 1000 };
+    const room = new Room(snapshot, AUCTION_PACK);
+    const picker = room.toGameStateView()!.turnParticipantId;
+    const other = picker === vanya ? katya : vanya;
+
+    room.selectQuestion(picker, 0, 'auc1');
+    expect(room.toGameStateView()?.phase).toBe('auction-bidding');
+    expect(room.toGameStateView()!.currentQuestion!.text).toBeNull();
+    expect(room.toGameStateView()?.currentQuestion).toEqual({
+      text: null,
+      price: 100,
+      themeName: 'Тема',
+    });
+
+    room.placeBid(picker, 150);
+    room.passBid(other);
+
+    expect(room.toGameStateView()?.phase).toBe('question-open');
+    expect(room.toGameStateView()!.currentQuestion!.text).toBe(
+      'Вопрос-аукцион?',
+    );
+  });
+
   it('re-arms the auction-bid timer after restoring from a snapshot mid-auction', () => {
     vi.useFakeTimers();
     try {

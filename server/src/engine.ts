@@ -330,7 +330,10 @@ function handlePlaceBid(
   if (
     state.phase !== 'auction-bidding' ||
     event.counterId !== state.auctionTurnCounterId ||
-    !Number.isFinite(event.amount)
+    !Number.isFinite(event.amount) ||
+    // Дробные ставки — мусор: и цены пакета, и вся арифметика счёта здесь
+    // целочисленные (финальное ревью, 2026-08-14).
+    !Number.isInteger(event.amount)
   ) {
     return unchanged(state);
   }
@@ -344,7 +347,17 @@ function handlePlaceBid(
     state.auctionHighestBidderCounterId === null
       ? question.price
       : state.auctionHighestBid + 1;
-  if (event.amount < minBid || event.amount > state.scores[event.counterId]) {
+  // Потолок — свой счёт («ва-банк»), КРОМЕ самой первой ставки: её можно
+  // сделать вплоть до цены вопроса из пакета, даже не имея столько очков —
+  // тем же принципом, что «дневной дубль» в настоящей «Своей игре»
+  // (design.md, «Правило»/«Отказы», дополнено на финальном ревью
+  // 2026-08-14). Без этого исключения аукцион в начале раунда, пока у всех
+  // 0, был неиграбелен: единственным допустимым действием был пас.
+  const ceiling =
+    state.auctionHighestBidderCounterId === null
+      ? Math.max(state.scores[event.counterId], question.price)
+      : state.scores[event.counterId];
+  if (event.amount < minBid || event.amount > ceiling) {
     return unchanged(state);
   }
   return afterBidOrPass({
@@ -440,9 +453,9 @@ function handleBuzz(
   if (state.phase !== 'question-open' || !(event.counterId in state.scores)) {
     return unchanged(state);
   }
-  // Вопрос-«кот»: жать может только тот, кому его передали — остальные, хоть
-  // и счётчики, для этого конкретного вопроса не считаются (design.md,
-  // «Правило»).
+  // Вопрос с эксклюзивным правом ответа («кот» или «аукцион»): жать может
+  // только тот, кому оно досталось — остальные, хоть и счётчики, для этого
+  // конкретного вопроса не считаются (design.md обеих вех, «Правило»).
   if (
     state.exclusiveAnswererCounterId !== null &&
     event.counterId !== state.exclusiveAnswererCounterId

@@ -716,11 +716,15 @@ export class Room {
       })),
       turnParticipantId: game.turnCounterId,
       // Цена и тема видны сразу — не секрет, те же данные уже были на сетке
-      // до выбора. Текст скрыт, пока идёт cat-handoff (design.md, «Правило»).
+      // до выбора. Текст скрыт, пока идёт cat-handoff или торги по аукциону
+      // (design.md обеих вех, «Правило»: у аукциона та же видимость, что у
+      // «кота» — торговаться, уже зная вопрос, значит не торговаться вовсе).
       currentQuestion: currentQuestionData
         ? {
             text:
-              game.phase === 'cat-handoff' ? null : currentQuestionData.text,
+              game.phase === 'cat-handoff' || game.phase === 'auction-bidding'
+                ? null
+                : currentQuestionData.text,
             price: currentQuestionData.price,
             themeName: currentThemeName!,
           }
@@ -728,7 +732,16 @@ export class Room {
       buzzedParticipantId: game.buzzedCounterId,
       exclusiveAnswererParticipantId: game.exclusiveAnswererCounterId,
       auctionTurnParticipantId: game.auctionTurnCounterId,
-      auctionHighestBid: game.auctionOrder ? game.auctionHighestBid : null,
+      // Гейт по auctionHighestBidderCounterId, а не по auctionOrder:
+      // auctionOrder обнуляется в ту же секунду, когда победитель определён,
+      // и по нему выигрышная сумма пропала бы с провода ровно на
+      // question-open/buzzed/judging — то есть именно тогда, когда комнате
+      // нужно видеть, что стоит на кону. Победитель же живёт до
+      // revealQuestion() (финальное ревью, 2026-08-14).
+      auctionHighestBid:
+        game.auctionHighestBidderCounterId !== null
+          ? game.auctionHighestBid
+          : null,
       auctionHighestBidderParticipantId: game.auctionHighestBidderCounterId,
       auctionPassedParticipantIds: game.auctionOrder
         ? game.auctionPassedCounterIds

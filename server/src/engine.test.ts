@@ -1582,6 +1582,38 @@ describe('cancel-question — во время cat-handoff', () => {
   });
 });
 
+describe('cancel-question — во время auction-bidding', () => {
+  it('lets the host cancel an auction question mid-bidding, closing it like a timeout and resetting every auction field', () => {
+    const initial = createInitialState(
+      AUCTION_PACK,
+      ['p1', 'p2', 'p3'],
+      'judge',
+    );
+    const funded = { ...initial, scores: { p1: 1000, p2: 1000, p3: 1000 } };
+    let state = selectAuction(funded).state;
+    const picker = state.turnCounterId;
+    state = reduce(state, {
+      type: 'place-bid',
+      counterId: state.auctionTurnCounterId!,
+      amount: 150,
+    }).state;
+
+    const { state: next } = reduce(state, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    });
+
+    expect(next.phase).toBe('reveal');
+    expect(next.answeredQuestionIds).toContain('a1');
+    expect(next.turnCounterId).toBe(picker);
+    expect(next.auctionOrder).toBeNull();
+    expect(next.auctionTurnCounterId).toBeNull();
+    expect(next.auctionPassedCounterIds).toEqual([]);
+    expect(next.auctionHighestBid).toBe(0);
+    expect(next.auctionHighestBidderCounterId).toBeNull();
+  });
+});
+
 describe('select-question — некому отдать кота (только у Комнаты есть онлайн-статус)', () => {
   it('does not itself reject a lone counter — Room is responsible for that check (see room.test.ts)', () => {
     // handleSelectQuestion не знает об онлайн-статусе (design.md, инвариант
@@ -1674,8 +1706,50 @@ describe('place-bid', () => {
     const state = biddingState();
     const { state: next } = reduce(state, {
       type: 'place-bid',
+      // 1001 — строго выше и своего счёта (1000), и цены пакета (100),
+      // так что «дневной дубль» (первая ставка до цены пакета) этот случай
+      // не покрывает, и отказ остаётся настоящим отказом по потолку.
       counterId: state.auctionTurnCounterId!,
       amount: state.scores[state.auctionTurnCounterId!] + 1,
+    });
+    expect(next).toEqual(state);
+  });
+
+  // «Дневной дубль» (design.md, «Правило», дополнено на финальном ревью
+  // 2026-08-14): первую ставку можно сделать по цене пакета даже без этих
+  // очков на счету — иначе аукцион в начале раунда, пока у всех 0,
+  // неиграбелен.
+  it('lets a broke bidder open the auction at exactly the pack price, even above their own score', () => {
+    const initial = createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3']);
+    const state = selectAuction(initial).state;
+    const bidderId = state.auctionTurnCounterId!;
+    expect(state.scores[bidderId]).toBe(0);
+    const { state: next } = reduce(state, {
+      type: 'place-bid',
+      counterId: bidderId,
+      amount: 100,
+    });
+    expect(next.auctionHighestBid).toBe(100);
+    expect(next.auctionHighestBidderCounterId).toBe(bidderId);
+  });
+
+  it('still caps that first-bid exception at the pack price — a broke bidder cannot go above it', () => {
+    const initial = createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3']);
+    const state = selectAuction(initial).state;
+    const { state: next } = reduce(state, {
+      type: 'place-bid',
+      counterId: state.auctionTurnCounterId!,
+      amount: 101,
+    });
+    expect(next).toEqual(state);
+  });
+
+  it('is a no-op for a fractional bid — prices and scores are integers everywhere else', () => {
+    const state = biddingState();
+    const { state: next } = reduce(state, {
+      type: 'place-bid',
+      counterId: state.auctionTurnCounterId!,
+      amount: 100.5,
     });
     expect(next).toEqual(state);
   });
@@ -1803,6 +1877,51 @@ describe('pass-bid', () => {
     expect(effects).toEqual([
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ]);
+  });
+
+  // Регрессия (финальное ревью, 2026-08-14): цикл перехода хода в
+  // afterBidOrPass (модуло + пропуск спасовавших) ни один прежний тест не
+  // прогонял ни через край массива, ни через уже спасовавшего — все они
+  // шли строго по порядку и заканчивались раньше. Здесь четверо: сначала
+  // ход обязан завернуться с последнего на первого, потом — перескочить
+  // через спасовавшего order[1].
+  it('wraps the bidding turn around the end of the order and skips whoever already passed', () => {
+    const initial = createInitialState(AUCTION_PACK, ['p1', 'p2', 'p3', 'p4']);
+    const funded = {
+      ...initial,
+      scores: { p1: 1000, p2: 1000, p3: 1000, p4: 1000 },
+    };
+    let state = selectAuction(funded).state;
+    const order = state.auctionOrder!;
+    expect(order).toHaveLength(4);
+
+    state = reduce(state, {
+      type: 'place-bid',
+      counterId: order[0],
+      amount: 150,
+    }).state;
+    expect(state.auctionTurnCounterId).toBe(order[1]);
+    state = reduce(state, { type: 'pass-bid', counterId: order[1] }).state;
+    expect(state.auctionTurnCounterId).toBe(order[2]);
+    state = reduce(state, {
+      type: 'place-bid',
+      counterId: order[2],
+      amount: 200,
+    }).state;
+    expect(state.auctionTurnCounterId).toBe(order[3]);
+
+    // Заворот через конец массива обратно на order[0].
+    state = reduce(state, { type: 'pass-bid', counterId: order[3] }).state;
+    expect(state.phase).toBe('auction-bidding');
+    expect(state.auctionTurnCounterId).toBe(order[0]);
+
+    // Пропуск уже спасовавшего order[1] — ход уходит сразу к order[2].
+    state = reduce(state, {
+      type: 'place-bid',
+      counterId: order[0],
+      amount: 250,
+    }).state;
+    expect(state.auctionTurnCounterId).toBe(order[2]);
   });
 
   it('lets the picker win their own auction', () => {

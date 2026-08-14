@@ -399,6 +399,21 @@ export function Player() {
             : `Текущая ставка: ${game.auctionHighestBid} (${nameOf(
                 game.auctionHighestBidderParticipantId,
               )})`;
+        // Одна и та же шапка торгов на обоих экранах (чей ход / все
+        // остальные) — считаем один раз, а не дублируем JSX.
+        const biddingHeader = (
+          <>
+            {game.currentQuestion && (
+              <p className="player-answer">
+                {game.currentQuestion.themeName} за {game.currentQuestion.price}
+              </p>
+            )}
+            <p>{bidHint}</p>
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
+          </>
+        );
         if (game.auctionTurnParticipantId === selfId) {
           const myScore =
             game.scores.find((s) => s.participantId === selfId)?.score ?? 0;
@@ -406,33 +421,41 @@ export function Player() {
             game.auctionHighestBidderParticipantId === null
               ? (game.currentQuestion?.price ?? 0)
               : (game.auctionHighestBid ?? 0) + 1;
+          // Те же границы, что проверяет сервер (engine.ts, handlePlaceBid),
+          // включая исключение «дневного дубля» для самой первой ставки:
+          // её потолок — больший из своего счёта и цены пакета.
+          const maxBid =
+            game.auctionHighestBidderParticipantId === null
+              ? Math.max(myScore, game.currentQuestion?.price ?? 0)
+              : myScore;
+          const parsedAmount = Number(bidInput);
+          // Без этой проверки кнопка всегда кликабельна, а недопустимая
+          // сумма молча улетает в no-op на сервере — под таймером это
+          // выглядит как «кнопка сломалась» (финальное ревью, 2026-08-14).
+          const isValidBid =
+            bidInput.trim() !== '' &&
+            Number.isFinite(parsedAmount) &&
+            Number.isInteger(parsedAmount) &&
+            parsedAmount >= minBid &&
+            parsedAmount <= maxBid;
           return (
             <div className="player player--center">
               <h2>Торги</h2>
-              {game.currentQuestion && (
-                <p className="player-answer">
-                  {game.currentQuestion.themeName} за{' '}
-                  {game.currentQuestion.price}
-                </p>
-              )}
-              <p>{bidHint}</p>
-              {remainingSeconds !== null && (
-                <p className="player-timer">{remainingSeconds}с</p>
-              )}
+              {biddingHeader}
               <label htmlFor="bid">Ставка</label>
               <input
                 id="bid"
                 type="number"
                 min={minBid}
-                max={myScore}
+                max={maxBid}
                 value={bidInput}
                 onChange={(e) => setBidInput(e.target.value)}
               />
               <button
                 className="button button--primary"
+                disabled={!isValidBid}
                 onClick={() => {
-                  const amount = Number(bidInput);
-                  if (Number.isFinite(amount)) placeBid(amount);
+                  if (isValidBid) placeBid(parsedAmount);
                 }}
               >
                 Поставить
@@ -450,15 +473,7 @@ export function Player() {
             ) : (
               <p>Ждём {nameOf(game.auctionTurnParticipantId)}</p>
             )}
-            {game.currentQuestion && (
-              <p className="player-answer">
-                {game.currentQuestion.themeName} за {game.currentQuestion.price}
-              </p>
-            )}
-            <p>{bidHint}</p>
-            {remainingSeconds !== null && (
-              <p className="player-timer">{remainingSeconds}с</p>
-            )}
+            {biddingHeader}
           </div>
         );
       }
@@ -478,6 +493,14 @@ export function Player() {
             </div>
           );
         }
+        // Вопрос, выигранный на торгах, стоит не цену пакета, а выигрышную
+        // ставку (design.md, «Правило») — показывать здесь цену с сетки
+        // значит врать о том, что на кону. Победитель торгов жив в
+        // auctionHighestBidderParticipantId всю фазу ответа.
+        const questionStake =
+          game.auctionHighestBidderParticipantId !== null
+            ? game.auctionHighestBid
+            : game.currentQuestion?.price;
         // Вопрос с эксклюзивным правом ответа («кот» или «аукцион»): кнопка
         // «Ответ» существует только для того, кому оно досталось — остальные,
         // хоть и счётчики, для этого конкретного вопроса не в игре
@@ -494,8 +517,7 @@ export function Player() {
               </p>
               {game.currentQuestion && (
                 <p className="player-answer">
-                  {game.currentQuestion.themeName} за{' '}
-                  {game.currentQuestion.price}
+                  {game.currentQuestion.themeName} за {questionStake}
                 </p>
               )}
               {remainingSeconds !== null && (
@@ -517,7 +539,7 @@ export function Player() {
           <div className="player player--center">
             {hasExclusiveAnswerer && game.currentQuestion && (
               <p className="player-answer">
-                {game.currentQuestion.themeName} за {game.currentQuestion.price}
+                {game.currentQuestion.themeName} за {questionStake}
               </p>
             )}
             <button

@@ -1463,6 +1463,9 @@ describe('Player', () => {
           auctionHighestBid: 100,
           auctionHighestBidderParticipantId: 'other',
           currentQuestion: { text: null, price: 100, themeName: 'История' },
+          // Повышение ставки ограничено собственным счётом — без него
+          // кнопка «Поставить» справедливо заблокирована.
+          scores: [{ participantId: 'me', score: 1000 }],
         }),
         placeBid,
       }),
@@ -1471,6 +1474,130 @@ describe('Player', () => {
     await userEvent.type(screen.getByLabelText(/ставка/i), '150');
     await userEvent.click(screen.getByRole('button', { name: /поставить/i }));
     expect(placeBid).toHaveBeenCalledWith(150);
+  });
+
+  // Регрессия (финальное ревью, 2026-08-14): кнопка была кликабельна всегда,
+  // а недопустимая сумма молча оборачивалась no-op'ом на сервере.
+  describe('валидация ставки на клиенте', () => {
+    function biddingConnection(
+      overrides: Partial<GameStateView> = {},
+      score = 1000,
+    ) {
+      return connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 150,
+          auctionHighestBidderParticipantId: 'other',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+          scores: [{ participantId: 'me', score }],
+          ...overrides,
+        }),
+      });
+    }
+
+    it('disables the bid button while the input is empty', () => {
+      mockedUseRoomConnection.mockReturnValue(biddingConnection());
+      render(<Player />);
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeDisabled();
+    });
+
+    it('disables the bid button for an amount below the minimum raise', async () => {
+      mockedUseRoomConnection.mockReturnValue(biddingConnection());
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '150');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeDisabled();
+    });
+
+    it('disables the bid button for an amount above my own score', async () => {
+      mockedUseRoomConnection.mockReturnValue(biddingConnection({}, 200));
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '201');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeDisabled();
+    });
+
+    it('enables the bid button for a valid raise', async () => {
+      mockedUseRoomConnection.mockReturnValue(biddingConnection());
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '151');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeEnabled();
+    });
+
+    // «Дневной дубль» через интерфейс: у игрока 0 очков, ставок ещё не было —
+    // ровно цену пакета поставить можно, хоть сколько-нибудь больше — нет.
+    it('enables the bid button for exactly the pack price as a first bid, even with a score of 0', async () => {
+      mockedUseRoomConnection.mockReturnValue(
+        biddingConnection(
+          {
+            auctionHighestBid: 0,
+            auctionHighestBidderParticipantId: null,
+          },
+          0,
+        ),
+      );
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '100');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeEnabled();
+    });
+
+    it('disables the bid button above the pack price as a first bid with a score of 0', async () => {
+      mockedUseRoomConnection.mockReturnValue(
+        biddingConnection(
+          {
+            auctionHighestBid: 0,
+            auctionHighestBidderParticipantId: null,
+          },
+          0,
+        ),
+      );
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '101');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeDisabled();
+    });
+  });
+
+  // Регрессия (финальное ревью, 2026-08-14): экран отвечающего показывал цену
+  // с сетки, хотя вопрос, выигранный на торгах, стоит выигрышную ставку.
+  it('shows the winning bid, not the pack price, on the exclusive answerer screen after an auction', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'question-open',
+          exclusiveAnswererParticipantId: 'me',
+          auctionHighestBid: 350,
+          auctionHighestBidderParticipantId: 'me',
+          currentQuestion: {
+            text: 'Вопрос?',
+            price: 100,
+            themeName: 'История',
+          },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/за 350/)).toBeInTheDocument();
+    expect(screen.queryByText(/за 100/)).not.toBeInTheDocument();
+  });
+
+  it('still shows the pack price on the exclusive answerer screen for a cat question', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'question-open',
+          exclusiveAnswererParticipantId: 'me',
+          currentQuestion: {
+            text: 'Вопрос?',
+            price: 100,
+            themeName: 'История',
+          },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/за 100/)).toBeInTheDocument();
   });
 
   it('calls passBid when the pass button is clicked', async () => {
