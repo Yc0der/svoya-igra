@@ -3,6 +3,7 @@ import type { Pack, Question } from './pack.js';
 export type Phase =
   | 'selecting'
   | 'cat-handoff'
+  | 'auction-bidding'
   | 'question-open'
   | 'buzzed'
   | 'judging'
@@ -18,6 +19,7 @@ export type Phase =
 export type TimerName =
   | 'question'
   | 'cat-handoff'
+  | 'auction-bid'
   | 'said-answer'
   | 'vote'
   | 'reveal'
@@ -30,6 +32,7 @@ export type TimerName =
 
 export const QUESTION_TIMER_MS = 30_000;
 export const CAT_HANDOFF_TIMER_MS = 15_000;
+export const AUCTION_BID_TIMER_MS = 20_000;
 export const SAID_ANSWER_TIMER_MS = 10_000;
 export const VOTE_TIMER_MS = 10_000;
 export const REVEAL_TIMER_MS = 4_000;
@@ -50,10 +53,24 @@ export interface EngineState {
   turnCounterId: string;
   currentQuestion: { themeIndex: number; questionId: string } | null;
   buzzedCounterId: string | null;
-  // Не null только пока фаза — question-open/buzzed/judging для
-  // вопроса-«кота»: единственный, кому в этом состоянии можно жать «Ответ»
-  // (docs/superpowers/specs/2026-08-12-cat-in-bag-design.md).
-  catRecipientCounterId: string | null;
+  // Не null только пока фаза — question-open/buzzed/judging для вопроса,
+  // требующего эксклюзивного права ответа («кот» или «аукцион») —
+  // единственный, кому в этом состоянии можно жать «Ответ» (design.md обеих
+  // вех: 2026-08-12-cat-in-bag-design.md, 2026-08-13-auction-design.md,
+  // «Рефакторинг вехи 4»).
+  exclusiveAnswererCounterId: string | null;
+  // Порядок торгов — все счётчики партии по кругу, начиная с выбравшего
+  // (включая его самого — design.md, «Правило»). Фиксируется один раз при
+  // старте торгов.
+  auctionOrder: string[] | null;
+  auctionTurnCounterId: string | null;
+  // Пас окончателен — раз добавленный сюда счётчик до конца этого раунда
+  // торгов больше не может ходить (design.md, «Правило»).
+  auctionPassedCounterIds: string[];
+  // 0 = ни одной ставки ещё не было. Отличать от «нет торгов вообще»
+  // (auctionOrder === null).
+  auctionHighestBid: number;
+  auctionHighestBidderCounterId: string | null;
   votes: Record<string, boolean>;
   scores: Record<string, number>;
   lastCorrectCounterId: string | null;
@@ -81,6 +98,8 @@ export type EngineEvent =
       counterId: string;
       recipientCounterId: string;
     }
+  | { type: 'place-bid'; counterId: string; amount: number }
+  | { type: 'pass-bid'; counterId: string }
   | { type: 'buzz'; counterId: string }
   | { type: 'said-answer'; counterId: string }
   | { type: 'vote'; counterId: string; correct: boolean }
@@ -134,7 +153,12 @@ export function createInitialState(
     turnCounterId: counterIds[Math.floor(Math.random() * counterIds.length)],
     currentQuestion: null,
     buzzedCounterId: null,
-    catRecipientCounterId: null,
+    exclusiveAnswererCounterId: null,
+    auctionOrder: null,
+    auctionTurnCounterId: null,
+    auctionPassedCounterIds: [],
+    auctionHighestBid: 0,
+    auctionHighestBidderCounterId: null,
     votes: {},
     scores,
     lastCorrectCounterId: null,
@@ -180,6 +204,10 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
       return handleSelectQuestion(state, event);
     case 'assign-cat':
       return handleAssignCat(state, event);
+    case 'place-bid':
+      return handlePlaceBid(state, event);
+    case 'pass-bid':
+      return handlePassBid(state, event);
     case 'buzz':
       return handleBuzz(state, event);
     case 'said-answer':
@@ -240,6 +268,26 @@ function handleSelectQuestion(
       ],
     };
   }
+  if (question.type === 'аукцион') {
+    const ids = Object.keys(state.scores);
+    const startIndex = ids.indexOf(event.counterId);
+    const auctionOrder = [
+      ...ids.slice(startIndex),
+      ...ids.slice(0, startIndex),
+    ];
+    return {
+      state: {
+        ...state,
+        phase: 'auction-bidding',
+        currentQuestion,
+        auctionOrder,
+        auctionTurnCounterId: auctionOrder[0],
+      },
+      effects: [
+        { type: 'start-timer', timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
+      ],
+    };
+  }
   return {
     state: { ...state, phase: 'question-open', currentQuestion },
     effects: [
@@ -267,11 +315,134 @@ function handleAssignCat(
     state: {
       ...state,
       phase: 'question-open',
-      catRecipientCounterId: event.recipientCounterId,
+      exclusiveAnswererCounterId: event.recipientCounterId,
     },
     effects: [
       { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
     ],
+  };
+}
+
+function handlePlaceBid(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'place-bid' }>,
+): Result {
+  if (
+    state.phase !== 'auction-bidding' ||
+    event.counterId !== state.auctionTurnCounterId ||
+    !Number.isFinite(event.amount) ||
+    // Дробные ставки — мусор: и цены пакета, и вся арифметика счёта здесь
+    // целочисленные (финальное ревью, 2026-08-14).
+    !Number.isInteger(event.amount)
+  ) {
+    return unchanged(state);
+  }
+  const question = findQuestion(
+    state.pack,
+    state.roundIndex,
+    state.currentQuestion!.themeIndex,
+    state.currentQuestion!.questionId,
+  )!;
+  const minBid =
+    state.auctionHighestBidderCounterId === null
+      ? question.price
+      : state.auctionHighestBid + 1;
+  // Потолок — свой счёт («ва-банк»), КРОМЕ самой первой ставки: её можно
+  // сделать вплоть до цены вопроса из пакета, даже не имея столько очков —
+  // тем же принципом, что «дневной дубль» в настоящей «Своей игре»
+  // (design.md, «Правило»/«Отказы», дополнено на финальном ревью
+  // 2026-08-14). Без этого исключения аукцион в начале раунда, пока у всех
+  // 0, был неиграбелен: единственным допустимым действием был пас.
+  const ceiling =
+    state.auctionHighestBidderCounterId === null
+      ? Math.max(state.scores[event.counterId], question.price)
+      : state.scores[event.counterId];
+  if (event.amount < minBid || event.amount > ceiling) {
+    return unchanged(state);
+  }
+  return afterBidOrPass({
+    ...state,
+    auctionHighestBid: event.amount,
+    auctionHighestBidderCounterId: event.counterId,
+  });
+}
+
+function handlePassBid(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'pass-bid' }>,
+): Result {
+  if (
+    state.phase !== 'auction-bidding' ||
+    event.counterId !== state.auctionTurnCounterId
+  ) {
+    return unchanged(state);
+  }
+  return afterBidOrPass({
+    ...state,
+    auctionPassedCounterIds: [
+      ...state.auctionPassedCounterIds,
+      event.counterId,
+    ],
+  });
+}
+
+// Общий переход хода торгов после ставки или паса (design.md, «Общий
+// переход хода торгов»). active.length === 1 без ставки — НЕ конец торгов:
+// последнему оставшемуся ещё не дали собственный ход (пас или ставка),
+// он не выигрывает и не проигрывает автоматически по факту, что остался
+// один — см. развёрнутое объяснение в дизайне.
+function afterBidOrPass(state: EngineState): Result {
+  const active = state.auctionOrder!.filter(
+    (id) => !state.auctionPassedCounterIds.includes(id),
+  );
+  if (active.length === 0) {
+    return revealQuestion(resetAuctionFields(state), null);
+  }
+  if (active.length === 1 && state.auctionHighestBidderCounterId !== null) {
+    // auctionHighestBid/auctionHighestBidderCounterId НЕ сбрасываются здесь,
+    // в отличие от остальных трёх полей ниже — resolveVote() читает
+    // auctionHighestBid как цену вопроса, когда победитель отвечает, а это
+    // случится ПОЗЖЕ этого return (buzz → said-answer → vote). revealQuestion()
+    // — единственный путь, которым в итоге закрывается любой вопрос-аукцион
+    // (верный ответ, неверный, тайм-аут) — сама сбросит оба поля своим общим
+    // резетом, но только после того, как resolveVote() успеет их прочитать.
+    return {
+      state: {
+        ...state,
+        phase: 'question-open',
+        exclusiveAnswererCounterId: active[0],
+        auctionOrder: null,
+        auctionTurnCounterId: null,
+        auctionPassedCounterIds: [],
+      },
+      effects: [
+        { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      ],
+    };
+  }
+  const currentIndex = state.auctionOrder!.indexOf(state.auctionTurnCounterId!);
+  let nextIndex = currentIndex;
+  do {
+    nextIndex = (nextIndex + 1) % state.auctionOrder!.length;
+  } while (
+    state.auctionPassedCounterIds.includes(state.auctionOrder![nextIndex])
+  );
+  return {
+    state: { ...state, auctionTurnCounterId: state.auctionOrder![nextIndex] },
+    effects: [
+      { type: 'start-timer', timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
+    ],
+  };
+}
+
+function resetAuctionFields(state: EngineState): EngineState {
+  return {
+    ...state,
+    auctionOrder: null,
+    auctionTurnCounterId: null,
+    auctionPassedCounterIds: [],
+    auctionHighestBid: 0,
+    auctionHighestBidderCounterId: null,
   };
 }
 
@@ -282,12 +453,12 @@ function handleBuzz(
   if (state.phase !== 'question-open' || !(event.counterId in state.scores)) {
     return unchanged(state);
   }
-  // Вопрос-«кот»: жать может только тот, кому его передали — остальные, хоть
-  // и счётчики, для этого конкретного вопроса не считаются (design.md,
-  // «Правило»).
+  // Вопрос с эксклюзивным правом ответа («кот» или «аукцион»): жать может
+  // только тот, кому оно досталось — остальные, хоть и счётчики, для этого
+  // конкретного вопроса не считаются (design.md обеих вех, «Правило»).
   if (
-    state.catRecipientCounterId !== null &&
-    event.counterId !== state.catRecipientCounterId
+    state.exclusiveAnswererCounterId !== null &&
+    event.counterId !== state.exclusiveAnswererCounterId
   ) {
     return unchanged(state);
   }
@@ -420,7 +591,12 @@ function handleSkipToFinal(state: EngineState): Result {
     ...state,
     currentQuestion: null,
     buzzedCounterId: null,
-    catRecipientCounterId: null,
+    exclusiveAnswererCounterId: null,
+    auctionOrder: null,
+    auctionTurnCounterId: null,
+    auctionPassedCounterIds: [],
+    auctionHighestBid: 0,
+    auctionHighestBidderCounterId: null,
     votes: {},
   });
 }
@@ -444,6 +620,11 @@ function handleTimerExpired(
         recipientCounterId,
       });
     }
+    case 'auction-bid':
+      return handlePassBid(state, {
+        type: 'pass-bid',
+        counterId: state.auctionTurnCounterId!,
+      });
     case 'said-answer':
       return startJudging(state);
     case 'vote':
@@ -480,17 +661,19 @@ function resolveVote(state: EngineState): Result {
   const yes = Object.values(state.votes).filter((v) => v).length;
   const no = Object.values(state.votes).filter((v) => !v).length;
   const correct = yes >= no;
+  const price =
+    question.type === 'аукцион' ? state.auctionHighestBid : question.price;
 
   if (correct) {
     return revealQuestion(state, {
       counterId: buzzedCounterId,
-      delta: question.price,
+      delta: price,
     });
   }
 
   const penalizedScores = {
     ...state.scores,
-    [buzzedCounterId]: state.scores[buzzedCounterId] - question.price,
+    [buzzedCounterId]: state.scores[buzzedCounterId] - price,
   };
 
   if (state.hostId === null) {
@@ -503,12 +686,15 @@ function resolveVote(state: EngineState): Result {
     return revealQuestion({ ...state, scores: penalizedScores }, null);
   }
 
-  if (question.type === 'кот') {
-    // Вопрос-«кот»: получатель отвечает один, перехвата нет даже при
-    // ведущем — единственное отличие «кота» от обычного вопроса в этой
-    // функции (docs/superpowers/specs/2026-08-12-cat-in-bag-design.md,
-    // «Отказы»). Дальше — тот же путь, что у пары без ведущего: закрыть
-    // сразу.
+  if (state.exclusiveAnswererCounterId !== null) {
+    // Вопрос с эксклюзивным правом ответа («кот» или «аукцион»): отвечает
+    // один, перехвата нет даже при ведущем. Проверка по состоянию, а не по
+    // типу вопроса — на этот момент (внутри resolveVote, до вызова
+    // revealQuestion, которая единственная сбрасывает поле) оно ещё не
+    // сброшено для любой механики с этим принципом, так что новой третьей
+    // механике с тем же правилом не придётся дописывать сюда ещё одну
+    // ветку (design.md обеих вех, «Рефакторинг вехи 4»). Дальше — тот же
+    // путь, что у пары без ведущего: закрыть сразу.
     return revealQuestion({ ...state, scores: penalizedScores }, null);
   }
 
@@ -558,7 +744,12 @@ function revealQuestion(
         ? correctResult.counterId
         : state.lastCorrectCounterId,
       buzzedCounterId: null,
-      catRecipientCounterId: null,
+      exclusiveAnswererCounterId: null,
+      auctionOrder: null,
+      auctionTurnCounterId: null,
+      auctionPassedCounterIds: [],
+      auctionHighestBid: 0,
+      auctionHighestBidderCounterId: null,
       votes: {},
     },
     effects: [{ type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS }],

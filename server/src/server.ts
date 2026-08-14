@@ -230,6 +230,20 @@ export function createServer(options: CreateServerOptions): GameServer {
         }
       }
 
+      if (message.type === 'place-bid' && typeof message.amount === 'number') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.placeBid(participantId, message.amount);
+        }
+      }
+
+      if (message.type === 'pass-bid') {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.passBid(participantId);
+        }
+      }
+
       if (
         message.type === 'assign-cat' &&
         typeof message.recipientParticipantId === 'string'

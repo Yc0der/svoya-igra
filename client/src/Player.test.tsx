@@ -20,7 +20,11 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     turnParticipantId: '',
     currentQuestion: null,
     buzzedParticipantId: null,
-    catRecipientParticipantId: null,
+    exclusiveAnswererParticipantId: null,
+    auctionTurnParticipantId: null,
+    auctionHighestBid: null,
+    auctionHighestBidderParticipantId: null,
+    auctionPassedParticipantIds: null,
     correctAnswer: null,
     graceExcludedParticipantId: null,
     graceExcludedUntil: null,
@@ -52,6 +56,8 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     startGame: vi.fn(),
     toggleHost: vi.fn(),
     selectQuestion: vi.fn(),
+    placeBid: vi.fn(),
+    passBid: vi.fn(),
     assignCat: vi.fn(),
     buzz: vi.fn(),
     saidAnswer: vi.fn(),
@@ -522,7 +528,7 @@ describe('Player', () => {
         ],
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: 'recipient',
+          exclusiveAnswererParticipantId: 'recipient',
         }),
       }),
     );
@@ -530,7 +536,7 @@ describe('Player', () => {
     expect(
       screen.queryByRole('button', { name: /^ответ$/i }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText(/кот у получатель/i)).toBeInTheDocument();
+    expect(screen.getByText(/право ответа у получатель/i)).toBeInTheDocument();
   });
 
   it('shows the normal buzz button to the cat recipient', () => {
@@ -539,7 +545,7 @@ describe('Player', () => {
         selfId: 'recipient',
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: 'recipient',
+          exclusiveAnswererParticipantId: 'recipient',
         }),
       }),
     );
@@ -613,7 +619,7 @@ describe('Player', () => {
         selfId: 'recipient',
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: 'recipient',
+          exclusiveAnswererParticipantId: 'recipient',
           currentQuestion: {
             text: 'Вопрос-кот?',
             price: 300,
@@ -636,7 +642,7 @@ describe('Player', () => {
         ],
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: 'recipient',
+          exclusiveAnswererParticipantId: 'recipient',
           currentQuestion: {
             text: 'Вопрос-кот?',
             price: 300,
@@ -655,7 +661,7 @@ describe('Player', () => {
         selfId: 'me',
         game: baseGame({
           phase: 'question-open',
-          catRecipientParticipantId: null,
+          exclusiveAnswererParticipantId: null,
           currentQuestion: {
             text: 'Обычный вопрос?',
             price: 300,
@@ -1406,5 +1412,273 @@ describe('Player', () => {
       ).not.toBeInTheDocument();
       expect(screen.getByText(/итог/i)).toBeInTheDocument();
     });
+  });
+
+  it('shows the current bid and a form to place a higher one, when it is my turn to bid', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 150,
+          auctionHighestBidderParticipantId: 'other',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/150/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /поставить/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /пас/i })).toBeInTheDocument();
+  });
+
+  it('shows "no bids yet" when it is my turn and nobody has bid', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 0,
+          auctionHighestBidderParticipantId: null,
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/ставок ещё не было/i)).toBeInTheDocument();
+  });
+
+  it('calls placeBid with the entered amount', async () => {
+    const placeBid = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 100,
+          auctionHighestBidderParticipantId: 'other',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+          // Повышение ставки ограничено собственным счётом — без него
+          // кнопка «Поставить» справедливо заблокирована.
+          scores: [{ participantId: 'me', score: 1000 }],
+        }),
+        placeBid,
+      }),
+    );
+    render(<Player />);
+    await userEvent.type(screen.getByLabelText(/ставка/i), '150');
+    await userEvent.click(screen.getByRole('button', { name: /поставить/i }));
+    expect(placeBid).toHaveBeenCalledWith(150);
+  });
+
+  // Регрессия (финальное ревью, 2026-08-14): кнопка была кликабельна всегда,
+  // а недопустимая сумма молча оборачивалась no-op'ом на сервере.
+  describe('валидация ставки на клиенте', () => {
+    function biddingConnection(
+      overrides: Partial<GameStateView> = {},
+      score = 1000,
+    ) {
+      return connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 150,
+          auctionHighestBidderParticipantId: 'other',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+          scores: [{ participantId: 'me', score }],
+          ...overrides,
+        }),
+      });
+    }
+
+    it('disables the bid button while the input is empty', () => {
+      mockedUseRoomConnection.mockReturnValue(biddingConnection());
+      render(<Player />);
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeDisabled();
+    });
+
+    it('disables the bid button for an amount below the minimum raise', async () => {
+      mockedUseRoomConnection.mockReturnValue(biddingConnection());
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '150');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeDisabled();
+    });
+
+    it('disables the bid button for an amount above my own score', async () => {
+      mockedUseRoomConnection.mockReturnValue(biddingConnection({}, 200));
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '201');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeDisabled();
+    });
+
+    it('enables the bid button for a valid raise', async () => {
+      mockedUseRoomConnection.mockReturnValue(biddingConnection());
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '151');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeEnabled();
+    });
+
+    // «Дневной дубль» через интерфейс: у игрока 0 очков, ставок ещё не было —
+    // ровно цену пакета поставить можно, хоть сколько-нибудь больше — нет.
+    it('enables the bid button for exactly the pack price as a first bid, even with a score of 0', async () => {
+      mockedUseRoomConnection.mockReturnValue(
+        biddingConnection(
+          {
+            auctionHighestBid: 0,
+            auctionHighestBidderParticipantId: null,
+          },
+          0,
+        ),
+      );
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '100');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeEnabled();
+    });
+
+    it('disables the bid button above the pack price as a first bid with a score of 0', async () => {
+      mockedUseRoomConnection.mockReturnValue(
+        biddingConnection(
+          {
+            auctionHighestBid: 0,
+            auctionHighestBidderParticipantId: null,
+          },
+          0,
+        ),
+      );
+      render(<Player />);
+      await userEvent.type(screen.getByLabelText(/ставка/i), '101');
+      expect(screen.getByRole('button', { name: /поставить/i })).toBeDisabled();
+    });
+  });
+
+  // Регрессия (финальное ревью, 2026-08-14): экран отвечающего показывал цену
+  // с сетки, хотя вопрос, выигранный на торгах, стоит выигрышную ставку.
+  it('shows the winning bid, not the pack price, on the exclusive answerer screen after an auction', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'question-open',
+          exclusiveAnswererParticipantId: 'me',
+          auctionHighestBid: 350,
+          auctionHighestBidderParticipantId: 'me',
+          currentQuestion: {
+            text: 'Вопрос?',
+            price: 100,
+            themeName: 'История',
+          },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/за 350/)).toBeInTheDocument();
+    expect(screen.queryByText(/за 100/)).not.toBeInTheDocument();
+  });
+
+  it('still shows the pack price on the exclusive answerer screen for a cat question', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'question-open',
+          exclusiveAnswererParticipantId: 'me',
+          currentQuestion: {
+            text: 'Вопрос?',
+            price: 100,
+            themeName: 'История',
+          },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/за 100/)).toBeInTheDocument();
+  });
+
+  it('calls passBid when the pass button is clicked', async () => {
+    const passBid = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+        passBid,
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: /^пас$/i }));
+    expect(passBid).toHaveBeenCalledOnce();
+  });
+
+  it('shows a waiting message with the current bid to everyone else during bidding', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'other',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'me',
+          auctionHighestBid: 150,
+          auctionHighestBidderParticipantId: 'me',
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/ждём.*я/i)).toBeInTheDocument();
+    expect(screen.getByText(/150/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /поставить/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows that I have passed, without a bid form, once I am out of the bidding', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionTurnParticipantId: 'other',
+          auctionPassedParticipantIds: ['me'],
+          currentQuestion: { text: null, price: 100, themeName: 'История' },
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(screen.getByText(/вы спасовали/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /поставить/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the cancel-question button to the host during auction-bidding', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'host-id',
+        isHost: true,
+        hostParticipantId: 'host-id',
+        game: baseGame({ phase: 'auction-bidding', hostId: 'host-id' }),
+      }),
+    );
+    render(<Player />);
+    await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
+    expect(
+      screen.getByRole('button', { name: 'Отменить вопрос' }),
+    ).toBeInTheDocument();
   });
 });

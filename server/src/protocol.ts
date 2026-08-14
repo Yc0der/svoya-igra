@@ -28,10 +28,21 @@ export interface GameStateView {
     themeName: string;
   } | null;
   buzzedParticipantId: string | null;
-  // Не null только для вопроса-«кота», пока фаза question-open/buzzed/
-  // judging — единственный, кому в этот момент можно жать «Ответ» (см.
-  // Room.toGameStateView).
-  catRecipientParticipantId: string | null;
+  // Не null только пока фаза — question-open/buzzed/judging для вопроса,
+  // требующего эксклюзивного права ответа («кот» или «аукцион») —
+  // единственный, кому в этом состоянии можно жать «Ответ» (design.md обеих
+  // вех: 2026-08-12-cat-in-bag-design.md, 2026-08-13-auction-design.md,
+  // «Рефакторинг вехи 4»).
+  exclusiveAnswererParticipantId: string | null;
+  // Чей сейчас ход в торгах по вопросу-аукциону; null вне auction-bidding.
+  auctionTurnParticipantId: string | null;
+  // Текущая наивысшая ставка — null, пока торги не идут (auctionOrder на
+  // движке ещё/уже пуст), не 0: 0 — валидная ставка внутри самих торгов.
+  auctionHighestBid: number | null;
+  auctionHighestBidderParticipantId: string | null;
+  // Кто уже спасовал в текущем раунде торгов — null вне auction-bidding, по
+  // тому же принципу, что auctionHighestBid выше.
+  auctionPassedParticipantIds: string[] | null;
   // На judging непустой только для одного получателя за раз: при
   // hostParticipantId === null — для всех (двое, открытое судейство), иначе
   // — только для сокета с этим participantId (см. Room.toGameStateView).
@@ -67,6 +78,8 @@ export type ClientMessage =
   | { type: 'start-game' }
   | { type: 'toggle-host' }
   | { type: 'select-question'; themeIndex: number; questionId: string }
+  | { type: 'place-bid'; amount: number }
+  | { type: 'pass-bid' }
   | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
   | { type: 'said-answer' }

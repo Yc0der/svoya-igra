@@ -24,6 +24,8 @@ export function Player() {
     startGame,
     toggleHost,
     selectQuestion,
+    placeBid,
+    passBid,
     assignCat,
     buzz,
     saidAnswer,
@@ -51,6 +53,7 @@ export function Player() {
   >({});
   const [wagerInput, setWagerInput] = useState('');
   const [answerInput, setAnswerInput] = useState('');
+  const [bidInput, setBidInput] = useState('');
   // Один раз за подключение ведущий решает, продолжать ли партию, найденную
   // на сервере при заходе (например, восстановленную из снапшота после
   // перезапуска), или отбросить её и начать заново — см. блок ниже
@@ -86,6 +89,10 @@ export function Player() {
   useEffect(() => {
     if (game?.phase !== 'final-wager') setWagerInput('');
     if (game?.phase !== 'final-answer') setAnswerInput('');
+  }, [game?.phase]);
+
+  useEffect(() => {
+    if (game?.phase !== 'auction-bidding') setBidInput('');
   }, [game?.phase]);
 
   function nameOf(participantId: string | null): string {
@@ -258,6 +265,7 @@ export function Player() {
     if (!game) return null;
     const questionActive =
       game.phase === 'cat-handoff' ||
+      game.phase === 'auction-bidding' ||
       game.phase === 'question-open' ||
       game.phase === 'buzzed' ||
       game.phase === 'judging';
@@ -381,6 +389,99 @@ export function Player() {
         );
       }
 
+      case 'auction-bidding': {
+        const iPassed =
+          selfId !== null &&
+          (game.auctionPassedParticipantIds?.includes(selfId) ?? false);
+        const bidHint =
+          game.auctionHighestBidderParticipantId === null
+            ? `Ставок ещё не было — минимум ${game.currentQuestion?.price ?? 0}`
+            : `Текущая ставка: ${game.auctionHighestBid} (${nameOf(
+                game.auctionHighestBidderParticipantId,
+              )})`;
+        // Одна и та же шапка торгов на обоих экранах (чей ход / все
+        // остальные) — считаем один раз, а не дублируем JSX.
+        const biddingHeader = (
+          <>
+            {game.currentQuestion && (
+              <p className="player-answer">
+                {game.currentQuestion.themeName} за {game.currentQuestion.price}
+              </p>
+            )}
+            <p className="player-hint">
+              По очереди ставьте больше текущей ставки или пасуйте — победивший
+              отвечает за свою ставку, а не за цену вопроса.
+            </p>
+            <p>{bidHint}</p>
+            {remainingSeconds !== null && (
+              <p className="player-timer">{remainingSeconds}с</p>
+            )}
+          </>
+        );
+        if (game.auctionTurnParticipantId === selfId) {
+          const myScore =
+            game.scores.find((s) => s.participantId === selfId)?.score ?? 0;
+          const minBid =
+            game.auctionHighestBidderParticipantId === null
+              ? (game.currentQuestion?.price ?? 0)
+              : (game.auctionHighestBid ?? 0) + 1;
+          // Те же границы, что проверяет сервер (engine.ts, handlePlaceBid),
+          // включая исключение «дневного дубля» для самой первой ставки:
+          // её потолок — больший из своего счёта и цены пакета.
+          const maxBid =
+            game.auctionHighestBidderParticipantId === null
+              ? Math.max(myScore, game.currentQuestion?.price ?? 0)
+              : myScore;
+          const parsedAmount = Number(bidInput);
+          // Без этой проверки кнопка всегда кликабельна, а недопустимая
+          // сумма молча улетает в no-op на сервере — под таймером это
+          // выглядит как «кнопка сломалась» (финальное ревью, 2026-08-14).
+          const isValidBid =
+            bidInput.trim() !== '' &&
+            Number.isFinite(parsedAmount) &&
+            Number.isInteger(parsedAmount) &&
+            parsedAmount >= minBid &&
+            parsedAmount <= maxBid;
+          return (
+            <div className="player player--center">
+              <h2>Вопрос-аукцион</h2>
+              {biddingHeader}
+              <label htmlFor="bid">Ставка</label>
+              <input
+                id="bid"
+                type="number"
+                min={minBid}
+                max={maxBid}
+                value={bidInput}
+                onChange={(e) => setBidInput(e.target.value)}
+              />
+              <button
+                className="button button--primary"
+                disabled={!isValidBid}
+                onClick={() => {
+                  if (isValidBid) placeBid(parsedAmount);
+                }}
+              >
+                Поставить
+              </button>
+              <button className="button button--no" onClick={passBid}>
+                Пас
+              </button>
+            </div>
+          );
+        }
+        return (
+          <div className="player player--center">
+            {iPassed ? (
+              <p>Вы спасовали — ждём остальных</p>
+            ) : (
+              <p>Ждём {nameOf(game.auctionTurnParticipantId)}</p>
+            )}
+            {biddingHeader}
+          </div>
+        );
+      }
+
       case 'question-open': {
         if (isHost) {
           // Ведущий не счётчик — не жмёт кнопку и никогда не будет тем, кому
@@ -396,20 +497,31 @@ export function Player() {
             </div>
           );
         }
-        // Вопрос-«кот»: кнопка «Ответ» существует только для того, кому его
-        // передали — остальные, хоть и счётчики, для этого конкретного
-        // вопроса не в игре (design.md, «Правило»).
-        const isCatRecipient =
-          game.catRecipientParticipantId === null ||
-          game.catRecipientParticipantId === selfId;
-        if (!isCatRecipient) {
+        // Вопрос, выигранный на торгах, стоит не цену пакета, а выигрышную
+        // ставку (design.md, «Правило») — показывать здесь цену с сетки
+        // значит врать о том, что на кону. Победитель торгов жив в
+        // auctionHighestBidderParticipantId всю фазу ответа.
+        const questionStake =
+          game.auctionHighestBidderParticipantId !== null
+            ? game.auctionHighestBid
+            : game.currentQuestion?.price;
+        // Вопрос с эксклюзивным правом ответа («кот» или «аукцион»): кнопка
+        // «Ответ» существует только для того, кому оно досталось — остальные,
+        // хоть и счётчики, для этого конкретного вопроса не в игре
+        // (design.md обеих вех, «Правило»/«Рефакторинг вехи 4»).
+        const isExclusiveAnswerer =
+          game.exclusiveAnswererParticipantId === null ||
+          game.exclusiveAnswererParticipantId === selfId;
+        if (!isExclusiveAnswerer) {
           return (
             <div className="player player--center">
-              <p>Кот у {nameOf(game.catRecipientParticipantId)} — жди</p>
+              <p>
+                Право ответа у {nameOf(game.exclusiveAnswererParticipantId)} —
+                жди
+              </p>
               {game.currentQuestion && (
                 <p className="player-answer">
-                  {game.currentQuestion.themeName} за{' '}
-                  {game.currentQuestion.price}
+                  {game.currentQuestion.themeName} за {questionStake}
                 </p>
               )}
               {remainingSeconds !== null && (
@@ -420,16 +532,18 @@ export function Player() {
         }
         const iAmExcluded =
           selfId !== null && game.graceExcludedParticipantId === selfId;
-        // Цена показывается только у вопроса-«кота» — для обычного вопроса
-        // текст/цену и так читают вслух/видят на табло, здесь только кнопка
-        // (design.md, «Клиенты»). Возможно, позже цену станем показывать и
-        // для обычных вопросов — пока не трогаем, чтобы не расширять веху.
-        const isCatQuestion = game.catRecipientParticipantId !== null;
+        // Цена показывается только у вопроса с эксклюзивным правом ответа —
+        // для обычного вопроса текст/цену и так читают вслух/видят на
+        // табло, здесь только кнопка (design.md, «Клиенты»). Возможно,
+        // позже цену станем показывать и для обычных вопросов — пока не
+        // трогаем, чтобы не расширять веху.
+        const hasExclusiveAnswerer =
+          game.exclusiveAnswererParticipantId !== null;
         return (
           <div className="player player--center">
-            {isCatQuestion && game.currentQuestion && (
+            {hasExclusiveAnswerer && game.currentQuestion && (
               <p className="player-answer">
-                {game.currentQuestion.themeName} за {game.currentQuestion.price}
+                {game.currentQuestion.themeName} за {questionStake}
               </p>
             )}
             <button

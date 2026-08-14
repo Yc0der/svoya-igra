@@ -363,6 +363,11 @@ code {
   font-size: 18px;
 }
 
+.player-hint {
+  font-size: 15px;
+  color: var(--text);
+}
+
 .host-admin {
   width: 100%;
   max-width: 500px;

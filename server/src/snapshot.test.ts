@@ -243,15 +243,15 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
   });
 
   // Регрессия (финальное ревью, 2026-08-12): снапшот, записанный ДО появления
-  // «кота в мешке», содержит `game`, но без `catRecipientCounterId` — тогда
+  // «кота в мешке», содержит `game`, но без `exclusiveAnswererCounterId` — тогда
   // этого поля ещё не существовало. Без дефолта поле остаётся `undefined`, а
   // `handleBuzz` в engine.ts сравнивает его с `null` — `undefined !== null`
   // истинно, так что первый же вопрос после рестарта с такого снапшота молча
   // отклоняет buzz от всех игроков.
-  it('migrates a pre-cat-in-bag snapshot (game missing catRecipientCounterId) to null', () => {
+  it('migrates a pre-cat-in-bag snapshot (game missing exclusiveAnswererCounterId) to null', () => {
     const game = createInitialState(TEST_PACK, ['1', '2']);
     const preCat = { ...game } as Record<string, unknown>;
-    delete preCat.catRecipientCounterId;
+    delete preCat.exclusiveAnswererCounterId;
 
     const rawJson = JSON.stringify({
       participants: [
@@ -263,6 +263,39 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
     });
 
     const restored = deserializeSnapshot(rawJson);
-    expect(restored.game).toMatchObject({ catRecipientCounterId: null });
+    expect(restored.game).toMatchObject({ exclusiveAnswererCounterId: null });
+  });
+
+  // Та же причина, что у теста pre-cat-in-bag выше, но для пяти полей вехи
+  // 5 ("вопрос-аукцион") — снапшот, записанный до неё, не содержит их
+  // вовсе. Без дефолта первое же действие в аукционе после рестарта с
+  // такого снапшота падает с TypeError (afterBidOrPass в engine.ts —
+  // auctionOrder!.filter на undefined).
+  it('migrates a pre-auction snapshot (game missing the five auction fields) to their defaults', () => {
+    const game = createInitialState(TEST_PACK, ['1', '2']);
+    const preAuction = { ...game } as Record<string, unknown>;
+    delete preAuction.auctionOrder;
+    delete preAuction.auctionTurnCounterId;
+    delete preAuction.auctionPassedCounterIds;
+    delete preAuction.auctionHighestBid;
+    delete preAuction.auctionHighestBidderCounterId;
+
+    const rawJson = JSON.stringify({
+      participants: [
+        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+        { id: '2', name: 'Катя', token: 'tok-2', connected: true },
+      ],
+      game: preAuction,
+      hostParticipantId: null,
+    });
+
+    const restored = deserializeSnapshot(rawJson);
+    expect(restored.game).toMatchObject({
+      auctionOrder: null,
+      auctionTurnCounterId: null,
+      auctionPassedCounterIds: [],
+      auctionHighestBid: 0,
+      auctionHighestBidderCounterId: null,
+    });
   });
 });

@@ -6,6 +6,7 @@ import {
   findQuestion,
   QUESTION_TIMER_MS,
   CAT_HANDOFF_TIMER_MS,
+  AUCTION_BID_TIMER_MS,
   SAID_ANSWER_TIMER_MS,
   VOTE_TIMER_MS,
   REVEAL_TIMER_MS,
@@ -88,6 +89,7 @@ function normalizeName(name: string): string {
 const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   'question-open': { timer: 'question', ms: QUESTION_TIMER_MS },
   'cat-handoff': { timer: 'cat-handoff', ms: CAT_HANDOFF_TIMER_MS },
+  'auction-bidding': { timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
   buzzed: { timer: 'said-answer', ms: SAID_ANSWER_TIMER_MS },
   judging: { timer: 'vote', ms: VOTE_TIMER_MS },
   reveal: { timer: 'reveal', ms: REVEAL_TIMER_MS },
@@ -460,6 +462,19 @@ export class Room {
     });
   }
 
+  // В отличие от selectQuestion()/assignCat() выше, здесь нет собственной
+  // проверки — движок сам знает, чей ход (auctionTurnCounterId), а онлайн-
+  // статус для аукциона не нужен (design.md, «Тайм-аут хода торгов»):
+  // бездействие уже само по себе штатный исход (авто-пас по таймеру), а не
+  // тупик, который надо было бы предотвратить заранее.
+  placeBid(participantId: string, amount: number): void {
+    this.dispatch({ type: 'place-bid', counterId: participantId, amount });
+  }
+
+  passBid(participantId: string): void {
+    this.dispatch({ type: 'pass-bid', counterId: participantId });
+  }
+
   // Возвращает 'falsestart', когда нажатие пришло вне фазы «вопрос открыт» —
   // движок о таких нажатиях никогда не узнаёт (design.md, «Комната»),
   // потому что здесь для них нет смысла ни в каком состоянии.
@@ -701,17 +716,36 @@ export class Room {
       })),
       turnParticipantId: game.turnCounterId,
       // Цена и тема видны сразу — не секрет, те же данные уже были на сетке
-      // до выбора. Текст скрыт, пока идёт cat-handoff (design.md, «Правило»).
+      // до выбора. Текст скрыт, пока идёт cat-handoff или торги по аукциону
+      // (design.md обеих вех, «Правило»: у аукциона та же видимость, что у
+      // «кота» — торговаться, уже зная вопрос, значит не торговаться вовсе).
       currentQuestion: currentQuestionData
         ? {
             text:
-              game.phase === 'cat-handoff' ? null : currentQuestionData.text,
+              game.phase === 'cat-handoff' || game.phase === 'auction-bidding'
+                ? null
+                : currentQuestionData.text,
             price: currentQuestionData.price,
             themeName: currentThemeName!,
           }
         : null,
       buzzedParticipantId: game.buzzedCounterId,
-      catRecipientParticipantId: game.catRecipientCounterId,
+      exclusiveAnswererParticipantId: game.exclusiveAnswererCounterId,
+      auctionTurnParticipantId: game.auctionTurnCounterId,
+      // Гейт по auctionHighestBidderCounterId, а не по auctionOrder:
+      // auctionOrder обнуляется в ту же секунду, когда победитель определён,
+      // и по нему выигрышная сумма пропала бы с провода ровно на
+      // question-open/buzzed/judging — то есть именно тогда, когда комнате
+      // нужно видеть, что стоит на кону. Победитель же живёт до
+      // revealQuestion() (финальное ревью, 2026-08-14).
+      auctionHighestBid:
+        game.auctionHighestBidderCounterId !== null
+          ? game.auctionHighestBid
+          : null,
+      auctionHighestBidderParticipantId: game.auctionHighestBidderCounterId,
+      auctionPassedParticipantIds: game.auctionOrder
+        ? game.auctionPassedCounterIds
+        : null,
       // Не поле движка — Room-состояние, лениво «истекает» по сравнению с
       // Date.now() здесь же, без отдельного сброса по таймеру (см. поля
       // класса выше).

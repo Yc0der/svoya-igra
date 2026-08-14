@@ -360,6 +360,28 @@ describe('useRoomConnection', () => {
     expect(result.current.selectPackError).toBe('unknown-file');
   });
 
+  it('sends place-bid with the given amount', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.placeBid(150));
+
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'place-bid', amount: 150 }),
+    );
+  });
+
+  it('sends pass-bid', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.passBid());
+
+    expect(socket.sent).toContainEqual(JSON.stringify({ type: 'pass-bid' }));
+  });
+
   it('sends assign-cat with the chosen recipient', () => {
     const { result } = renderHook(() => useRoomConnection(factory));
     const socket = FakeWebSocket.instances[0];
