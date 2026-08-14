@@ -395,7 +395,7 @@ export function Player() {
           (game.auctionPassedParticipantIds?.includes(selfId) ?? false);
         const bidHint =
           game.auctionHighestBidderParticipantId === null
-            ? 'Ставок ещё не было'
+            ? `Ставок ещё не было — минимум ${game.currentQuestion?.price ?? 0}`
             : `Текущая ставка: ${game.auctionHighestBid} (${nameOf(
                 game.auctionHighestBidderParticipantId,
               )})`;
@@ -408,6 +408,10 @@ export function Player() {
                 {game.currentQuestion.themeName} за {game.currentQuestion.price}
               </p>
             )}
+            <p className="player-hint">
+              По очереди ставьте больше текущей ставки или пасуйте — победивший
+              отвечает за свою ставку, а не за цену вопроса.
+            </p>
             <p>{bidHint}</p>
             {remainingSeconds !== null && (
               <p className="player-timer">{remainingSeconds}с</p>
@@ -440,7 +444,7 @@ export function Player() {
             parsedAmount <= maxBid;
           return (
             <div className="player player--center">
-              <h2>Торги</h2>
+              <h2>Вопрос-аукцион</h2>
               {biddingHeader}
               <label htmlFor="bid">Ставка</label>
               <input
