@@ -253,4 +253,116 @@ describe('useAdminConnection', () => {
 
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
+
+  it('sends admin-get-pack and picks up the returned pack', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.getPack('a.json'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+
+    const pack = {
+      title: 'Пак',
+      author: 'Автор',
+      createdAt: '2026-08-04',
+      rounds: [],
+    };
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPack).toEqual(pack);
+    expect(result.current.editedPackFilename).toBe('a.json');
+    expect(result.current.editedPackError).toBeNull();
+  });
+
+  it('sends admin-update-question with all fields, including the optional comment', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      result.current.updateQuestion('a.json', 'q1', {
+        price: 200,
+        text: 'Текст?',
+        answer: 'Ответ',
+        comment: 'Комментарий',
+        questionType: 'обычный',
+      }),
+    );
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-update-question',
+        filename: 'a.json',
+        questionId: 'q1',
+        price: 200,
+        text: 'Текст?',
+        answer: 'Ответ',
+        comment: 'Комментарий',
+        questionType: 'обычный',
+      }),
+    );
+  });
+
+  it('sends admin-delete-question', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.deleteQuestion('a.json', 'q1'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-delete-question',
+        filename: 'a.json',
+        questionId: 'q1',
+      }),
+    );
+  });
+
+  it('surfaces an admin-pack-error reason and filename from the server', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-pack-error',
+        filename: 'a.json',
+        reason: 'вопрос с id "ghost" не найден в пакете',
+      }),
+    );
+    expect(result.current.editedPackError).toBe(
+      'вопрос с id "ghost" не найден в пакете',
+    );
+    expect(result.current.editedPackFilename).toBe('a.json');
+  });
+
+  it('clears editedPackError once a later admin-pack arrives', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-pack-error',
+        filename: 'a.json',
+        reason: 'ошибка',
+      }),
+    );
+    expect(result.current.editedPackError).toBe('ошибка');
+
+    const pack = {
+      title: 'Пак',
+      author: 'Автор',
+      createdAt: '2026-08-04',
+      rounds: [],
+    };
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPackError).toBeNull();
+    expect(result.current.editedPack).toEqual(pack);
+  });
 });

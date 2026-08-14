@@ -19,6 +19,34 @@ export interface PackSummary {
   description: string | null;
 }
 
+// Типы пакета — зеркало server/src/pack.ts (клиент не импортирует серверные типы)
+export interface Question {
+  id: string;
+  price: number;
+  text: string;
+  answer: string;
+  comment?: string;
+  type: 'обычный' | 'кот' | 'аукцион';
+}
+
+export interface Theme {
+  name: string;
+  questions: Question[];
+}
+
+export interface Round {
+  themes: Theme[];
+}
+
+export interface Pack {
+  title: string;
+  author: string;
+  createdAt: string;
+  description?: string;
+  rounds: Round[];
+  final?: unknown;
+}
+
 // Админ-панель (design.md, «Админ-панель») — отдельный от useRoomConnection
 // хук: сокет админки никогда не шлёт 'join'/'reconnect', не хранит токен в
 // localStorage и не занимает место участника. Он получает те же
@@ -37,7 +65,9 @@ type ServerMessage =
       activePackFilename: string | null;
     }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
-  | { type: 'select-pack-error'; reason: 'unknown-file' };
+  | { type: 'select-pack-error'; reason: 'unknown-file' }
+  | { type: 'admin-pack'; filename: string; pack: Pack }
+  | { type: 'admin-pack-error'; filename: string; reason: string };
 
 type ClientMessage =
   | { type: 'admin-start-game' }
@@ -49,7 +79,19 @@ type ClientMessage =
   | { type: 'admin-skip-to-final' }
   | { type: 'admin-set-lan-address'; address: string }
   | { type: 'admin-refresh-packs' }
-  | { type: 'admin-select-pack'; filename: string };
+  | { type: 'admin-select-pack'; filename: string }
+  | { type: 'admin-get-pack'; filename: string }
+  | {
+      type: 'admin-update-question';
+      filename: string;
+      questionId: string;
+      price: number;
+      text: string;
+      answer: string;
+      comment?: string;
+      questionType: Question['type'];
+    }
+  | { type: 'admin-delete-question'; filename: string; questionId: string };
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -75,6 +117,22 @@ export interface AdminConnection {
   selectPackError: 'unknown-file' | null;
   refreshPacks(): void;
   selectPack(filename: string): void;
+  editedPack: Pack | null;
+  editedPackFilename: string | null;
+  editedPackError: string | null;
+  getPack(filename: string): void;
+  updateQuestion(
+    filename: string,
+    questionId: string,
+    fields: {
+      price: number;
+      text: string;
+      answer: string;
+      comment?: string;
+      questionType: Question['type'];
+    },
+  ): void;
+  deleteQuestion(filename: string, questionId: string): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -96,6 +154,11 @@ export function useAdminConnection(
   const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(
     null,
   );
+  const [editedPack, setEditedPack] = useState<Pack | null>(null);
+  const [editedPackFilename, setEditedPackFilename] = useState<string | null>(
+    null,
+  );
+  const [editedPackError, setEditedPackError] = useState<string | null>(null);
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [hostParticipantId, setHostParticipantId] = useState<string | null>(
     null,
@@ -139,6 +202,15 @@ export function useAdminConnection(
         }
         if (message.type === 'select-pack-error') {
           setSelectPackError(message.reason);
+        }
+        if (message.type === 'admin-pack') {
+          setEditedPack(message.pack);
+          setEditedPackFilename(message.filename);
+          setEditedPackError(null);
+        }
+        if (message.type === 'admin-pack-error') {
+          setEditedPackFilename(message.filename);
+          setEditedPackError(message.reason);
         }
       });
 
@@ -186,5 +258,18 @@ export function useAdminConnection(
     selectPackError,
     refreshPacks: () => send({ type: 'admin-refresh-packs' }),
     selectPack: (filename) => send({ type: 'admin-select-pack', filename }),
+    editedPack,
+    editedPackFilename,
+    editedPackError,
+    getPack: (filename) => send({ type: 'admin-get-pack', filename }),
+    updateQuestion: (filename, questionId, fields) =>
+      send({
+        type: 'admin-update-question',
+        filename,
+        questionId,
+        ...fields,
+      }),
+    deleteQuestion: (filename, questionId) =>
+      send({ type: 'admin-delete-question', filename, questionId }),
   };
 }

@@ -63,6 +63,12 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     selectPackError: null,
     refreshPacks: vi.fn(),
     selectPack: vi.fn(),
+    editedPack: null,
+    editedPackFilename: null,
+    editedPackError: null,
+    getPack: vi.fn(),
+    updateQuestion: vi.fn(),
+    deleteQuestion: vi.fn(),
     ...overrides,
   };
 }
