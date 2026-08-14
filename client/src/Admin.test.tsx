@@ -409,3 +409,221 @@ describe('Admin', () => {
     expect(kick).toHaveBeenCalledWith('p1');
   });
 });
+
+describe('Admin — редактор пакета', () => {
+  const PACK = {
+    title: 'Пак А',
+    author: 'Автор',
+    createdAt: '2026-08-04',
+    rounds: [
+      {
+        themes: [
+          {
+            name: 'Тема',
+            questions: [
+              {
+                id: 'q1',
+                price: 100,
+                text: 'Вопрос?',
+                answer: 'Ответ',
+                type: 'обычный' as const,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  it('shows the pack grid after clicking "Редактировать"', async () => {
+    const getPack = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        getPack,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    expect(getPack).toHaveBeenCalledWith('a.json');
+  });
+
+  it('renders the grid once the pack arrives, with a button per question price', async () => {
+    const getPack = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        getPack,
+      }),
+    );
+    const { rerender } = render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        getPack,
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    rerender(<Admin />);
+    expect(screen.getByText('Тема')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '100' })).toBeInTheDocument();
+  });
+
+  it('opens the edit form with the question’s current values on price click', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+    expect(screen.getByDisplayValue('Вопрос?')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Ответ')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('100')).toBeInTheDocument();
+  });
+
+  it('calls updateQuestion with the edited values and the fixed questionId on save', async () => {
+    const updateQuestion = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        updateQuestion,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+
+    const priceInput = screen.getByDisplayValue('100');
+    await userEvent.clear(priceInput);
+    await userEvent.type(priceInput, '300');
+    await userEvent.click(screen.getByRole('button', { name: /сохранить/i }));
+
+    expect(updateQuestion).toHaveBeenCalledWith('a.json', 'q1', {
+      price: 300,
+      text: 'Вопрос?',
+      answer: 'Ответ',
+      comment: undefined,
+      questionType: 'обычный',
+    });
+  });
+
+  it('disables "Сохранить" for an invalid price or empty text', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+
+    const priceInput = screen.getByDisplayValue('100');
+    await userEvent.clear(priceInput);
+    await userEvent.type(priceInput, '0');
+    expect(screen.getByRole('button', { name: /сохранить/i })).toBeDisabled();
+  });
+
+  it('shows the error from editedPackError and keeps the form open', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        editedPackError: 'цена должна быть положительным числом',
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /цена должна быть положительным числом/i,
+    );
+  });
+
+  it('requires clicking "Удалить" twice before it actually deletes the question', async () => {
+    const deleteQuestion = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        deleteQuestion,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+
+    const del = screen.getByRole('button', { name: /^удалить$/i });
+    await userEvent.click(del);
+    expect(deleteQuestion).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /точно/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /точно/i }));
+    expect(deleteQuestion).toHaveBeenCalledWith('a.json', 'q1');
+  });
+
+  it('returns to the pack list when "Готово" is clicked', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /готово/i }));
+    expect(
+      screen.queryByRole('button', { name: '100' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /редактировать/i }),
+    ).toBeInTheDocument();
+  });
+});

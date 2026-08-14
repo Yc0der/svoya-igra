@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAdminConnection } from './useAdminConnection';
+import type { Question } from './useAdminConnection';
 import type { GameStateView } from './useRoomConnection';
 import { START_GAME_ERROR_TEXT } from './errorText';
 
@@ -37,6 +38,12 @@ export function Admin() {
     selectPackError,
     refreshPacks,
     selectPack,
+    editedPack,
+    editedPackFilename,
+    editedPackError,
+    getPack,
+    updateQuestion,
+    deleteQuestion,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -45,6 +52,72 @@ export function Admin() {
   // (design.md), лишняя защита на каждой кнопке не соответствовала бы этому
   // выбору.
   const [confirmingWipe, setConfirmingWipe] = useState(false);
+  // Режим редактора: какой файл сейчас открыт (null — обычный список
+  // пакетов), какой вопрос открыт формой, и текущие значения формы —
+  // отдельные строковые поля, а не готовые number/enum: значение в инпуте
+  // цены должно оставаться редактируемым текстом (в том числе временно
+  // невалидным, «0» или пустым), пока не нажали «Сохранить».
+  const [editingFilename, setEditingFilename] = useState<string | null>(null);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(
+    null,
+  );
+  const [formPrice, setFormPrice] = useState('');
+  const [formText, setFormText] = useState('');
+  const [formAnswer, setFormAnswer] = useState('');
+  const [formComment, setFormComment] = useState('');
+  const [formType, setFormType] = useState<Question['type']>('обычный');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  useEffect(() => {
+    if (editingFilename) getPack(editingFilename);
+    // Смена файла — закрыть открытую форму вопроса предыдущего пакета.
+    setEditingQuestionId(null);
+  }, [editingFilename]);
+
+  function openQuestionForm(question: Question): void {
+    setEditingQuestionId(question.id);
+    setFormPrice(String(question.price));
+    setFormText(question.text);
+    setFormAnswer(question.answer);
+    setFormComment(question.comment ?? '');
+    setFormType(question.type);
+    setConfirmingDelete(false);
+  }
+
+  function handleSaveQuestion(): void {
+    if (!editingFilename || !editingQuestionId) return;
+    updateQuestion(editingFilename, editingQuestionId, {
+      price: Number(formPrice),
+      text: formText,
+      answer: formAnswer,
+      comment: formComment.trim() === '' ? undefined : formComment,
+      questionType: formType,
+    });
+  }
+
+  function handleDeleteQuestion(): void {
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    if (editingFilename && editingQuestionId) {
+      deleteQuestion(editingFilename, editingQuestionId);
+    }
+    setConfirmingDelete(false);
+  }
+
+  // Те же границы, что проверяет сервер (packs.ts, validatePack/
+  // validateQuestion): цена — положительное число, текст и ответ — не
+  // пустые строки. Без этой проверки кнопка «Сохранить» всегда кликабельна,
+  // а недопустимое значение молча улетает в admin-pack-error — тот же
+  // принцип, что уже применён к форме ставки в аукционе (Player.tsx).
+  const parsedFormPrice = Number(formPrice);
+  const isValidForm =
+    Number.isFinite(parsedFormPrice) &&
+    Number.isInteger(parsedFormPrice) &&
+    parsedFormPrice > 0 &&
+    formText.trim() !== '' &&
+    formAnswer.trim() !== '';
 
   function roleOf(participantId: string): string {
     if (game) {
@@ -122,37 +195,150 @@ export function Admin() {
             Не удалось выбрать пакет — файл стал невалиден или исчез.
           </p>
         )}
-        <div className="admin-actions">
-          <button className="button" onClick={refreshPacks}>
-            Обновить
-          </button>
-        </div>
-        {availablePacks.length === 0 ? (
-          <p>
-            Пакеты не найдены — положите файлы в packs/ и нажмите «Обновить».
-          </p>
+        {editingFilename === null ? (
+          <>
+            <div className="admin-actions">
+              <button className="button" onClick={refreshPacks}>
+                Обновить
+              </button>
+            </div>
+            {availablePacks.length === 0 ? (
+              <p>
+                Пакеты не найдены — положите файлы в packs/ и нажмите
+                «Обновить».
+              </p>
+            ) : (
+              <ul className="admin-packs">
+                {availablePacks.map((p) => {
+                  const selected = p.filename === activePackFilename;
+                  return (
+                    <li key={p.filename}>
+                      <button
+                        className={`button${selected ? ' is-selected' : ''}`}
+                        onClick={() => selectPack(p.filename)}
+                        disabled={selected}
+                      >
+                        <span className="admin-pack-title">{p.title}</span>
+                        {p.description && (
+                          <span className="admin-pack-description">
+                            {p.description}
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        className="button"
+                        onClick={() => setEditingFilename(p.filename)}
+                      >
+                        Редактировать
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </>
         ) : (
-          <ul className="admin-packs">
-            {availablePacks.map((p) => {
-              const selected = p.filename === activePackFilename;
-              return (
-                <li key={p.filename}>
-                  <button
-                    className={`button${selected ? ' is-selected' : ''}`}
-                    onClick={() => selectPack(p.filename)}
-                    disabled={selected}
-                  >
-                    <span className="admin-pack-title">{p.title}</span>
-                    {p.description && (
-                      <span className="admin-pack-description">
-                        {p.description}
-                      </span>
+          <div className="pack-editor">
+            <div className="admin-actions">
+              <button
+                className="button"
+                onClick={() => setEditingFilename(null)}
+              >
+                Готово
+              </button>
+            </div>
+            {editedPackFilename === editingFilename && editedPack ? (
+              <>
+                {editedPack.rounds.map((round, ri) => (
+                  <div key={ri} className="pack-editor-round">
+                    <h3>Раунд {ri + 1}</h3>
+                    {round.themes.map((theme, ti) => (
+                      <div key={ti} className="pack-editor-theme">
+                        <span className="pack-editor-theme-name">
+                          {theme.name}
+                        </span>
+                        {theme.questions.map((q) => (
+                          <button
+                            key={q.id}
+                            className="button"
+                            onClick={() => openQuestionForm(q)}
+                          >
+                            {q.price}
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                {editingQuestionId && (
+                  <div className="pack-editor-form">
+                    {editedPackError && (
+                      <p className="player-alert" role="alert">
+                        {editedPackError}
+                      </p>
                     )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                    <label htmlFor="pack-editor-price">Цена</label>
+                    <input
+                      id="pack-editor-price"
+                      type="number"
+                      value={formPrice}
+                      onChange={(e) => setFormPrice(e.target.value)}
+                    />
+                    <label htmlFor="pack-editor-text">Текст</label>
+                    <textarea
+                      id="pack-editor-text"
+                      value={formText}
+                      onChange={(e) => setFormText(e.target.value)}
+                    />
+                    <label htmlFor="pack-editor-answer">Ответ</label>
+                    <textarea
+                      id="pack-editor-answer"
+                      value={formAnswer}
+                      onChange={(e) => setFormAnswer(e.target.value)}
+                    />
+                    <label htmlFor="pack-editor-comment">
+                      Комментарий (необязательно)
+                    </label>
+                    <textarea
+                      id="pack-editor-comment"
+                      value={formComment}
+                      onChange={(e) => setFormComment(e.target.value)}
+                    />
+                    <label htmlFor="pack-editor-type">Тип</label>
+                    <select
+                      id="pack-editor-type"
+                      value={formType}
+                      onChange={(e) =>
+                        setFormType(e.target.value as Question['type'])
+                      }
+                    >
+                      <option value="обычный">обычный</option>
+                      <option value="кот">кот</option>
+                      <option value="аукцион">аукцион</option>
+                    </select>
+                    <div className="admin-actions">
+                      <button
+                        className="button button--primary"
+                        onClick={handleSaveQuestion}
+                        disabled={!isValidForm}
+                      >
+                        Сохранить
+                      </button>
+                      <button
+                        className={`button button--no${confirmingDelete ? ' is-selected' : ''}`}
+                        onClick={handleDeleteQuestion}
+                        onBlur={() => setConfirmingDelete(false)}
+                      >
+                        {confirmingDelete ? 'Точно?' : 'Удалить'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p>Загрузка…</p>
+            )}
+          </div>
         )}
       </section>
 
