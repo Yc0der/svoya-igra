@@ -252,6 +252,11 @@ code {
   border: 2px solid var(--accent-border);
   background: var(--accent-bg);
   color: var(--accent);
+  transition: transform 0.1s ease;
+}
+
+.price-button:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .price-button:disabled {
