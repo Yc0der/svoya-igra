@@ -270,6 +270,11 @@ code {
   background: var(--accent-bg);
   color: var(--accent);
   min-height: 56px;
+  transition: transform 0.1s ease;
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 .button:disabled {
@@ -313,10 +318,10 @@ code {
   border-color: #d64545;
 }
 
-.button--yes.is-selected,
-.button--no.is-selected {
+.button.is-selected {
   outline: 4px solid var(--text-h);
   outline-offset: 2px;
+  transform: scale(1.05);
 }
 
 .player-vote-hint {
@@ -568,11 +573,6 @@ code {
   gap: 12px;
 }
 
-.admin-lan-candidates .button.is-selected {
-  outline: 4px solid var(--text-h);
-  outline-offset: 2px;
-}
-
 .admin-packs,
 .player-packs {
   list-style: none;
@@ -600,12 +600,6 @@ code {
   font-size: 14px;
   color: var(--text);
   font-weight: 400;
-}
-
-.admin-packs .button.is-selected,
-.player-packs .button.is-selected {
-  outline: 4px solid var(--text-h);
-  outline-offset: 2px;
 }
 
 .player-pack-picker {
