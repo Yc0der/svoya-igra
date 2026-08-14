@@ -95,6 +95,41 @@ export function Player() {
     if (game?.phase !== 'auction-bidding') setBidInput('');
   }, [game?.phase]);
 
+  // Предыдущее значение лидера торгов — нужно только для сравнения внутри
+  // эффекта ниже, в разметке не участвует, поэтому useRef, а не useState.
+  const previousHighestBidderRef = useRef<string | null>(null);
+  const [outbidNotice, setOutbidNotice] = useState<{
+    newLeaderName: string;
+    amount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const previous = previousHighestBidderRef.current;
+    const current = game?.auctionHighestBidderParticipantId ?? null;
+    previousHighestBidderRef.current = current;
+    // previous === selfId — единственный случай, когда именно я только что
+    // был лидером торгов и им быть перестал (design.md, «Механизм
+    // обнаружения»). Переход с null (первая ставка в аукционе) или между
+    // двумя чужими id меня не касается.
+    if (
+      game?.phase === 'auction-bidding' &&
+      previous === selfId &&
+      current !== null &&
+      current !== selfId
+    ) {
+      setOutbidNotice({
+        newLeaderName: nameOf(current),
+        amount: game.auctionHighestBid ?? 0,
+      });
+    }
+  }, [game?.auctionHighestBidderParticipantId, game?.phase, selfId]);
+
+  useEffect(() => {
+    if (!outbidNotice) return;
+    const timer = setTimeout(() => setOutbidNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [outbidNotice]);
+
   function nameOf(participantId: string | null): string {
     if (!participantId) return '';
     return (
@@ -963,12 +998,22 @@ export function Player() {
     game?.phase === 'final-judging' ||
     game?.phase === 'final-reveal';
 
-  return isHost && !isFinalPhase ? (
+  return (
     <>
-      {phaseContent}
-      {hostAdminPanel()}
+      {outbidNotice && (
+        <div className="player-toast" role="status">
+          Вашу ставку перебили — {outbidNotice.newLeaderName} поставил{' '}
+          {outbidNotice.amount}
+        </div>
+      )}
+      {isHost && !isFinalPhase ? (
+        <>
+          {phaseContent}
+          {hostAdminPanel()}
+        </>
+      ) : (
+        phaseContent
+      )}
     </>
-  ) : (
-    phaseContent
   );
 }
