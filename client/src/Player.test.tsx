@@ -1785,6 +1785,31 @@ describe('Player — уведомление о перебитой ставке',
     expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
   });
 
+  it('does not show the toast for the very first bid when I have not joined yet (selfId null)', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: null,
+        }),
+      }),
+    );
+    const { rerender } = render(<Player />);
+
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        participants: [{ id: 'other', name: 'Соперник', connected: true }],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'other',
+          auctionHighestBid: 100,
+        }),
+      }),
+    );
+    rerender(<Player />);
+    expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
+  });
+
   it('does not show the toast when I was not the previous leader (watching two others bid)', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({

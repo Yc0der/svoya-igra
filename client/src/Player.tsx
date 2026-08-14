@@ -113,6 +113,7 @@ export function Player() {
     // двумя чужими id меня не касается.
     if (
       game?.phase === 'auction-bidding' &&
+      selfId !== null &&
       previous === selfId &&
       current !== null &&
       current !== selfId
