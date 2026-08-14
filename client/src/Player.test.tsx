@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Player } from './Player';
@@ -1680,5 +1680,188 @@ describe('Player', () => {
     expect(
       screen.getByRole('button', { name: 'Отменить вопрос' }),
     ).toBeInTheDocument();
+  });
+});
+
+describe('Player — уведомление о перебитой ставке', () => {
+  it('shows a toast when my bid gets outbid during auction-bidding', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'me',
+          auctionHighestBid: 150,
+          auctionTurnParticipantId: 'other',
+        }),
+      }),
+    );
+    const { rerender } = render(<Player />);
+    expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
+
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [
+          { id: 'me', name: 'Я', connected: true },
+          { id: 'other', name: 'Соперник', connected: true },
+        ],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'other',
+          auctionHighestBid: 300,
+          auctionTurnParticipantId: 'me',
+        }),
+      }),
+    );
+    rerender(<Player />);
+    expect(
+      screen.getByText(/вашу ставку перебили — соперник поставил 300/i),
+    ).toBeInTheDocument();
+  });
+
+  it('hides the toast automatically after 4 seconds', () => {
+    vi.useFakeTimers();
+    try {
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'me',
+          game: baseGame({
+            phase: 'auction-bidding',
+            auctionHighestBidderParticipantId: 'me',
+            auctionHighestBid: 150,
+          }),
+        }),
+      );
+      const { rerender } = render(<Player />);
+
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          selfId: 'me',
+          participants: [{ id: 'other', name: 'Соперник', connected: true }],
+          game: baseGame({
+            phase: 'auction-bidding',
+            auctionHighestBidderParticipantId: 'other',
+            auctionHighestBid: 300,
+          }),
+        }),
+      );
+      rerender(<Player />);
+      expect(screen.getByText(/вашу ставку перебили/i)).toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(4000));
+      expect(
+        screen.queryByText(/вашу ставку перебили/i),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not show the toast for the very first bid in the auction (transition from no bidder)', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: null,
+        }),
+      }),
+    );
+    const { rerender } = render(<Player />);
+
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [{ id: 'other', name: 'Соперник', connected: true }],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'other',
+          auctionHighestBid: 100,
+        }),
+      }),
+    );
+    rerender(<Player />);
+    expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show the toast for the very first bid when I have not joined yet (selfId null)', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: null,
+        }),
+      }),
+    );
+    const { rerender } = render(<Player />);
+
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        participants: [{ id: 'other', name: 'Соперник', connected: true }],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'other',
+          auctionHighestBid: 100,
+        }),
+      }),
+    );
+    rerender(<Player />);
+    expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show the toast when I was not the previous leader (watching two others bid)', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'a',
+          auctionHighestBid: 100,
+        }),
+      }),
+    );
+    const { rerender } = render(<Player />);
+
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        participants: [{ id: 'b', name: 'Б', connected: true }],
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'b',
+          auctionHighestBid: 200,
+        }),
+      }),
+    );
+    rerender(<Player />);
+    expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show the toast when I become the new leader myself', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'other',
+          auctionHighestBid: 100,
+        }),
+      }),
+    );
+    const { rerender } = render(<Player />);
+
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({
+          phase: 'auction-bidding',
+          auctionHighestBidderParticipantId: 'me',
+          auctionHighestBid: 150,
+        }),
+      }),
+    );
+    rerender(<Player />);
+    expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
   });
 });
