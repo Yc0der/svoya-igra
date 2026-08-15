@@ -66,6 +66,9 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     editedPack: null,
     editedPackFilename: null,
     editedPackError: null,
+    editedPackVersion: 0,
+    clearPackError: vi.fn(),
+    resetPackEditor: vi.fn(),
     getPack: vi.fn(),
     updateQuestion: vi.fn(),
     deleteQuestion: vi.fn(),
@@ -604,7 +607,8 @@ describe('Admin — редактор пакета', () => {
     expect(deleteQuestion).toHaveBeenCalledWith('a.json', 'q1');
   });
 
-  it('returns to the pack list when "Готово" is clicked', async () => {
+  it('closes the form after a successful delete, once editedPack no longer contains the question', async () => {
+    const deleteQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
         availablePacks: [
@@ -612,6 +616,159 @@ describe('Admin — редактор пакета', () => {
         ],
         editedPack: PACK,
         editedPackFilename: 'a.json',
+        editedPackVersion: 0,
+        deleteQuestion,
+      }),
+    );
+    const { rerender } = render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+    expect(screen.getByDisplayValue('Вопрос?')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /^удалить$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /точно/i }));
+    expect(deleteQuestion).toHaveBeenCalledWith('a.json', 'q1');
+
+    // Сервер ответил новым admin-pack без удалённого вопроса — тема
+    // осталась пустой (design.md допускает временно пустую тему в редакторе;
+    // сам сервер такое удаление и не разрешил бы, но для этого теста важна
+    // только реакция формы на исчезновение вопроса из editedPack).
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: {
+          ...PACK,
+          rounds: [{ themes: [{ name: 'Тема', questions: [] }] }],
+        },
+        editedPackFilename: 'a.json',
+        editedPackVersion: 1,
+        deleteQuestion,
+      }),
+    );
+    rerender(<Admin />);
+
+    expect(
+      screen.queryByRole('button', { name: '100' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('Вопрос?')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /сохранить/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('closes the form after a successful save, once a new editedPackVersion arrives', async () => {
+    const updateQuestion = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        editedPackVersion: 0,
+        updateQuestion,
+      }),
+    );
+    const { rerender } = render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+
+    const priceInput = screen.getByDisplayValue('100');
+    await userEvent.clear(priceInput);
+    await userEvent.type(priceInput, '300');
+    await userEvent.click(screen.getByRole('button', { name: /сохранить/i }));
+    expect(updateQuestion).toHaveBeenCalledOnce();
+
+    // Сервер ответил новым admin-pack с сохранённым вопросом — версия
+    // увеличилась, форма должна закрыться сама (design.md, «При успехе —
+    // форма закрывается»).
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: {
+          ...PACK,
+          rounds: [
+            {
+              themes: [
+                {
+                  name: 'Тема',
+                  questions: [
+                    { ...PACK.rounds[0].themes[0].questions[0], price: 300 },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        editedPackFilename: 'a.json',
+        editedPackVersion: 1,
+        updateQuestion,
+      }),
+    );
+    rerender(<Admin />);
+
+    expect(
+      screen.queryByRole('button', { name: /сохранить/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '300' })).toBeInTheDocument();
+  });
+
+  it('does not close the form when editedPackError arrives without a new editedPackVersion', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        editedPackVersion: 0,
+      }),
+    );
+    const { rerender } = render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+
+    // Тот же editedPack, версия не выросла — только пришла ошибка (напр.
+    // невалидная цена). Форма должна остаться открытой с текстом ошибки.
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        editedPackVersion: 0,
+        editedPackError: 'цена должна быть положительным числом',
+      }),
+    );
+    rerender(<Admin />);
+
+    expect(screen.getByDisplayValue('Вопрос?')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /цена должна быть положительным числом/i,
+    );
+  });
+
+  it('returns to the pack list when "Готово" is clicked, resetting the pack editor state', async () => {
+    const resetPackEditor = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        resetPackEditor,
       }),
     );
     render(<Admin />);
@@ -625,5 +782,52 @@ describe('Admin — редактор пакета', () => {
     expect(
       screen.getByRole('button', { name: /редактировать/i }),
     ).toBeInTheDocument();
+    expect(resetPackEditor).toHaveBeenCalledOnce();
+  });
+
+  it('clears the stale error from a previous question when opening a different one', async () => {
+    const clearPackError = vi.fn();
+    const PACK_TWO_QUESTIONS = {
+      ...PACK,
+      rounds: [
+        {
+          themes: [
+            {
+              name: 'Тема',
+              questions: [
+                ...PACK.rounds[0].themes[0].questions,
+                {
+                  id: 'q2',
+                  price: 200,
+                  text: 'Второй вопрос?',
+                  answer: 'Второй ответ',
+                  type: 'обычный' as const,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK_TWO_QUESTIONS,
+        editedPackFilename: 'a.json',
+        editedPackError: 'цена должна быть положительным числом',
+        clearPackError,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+    expect(clearPackError).toHaveBeenCalledOnce();
+
+    await userEvent.click(screen.getByRole('button', { name: '200' }));
+    expect(clearPackError).toHaveBeenCalledTimes(2);
   });
 });

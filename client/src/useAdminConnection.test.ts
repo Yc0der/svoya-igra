@@ -365,4 +365,77 @@ describe('useAdminConnection', () => {
     expect(result.current.editedPackError).toBeNull();
     expect(result.current.editedPack).toEqual(pack);
   });
+
+  it('increments editedPackVersion on every admin-pack, but not on admin-pack-error', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+    expect(result.current.editedPackVersion).toBe(0);
+
+    const pack = {
+      title: 'Пак',
+      author: 'Автор',
+      createdAt: '2026-08-04',
+      rounds: [],
+    };
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPackVersion).toBe(1);
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-pack-error',
+        filename: 'a.json',
+        reason: 'ошибка',
+      }),
+    );
+    expect(result.current.editedPackVersion).toBe(1);
+
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPackVersion).toBe(2);
+  });
+
+  it('clearPackError resets editedPackError to null locally, without a server round-trip', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-pack-error',
+        filename: 'a.json',
+        reason: 'ошибка',
+      }),
+    );
+    expect(result.current.editedPackError).toBe('ошибка');
+
+    act(() => result.current.clearPackError());
+    expect(result.current.editedPackError).toBeNull();
+    expect(socket.sent).toEqual([]);
+  });
+
+  it('resetPackEditor clears editedPack, editedPackFilename and editedPackError', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    const pack = {
+      title: 'Пак',
+      author: 'Автор',
+      createdAt: '2026-08-04',
+      rounds: [],
+    };
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPack).toEqual(pack);
+
+    act(() => result.current.resetPackEditor());
+    expect(result.current.editedPack).toBeNull();
+    expect(result.current.editedPackFilename).toBeNull();
+    expect(result.current.editedPackError).toBeNull();
+  });
 });

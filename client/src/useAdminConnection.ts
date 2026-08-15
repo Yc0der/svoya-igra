@@ -120,6 +120,19 @@ export interface AdminConnection {
   editedPack: Pack | null;
   editedPackFilename: string | null;
   editedPackError: string | null;
+  // Увеличивается на каждое входящее 'admin-pack' — способ для Admin.tsx
+  // отличить «пришёл новый пакет после моего save/delete» от «пакет тот же,
+  // просто пришла ошибка» без сравнения содержимого пакета (design.md,
+  // «При успехе — форма закрывается»).
+  editedPackVersion: number;
+  // Локально сбрасывает editedPackError, не дожидаясь следующего 'admin-pack'
+  // с сервера — нужно при переключении формы на другой вопрос, чтобы старая
+  // ошибка не «протекала» в форму, к которой не имеет отношения.
+  clearPackError(): void;
+  // Полный сброс editedPack/editedPackFilename/editedPackError к начальным
+  // значениям — вызывается при выходе из редактора («Готово»), чтобы при
+  // повторном входе не мелькнул старый пакет до ответа сервера.
+  resetPackEditor(): void;
   getPack(filename: string): void;
   updateQuestion(
     filename: string,
@@ -159,6 +172,7 @@ export function useAdminConnection(
     null,
   );
   const [editedPackError, setEditedPackError] = useState<string | null>(null);
+  const [editedPackVersion, setEditedPackVersion] = useState(0);
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [hostParticipantId, setHostParticipantId] = useState<string | null>(
     null,
@@ -207,6 +221,7 @@ export function useAdminConnection(
           setEditedPack(message.pack);
           setEditedPackFilename(message.filename);
           setEditedPackError(null);
+          setEditedPackVersion((v) => v + 1);
         }
         if (message.type === 'admin-pack-error') {
           setEditedPackFilename(message.filename);
@@ -261,6 +276,13 @@ export function useAdminConnection(
     editedPack,
     editedPackFilename,
     editedPackError,
+    editedPackVersion,
+    clearPackError: () => setEditedPackError(null),
+    resetPackEditor: () => {
+      setEditedPack(null);
+      setEditedPackFilename(null);
+      setEditedPackError(null);
+    },
     getPack: (filename) => send({ type: 'admin-get-pack', filename }),
     updateQuestion: (filename, questionId, fields) =>
       send({

@@ -464,6 +464,19 @@ export function createServer(options: CreateServerOptions): GameServer {
         await handleDeleteQuestion(message.filename, message.questionId);
       }
 
+      // Сырые сообщения Node (ENOENT: ... open 'C:\...\packs\ghost.json') не
+      // годятся для отправки в админку — они на английском и раскрывают
+      // абсолютный путь на диске сервера. Ошибки validatePack/updateQuestion/
+      // deleteQuestion, наоборот, уже человекочитаемые по-русски и должны
+      // доходить как есть — от файловых их отличает код ENOENT, которого у
+      // тех ошибок нет.
+      function adminPackErrorReason(err: unknown): string {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          return 'файл не найден';
+        }
+        return (err as Error).message;
+      }
+
       // Тот же приём, что у handleSelectPack: легитимный клиент никогда сам
       // не конструирует filename — эхом отправляет то, что уже видел в
       // availablePacks. Значение, не прошедшее эту проверку, может прийти
@@ -477,7 +490,7 @@ export function createServer(options: CreateServerOptions): GameServer {
           send(ws, {
             type: 'admin-pack-error',
             filename,
-            reason: (err as Error).message,
+            reason: adminPackErrorReason(err),
           });
         }
       }
@@ -503,7 +516,7 @@ export function createServer(options: CreateServerOptions): GameServer {
           send(ws, {
             type: 'admin-pack-error',
             filename,
-            reason: (err as Error).message,
+            reason: adminPackErrorReason(err),
           });
         }
       }
@@ -522,7 +535,7 @@ export function createServer(options: CreateServerOptions): GameServer {
           send(ws, {
             type: 'admin-pack-error',
             filename,
-            reason: (err as Error).message,
+            reason: adminPackErrorReason(err),
           });
         }
       }

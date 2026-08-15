@@ -2087,15 +2087,16 @@ describe('createServer pack editor', () => {
     admin.ws.close();
   });
 
-  it('admin-get-pack on an unknown file returns admin-pack-error', async () => {
+  it('admin-get-pack on an unknown file returns admin-pack-error with a short Russian reason, not a raw fs error', async () => {
     const admin = await connectAdmin(baseUrl);
     admin.ws.send(
       JSON.stringify({ type: 'admin-get-pack', filename: 'ghost.json' }),
     );
     const reply = await admin.nextMessage();
-    expect(reply).toMatchObject({
+    expect(reply).toEqual({
       type: 'admin-pack-error',
       filename: 'ghost.json',
+      reason: 'файл не найден',
     });
     admin.ws.close();
   });
@@ -2107,6 +2108,50 @@ describe('createServer pack editor', () => {
     // доказывает, что сокет жив и молчание не было случайностью.
     admin.ws.send(
       JSON.stringify({ type: 'admin-get-pack', filename: '../a.json' }),
+    );
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string };
+    expect(reply.type).toBe('admin-pack');
+    admin.ws.close();
+  });
+
+  it('admin-update-question with a path-traversal filename is a silent no-op', async () => {
+    const admin = await connectAdmin(baseUrl);
+    // Тот же приём, что и в 'admin-get-pack with a path-traversal filename'
+    // — легитимное действие после подозрительного доказывает, что сокет жив
+    // и молчание не было случайностью.
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-update-question',
+        filename: '../a.json',
+        questionId: 'a1',
+        price: 300,
+        text: 'Новый текст?',
+        answer: 'Новый ответ',
+        questionType: 'обычный',
+      }),
+    );
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string };
+    expect(reply.type).toBe('admin-pack');
+    admin.ws.close();
+  });
+
+  it('admin-delete-question with a path-traversal filename is a silent no-op', async () => {
+    const admin = await connectAdmin(baseUrl);
+    // Тот же приём, что и в 'admin-get-pack with a path-traversal filename'
+    // — легитимное действие после подозрительного доказывает, что сокет жив
+    // и молчание не было случайностью.
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-delete-question',
+        filename: '../a.json',
+        questionId: 'a1',
+      }),
     );
     admin.ws.send(
       JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
@@ -2210,9 +2255,7 @@ describe('createServer pack editor', () => {
       }),
     );
     // Первое удаление (a1) проходит нормально — из двух вопросов остаётся
-    // один. Второе (a2) оставило бы тему пустой и должно быть отклонено;
-    // не вычитываем ответ на первое отдельно, а сразу проверяем итог по
-    // диску — после обоих сообщений должен остаться ровно вопрос a2.
+    // один. Второе (a2) оставило бы тему пустой и должно быть отклонено.
     await admin.nextMessage(); // ответ на первое удаление
     const reply = await admin.nextMessage(); // ответ на второе
     expect(reply).toMatchObject({

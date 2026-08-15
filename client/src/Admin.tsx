@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAdminConnection } from './useAdminConnection';
 import type { Question } from './useAdminConnection';
 import type { GameStateView } from './useRoomConnection';
@@ -41,6 +41,9 @@ export function Admin() {
     editedPack,
     editedPackFilename,
     editedPackError,
+    editedPackVersion,
+    clearPackError,
+    resetPackEditor,
     getPack,
     updateQuestion,
     deleteQuestion,
@@ -67,12 +70,32 @@ export function Admin() {
   const [formComment, setFormComment] = useState('');
   const [formType, setFormType] = useState<Question['type']>('обычный');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // editedPackVersion, зафиксированный в момент клика «Сохранить» — см.
+  // эффект ниже, который закрывает форму, когда версия ушла вперёд (сервер
+  // прислал новый admin-pack в ответ именно на этот save), но оставляет её
+  // открытой при admin-pack-error (версия не меняется). null — нет
+  // незавершённого save, чтобы этот эффект не реагировал на чужие обновления
+  // пакета (первичная загрузка, фоновое обновление, save другого вопроса).
+  const pendingSaveVersionRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (editingFilename) getPack(editingFilename);
     // Смена файла — закрыть открытую форму вопроса предыдущего пакета.
     setEditingQuestionId(null);
   }, [editingFilename]);
+
+  // Fix 2 (Веха A, финальное ревью): успешный save не даёт иного видимого
+  // сигнала, кроме нового admin-pack — закрываем форму, когда видим версию
+  // старше зафиксированной в handleSaveQuestion.
+  useEffect(() => {
+    if (
+      pendingSaveVersionRef.current !== null &&
+      editedPackVersion > pendingSaveVersionRef.current
+    ) {
+      pendingSaveVersionRef.current = null;
+      setEditingQuestionId(null);
+    }
+  }, [editedPackVersion]);
 
   function openQuestionForm(question: Question): void {
     setEditingQuestionId(question.id);
@@ -82,10 +105,18 @@ export function Admin() {
     setFormComment(question.comment ?? '');
     setFormType(question.type);
     setConfirmingDelete(false);
+    // Fix 3 — не тащить ошибку от предыдущего открытого вопроса в форму
+    // другого.
+    clearPackError();
+    // Открытие другого вопроса делает эту ссылку неактуальной — иначе
+    // отложенный ответ на save прежнего вопроса мог бы закрыть форму того,
+    // который открыли только что.
+    pendingSaveVersionRef.current = null;
   }
 
   function handleSaveQuestion(): void {
     if (!editingFilename || !editingQuestionId) return;
+    pendingSaveVersionRef.current = editedPackVersion;
     updateQuestion(editingFilename, editingQuestionId, {
       price: Number(formPrice),
       text: formText,
@@ -105,6 +136,22 @@ export function Admin() {
     }
     setConfirmingDelete(false);
   }
+
+  // Fix 1 (Веха A, финальное ревью) — форма держится открытой не только по
+  // editingQuestionId, а по тому, что вопрос с этим id всё ещё есть в
+  // editedPack: после успешного delete сервер шлёт новый пакет без этого
+  // вопроса, и форма должна закрыться сама, а не показывать значения уже
+  // не существующего вопроса. При admin-pack-error (напр. «нельзя удалить
+  // последний вопрос в теме») editedPack не меняется, вопрос никуда не
+  // делся, и форма остаётся открытой с ошибкой — как и раньше.
+  const questionStillExists =
+    editingQuestionId !== null &&
+    editedPack !== null &&
+    editedPack.rounds.some((round) =>
+      round.themes.some((theme) =>
+        theme.questions.some((q) => q.id === editingQuestionId),
+      ),
+    );
 
   // Те же границы, что проверяет сервер (packs.ts, validatePack/
   // validateQuestion): цена — положительное число, текст и ответ — не
@@ -242,11 +289,22 @@ export function Admin() {
             <div className="admin-actions">
               <button
                 className="button"
-                onClick={() => setEditingFilename(null)}
+                onClick={() => {
+                  setEditingFilename(null);
+                  // Fix 6 — не тащить содержимое этого пакета в следующее
+                  // открытие редактора: без сброса до ответа сервера мог бы
+                  // мелькнуть старый пакет.
+                  resetPackEditor();
+                }}
               >
                 Готово
               </button>
             </div>
+            {editedPackError && (
+              <p className="player-alert" role="alert">
+                {editedPackError}
+              </p>
+            )}
             {editedPackFilename === editingFilename && editedPack ? (
               <>
                 {editedPack.rounds.map((round, ri) => (
@@ -270,13 +328,8 @@ export function Admin() {
                     ))}
                   </div>
                 ))}
-                {editingQuestionId && (
+                {questionStillExists && (
                   <div className="pack-editor-form">
-                    {editedPackError && (
-                      <p className="player-alert" role="alert">
-                        {editedPackError}
-                      </p>
-                    )}
                     <label htmlFor="pack-editor-price">Цена</label>
                     <input
                       id="pack-editor-price"
