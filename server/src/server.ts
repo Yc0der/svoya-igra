@@ -11,15 +11,26 @@ import type {
   ParticipantView,
   ServerMessage,
 } from './protocol.js';
-import { listAvailablePacks, updateQuestion, deleteQuestion } from './packs.js';
+import {
+  listAvailablePacks,
+  updateQuestion,
+  deleteQuestion,
+  findQuestionLocation,
+} from './packs.js';
 import { loadPack } from './pack.js';
 import type { Question } from './pack.js';
+import { appendComplaint, type ComplaintEntry } from './generatorProfile.js';
 
 export interface CreateServerOptions {
   room: Room;
   clientDistPath: string;
   port: number;
   packsDir: string;
+  // Опционально: нужен только для admin-report-question. Опционален, чтобы
+  // не менять все существующие вызовы createServer в тестах, которым этот
+  // путь не нужен вовсе — сервер без него просто не может принимать жалобы
+  // (тихий no-op, см. handleReportQuestion).
+  profilePath?: string;
 }
 
 export interface GameServer {
@@ -60,7 +71,7 @@ function lanUrlFor(address: string | null, port: number): string {
 }
 
 export function createServer(options: CreateServerOptions): GameServer {
-  const { room, clientDistPath, port, packsDir } = options;
+  const { room, clientDistPath, port, packsDir, profilePath } = options;
   const assets = sirv(clientDistPath, { single: true });
 
   const httpServer = createHttpServer((req, res) => {
@@ -142,24 +153,26 @@ export function createServer(options: CreateServerOptions): GameServer {
   // WeakSet, чтобы закрытые сокеты не удерживались в памяти.
   const alive = new WeakSet<WebSocket>();
 
-  // Сериализует updateQuestion/deleteQuestion между собой. Оба — read
-  // (loadPack) → modify → write поверх файла в packsDir, а
-  // ws.on('message', ...) ниже не ждёт завершения предыдущего
-  // handleMessage перед тем, как начать следующий: два admin-*-question
-  // сообщения, пришедшие подряд (тот же сокет или разные), иначе читают
-  // один и тот же ещё не перезаписанный файл и теряют правку друг друга
-  // (последняя запись побеждает, ни одна из проверок validatePack этого не
-  // ловит, если оба результата по отдельности валидны). Каждый вызов
-  // дожидается своей очереди в цепочке независимо от результата
-  // предыдущего — .catch(() => {}) не глотает ошибку вызывающего (она уже
-  // ушла через результат withPackWriteLock), а не даёт отклонённому
-  // промису прервать очередь для следующих операций.
-  let packWriteQueue: Promise<unknown> = Promise.resolve();
-  function withPackWriteLock<T>(fn: () => Promise<T>): Promise<T> {
-    const result = packWriteQueue.then(fn, fn);
-    packWriteQueue = result.catch(() => {});
-    return result;
+  // Сериализует конкурентные записи в один и тот же файл между собой — общий
+  // паттерн для обоих ресурсов, которые сервер пишет: файлы пакетов
+  // (updateQuestion/deleteQuestion) и profile.md (appendComplaint). Без
+  // этого два запроса подряд читают файл до того, как предыдущий успел его
+  // перезаписать, и один результат теряет правку другого (см. комментарий у
+  // исходного withPackWriteLock, Веха A) — тот же баг возможен и для
+  // profile.md, только там вместо потерянной правки вопроса теряется вся
+  // жалоба целиком. .catch(() => {}) на очереди — не глотает ошибку
+  // вызывающего (та уже ушла через результат withLock), а не даёт
+  // отклонённому промису прервать очередь для последующих операций.
+  function createWriteLock(): <T>(fn: () => Promise<T>) => Promise<T> {
+    let queue: Promise<unknown> = Promise.resolve();
+    return function withLock<T>(fn: () => Promise<T>): Promise<T> {
+      const result = queue.then(fn, fn);
+      queue = result.catch(() => {});
+      return result;
+    };
   }
+  const withPackWriteLock = createWriteLock();
+  const withProfileWriteLock = createWriteLock();
 
   wss.on('connection', (ws) => {
     alive.add(ws);
@@ -464,6 +477,19 @@ export function createServer(options: CreateServerOptions): GameServer {
         await handleDeleteQuestion(message.filename, message.questionId);
       }
 
+      if (
+        message.type === 'admin-report-question' &&
+        typeof message.filename === 'string' &&
+        typeof message.questionId === 'string' &&
+        typeof message.complaint === 'string'
+      ) {
+        await handleReportQuestion(
+          message.filename,
+          message.questionId,
+          message.complaint,
+        );
+      }
+
       // Сырые сообщения Node (ENOENT: ... open 'C:\...\packs\ghost.json') не
       // годятся для отправки в админку — они на английском и раскрывают
       // абсолютный путь на диске сервера. Ошибки validatePack/updateQuestion/
@@ -535,6 +561,41 @@ export function createServer(options: CreateServerOptions): GameServer {
           send(ws, {
             type: 'admin-pack-error',
             filename,
+            reason: adminPackErrorReason(err),
+          });
+        }
+      }
+
+      async function handleReportQuestion(
+        filename: string,
+        questionId: string,
+        complaint: string,
+      ): Promise<void> {
+        if (basename(filename) !== filename) return;
+        if (!profilePath) return;
+        try {
+          const pack = await loadPack(join(packsDir, filename));
+          const location = findQuestionLocation(pack, questionId);
+          if (!location) {
+            throw new Error(`вопрос с id "${questionId}" не найден в пакете`);
+          }
+          const entry: ComplaintEntry = {
+            date: new Date().toISOString().slice(0, 10),
+            packFilename: filename,
+            packTitle: pack.title,
+            themeName: location.themeName,
+            price: location.question.price,
+            questionText: location.question.text,
+            answer: location.question.answer,
+            complaint,
+          };
+          await withProfileWriteLock(() => appendComplaint(profilePath, entry));
+          send(ws, { type: 'admin-report-ack', filename, questionId });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-report-error',
+            filename,
+            questionId,
             reason: adminPackErrorReason(err),
           });
         }

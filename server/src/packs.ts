@@ -75,6 +75,27 @@ function findQuestion(pack: Pack, questionId: string): Question | undefined {
 }
 
 /**
+ * Как `findQuestion`, но публичная и возвращает ещё и название темы —
+ * нужно для жалобы на вопрос (server.ts, admin-report-question), где текст
+ * записи требует «тема «…»». Не объединяется с приватной `findQuestion`
+ * внутри update/deleteQuestion — та возвращает только вопрос, этой нужен ещё
+ * контекст темы, а трогать уже проверенный код ради двух похожих сигнатур
+ * не оправдано (YAGNI).
+ */
+export function findQuestionLocation(
+  pack: Pack,
+  questionId: string,
+): { themeName: string; question: Question } | undefined {
+  for (const round of pack.rounds) {
+    for (const theme of round.themes) {
+      const found = theme.questions.find((q) => q.id === questionId);
+      if (found) return { themeName: theme.name, question: found };
+    }
+  }
+  return undefined;
+}
+
+/**
  * Правит существующий вопрос по его `id` и сразу пишет результат на диск.
  * `id` не редактируется — вопрос ищется по нему, не переименовывается
  * (design.md, «Правило»: id — служебное поле движка, менять его человеку

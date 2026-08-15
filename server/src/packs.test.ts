@@ -2,9 +2,15 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { deleteQuestion, listAvailablePacks, updateQuestion } from './packs.js';
+import {
+  deleteQuestion,
+  findQuestionLocation,
+  listAvailablePacks,
+  updateQuestion,
+} from './packs.js';
+import type { Pack } from './pack.js';
 
-const VALID_PACK = {
+const VALID_PACK: Pack = {
   title: 'Тест',
   author: 'Автор',
   createdAt: '2026-08-04',
@@ -358,5 +364,19 @@ describe('deleteQuestion', () => {
     await expect(deleteQuestion(dir, 'sport.json', 'q1')).rejects.toThrow();
     const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
     expect(onDisk).toEqual(VALID_PACK);
+  });
+});
+
+describe('findQuestionLocation', () => {
+  it('returns the theme name and the question object for an existing id', () => {
+    const location = findQuestionLocation(VALID_PACK, 'q1');
+    expect(location).toEqual({
+      themeName: 'Тема',
+      question: VALID_PACK.rounds[0].themes[0].questions[0],
+    });
+  });
+
+  it('returns undefined for an unknown id', () => {
+    expect(findQuestionLocation(VALID_PACK, 'ghost')).toBeUndefined();
   });
 });

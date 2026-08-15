@@ -2053,16 +2053,21 @@ describe('createServer pack editor', () => {
     ],
   };
 
+  let profilePath: string;
+
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'svoya-igra-pack-editor-'));
     packsDir = await mkdtemp(join(tmpdir(), 'svoya-igra-pack-editor-packs-'));
     await writeFile(join(packsDir, 'a.json'), JSON.stringify(PACK_A), 'utf8');
+    profilePath = join(dir, 'profile.md');
+    await writeFile(profilePath, '# Профиль компании\n\nВступление.\n', 'utf8');
     const room = new Room(undefined, PACK_A, undefined, 'a.json');
     server = createServer({
       room,
       clientDistPath: dir,
       port: 8080,
       packsDir,
+      profilePath,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } = server.httpServer.address() as AddressInfo;
@@ -2268,6 +2273,103 @@ describe('createServer pack editor', () => {
     );
     expect(onDisk.rounds[0].themes[0].questions).toHaveLength(1);
     expect(onDisk.rounds[0].themes[0].questions[0].id).toBe('a2');
+    admin.ws.close();
+  });
+
+  it('admin-report-question appends a complaint to the profile file and acks', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-report-question',
+        filename: 'a.json',
+        questionId: 'a1',
+        complaint: 'непонятная формулировка',
+      }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toEqual({
+      type: 'admin-report-ack',
+      filename: 'a.json',
+      questionId: 'a1',
+    });
+
+    const profileContent = await readFile(profilePath, 'utf8');
+    expect(profileContent).toContain('## Жалобы из ручного редактора');
+    expect(profileContent).toContain('«Пак А» (a.json)');
+    expect(profileContent).toContain('тема «Тема», вопрос за 100');
+    expect(profileContent).toContain(
+      '«В?» (ответ: «О») — непонятная формулировка',
+    );
+    admin.ws.close();
+  });
+
+  it('admin-report-question on an unknown question id returns admin-report-error and does not write', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-report-question',
+        filename: 'a.json',
+        questionId: 'ghost',
+        complaint: 'жалоба',
+      }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toMatchObject({
+      type: 'admin-report-error',
+      filename: 'a.json',
+      questionId: 'ghost',
+    });
+
+    const profileContent = await readFile(profilePath, 'utf8');
+    expect(profileContent).not.toContain('## Жалобы из ручного редактора');
+    admin.ws.close();
+  });
+
+  it('admin-report-question with a path-traversal filename is a silent no-op', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-report-question',
+        filename: '../a.json',
+        questionId: 'a1',
+        complaint: 'жалоба',
+      }),
+    );
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string };
+    expect(reply.type).toBe('admin-pack');
+    admin.ws.close();
+  });
+
+  it('two admin-report-question calls in a row both land in the profile file (write-lock)', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-report-question',
+        filename: 'a.json',
+        questionId: 'a1',
+        complaint: 'первая жалоба',
+      }),
+    );
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-report-question',
+        filename: 'a.json',
+        questionId: 'a2',
+        complaint: 'вторая жалоба',
+      }),
+    );
+    await admin.nextMessage();
+    await admin.nextMessage();
+
+    const profileContent = await readFile(profilePath, 'utf8');
+    expect(profileContent).toContain('первая жалоба');
+    expect(profileContent).toContain('вторая жалоба');
+    const headingCount =
+      profileContent.split('## Жалобы из ручного редактора').length - 1;
+    expect(headingCount).toBe(1);
     admin.ws.close();
   });
 });

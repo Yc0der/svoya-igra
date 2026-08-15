@@ -131,7 +131,16 @@ export type ClientMessage =
       // Не «type» — не путать с полем-дискриминантом самого сообщения.
       questionType: Question['type'];
     }
-  | { type: 'admin-delete-question'; filename: string; questionId: string };
+  | { type: 'admin-delete-question'; filename: string; questionId: string }
+  // Жалоба на вопрос — список для беглого просмотра (design.md, 2026-08-15).
+  // Контекст вопроса (текст/ответ/тема/цена) сервер достаёт сам по
+  // filename+questionId, от клиента нужен только текст жалобы.
+  | {
+      type: 'admin-report-question';
+      filename: string;
+      questionId: string;
+      complaint: string;
+    };
 
 export type StartGameErrorReason =
   | 'not-enough-players'
@@ -171,4 +180,13 @@ export type ServerMessage =
   // admin-delete-question сразу — один тип на три запроса, чтобы клиенту
   // не нужно было по-разному обрабатывать три разных формы успеха.
   | { type: 'admin-pack'; filename: string; pack: Pack }
-  | { type: 'admin-pack-error'; filename: string; reason: string };
+  | { type: 'admin-pack-error'; filename: string; reason: string }
+  // Отдельные от admin-pack/admin-pack-error — жалоба не редактирует пакет,
+  // её ошибка не должна путаться с ошибкой правки вопроса.
+  | { type: 'admin-report-ack'; filename: string; questionId: string }
+  | {
+      type: 'admin-report-error';
+      filename: string;
+      questionId: string;
+      reason: string;
+    };
