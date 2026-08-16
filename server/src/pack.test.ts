@@ -57,7 +57,9 @@ describe('validatePack', () => {
 
   it('accepts a question with no image at all', () => {
     const data = validPackData();
-    expect(validatePack(data).rounds[0].themes[0].questions[0].image).toBeUndefined();
+    expect(
+      validatePack(data).rounds[0].themes[0].questions[0].image,
+    ).toBeUndefined();
   });
 
   it('rejects a non-string image when present', () => {
@@ -69,6 +71,20 @@ describe('validatePack', () => {
   it('rejects an empty string image', () => {
     const data = validPackData();
     (data.rounds[0].themes[0].questions[0] as { image?: string }).image = '';
+    expect(() => validatePack(data)).toThrow(/image/);
+  });
+
+  it('rejects an image containing a forward slash', () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: string }).image =
+      '../../current.json';
+    expect(() => validatePack(data)).toThrow(/image/);
+  });
+
+  it('rejects an image containing a backslash', () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: string }).image =
+      '..\\..\\current.json';
     expect(() => validatePack(data)).toThrow(/image/);
   });
 

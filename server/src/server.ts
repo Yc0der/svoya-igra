@@ -76,7 +76,7 @@ export function createServer(options: CreateServerOptions): GameServer {
   // Раздаёт packsDir/media/... под префиксом /media/ — БЕЗ single:true:
   // отсутствующая картинка обязана дать настоящий 404, а не откат на
   // клиентский index.html (design.md, 2026-08-16, «Отказы»). Смонтирован
-  // на сам packsDir (не packsDir/media) — префикс /media/ снимается с
+  // на packsDir/media (не на сам packsDir) — префикс /media/ снимается с
   // req.url перед вызовом, поэтому dir для sirv должен совпадать с тем,
   // что остаётся ПОСЛЕ снятия префикса.
   // dev: true — иначе sirv синхронно сканирует directory (readdirSync) уже

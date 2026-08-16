@@ -8,9 +8,10 @@ export interface Question {
   answer: string;
   comment?: string;
   type: 'обычный' | 'кот' | 'аукцион';
-  // Правило.md, «Правило» — имя файла без пути; полный путь/URL собирает
-  // сервер (room.ts) как `/media/<пак>/<image>`. Только основной раунд —
-  // финал (FinalTheme.question) картинок не получает в этой вехе.
+  // docs/superpowers/specs/2026-08-16-photo-questions-design.md, «Правило» —
+  // имя файла без пути; полный путь/URL собирает сервер (room.ts) как
+  // `/media/<пак>/<image>`. Только основной раунд — финал
+  // (FinalTheme.question) картинок не получает в этой вехе.
   image?: string;
 }
 
@@ -93,6 +94,9 @@ function validateQuestion(data: unknown, where: string): Question {
   let image: string | undefined;
   if (question.image !== undefined) {
     image = requireNonEmptyString(question.image, `${where}.image`);
+    if (image.includes('/') || image.includes('\\')) {
+      throw new Error(`${where}.image: должно быть именем файла без пути`);
+    }
   }
   const type = question.type;
   if (typeof type !== 'string' || !QUESTION_TYPES.has(type)) {
