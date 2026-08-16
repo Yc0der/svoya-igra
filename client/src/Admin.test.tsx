@@ -485,6 +485,7 @@ describe('Admin — редактор пакета', () => {
       }),
     );
     rerender(<Admin />);
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     expect(screen.getByText('Тема')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '100' })).toBeInTheDocument();
   });
@@ -503,6 +504,7 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
     expect(screen.getByDisplayValue('Вопрос?')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Ответ')).toBeInTheDocument();
@@ -525,6 +527,7 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
 
     const priceInput = screen.getByDisplayValue('100');
@@ -555,6 +558,7 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
 
     const priceInput = screen.getByDisplayValue('100');
@@ -578,6 +582,7 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
     expect(screen.getByRole('alert')).toHaveTextContent(
       /цена должна быть положительным числом/i,
@@ -600,6 +605,7 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
 
     const del = screen.getByRole('button', { name: /^удалить$/i });
@@ -628,6 +634,7 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
     expect(screen.getByDisplayValue('Вопрос?')).toBeInTheDocument();
 
@@ -681,6 +688,7 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
 
     const priceInput = screen.getByDisplayValue('100');
@@ -740,6 +748,7 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
 
     // Тот же editedPack, версия не выросла — только пришла ошибка (напр.
@@ -828,10 +837,262 @@ describe('Admin — редактор пакета', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /редактировать/i }),
     );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
     await userEvent.click(screen.getByRole('button', { name: '100' }));
     expect(clearPackError).toHaveBeenCalledOnce();
 
     await userEvent.click(screen.getByRole('button', { name: '200' }));
     expect(clearPackError).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Admin — список и жалобы', () => {
+  const PACK = {
+    title: 'Пак А',
+    author: 'Автор',
+    createdAt: '2026-08-04',
+    rounds: [
+      {
+        themes: [
+          {
+            name: 'Тема',
+            questions: [
+              {
+                id: 'q1',
+                price: 100,
+                text: 'Вопрос?',
+                answer: 'Ответ',
+                type: 'обычный' as const,
+              },
+              {
+                id: 'q2',
+                price: 200,
+                text: 'Второй вопрос?',
+                answer: 'Второй ответ',
+                type: 'обычный' as const,
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  async function openEditor() {
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+  }
+
+  it('shows the list view by default, with a "Пожаловаться" button per question', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    await openEditor();
+    expect(screen.getByText('Вопрос?')).toBeInTheDocument();
+    expect(
+      screen.getAllByRole('button', { name: /пожаловаться/i }),
+    ).toHaveLength(2);
+  });
+
+  it('switches to the grid when the "Сетка" radio is picked, hiding "Пожаловаться"', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    await openEditor();
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
+    expect(
+      screen.queryByRole('button', { name: /пожаловаться/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '100' })).toBeInTheDocument();
+  });
+
+  it('opens the edit form from a list row click, not the complaint button', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    await openEditor();
+    await userEvent.click(screen.getByText('Вопрос?'));
+    expect(screen.getByDisplayValue('Вопрос?')).toBeInTheDocument();
+  });
+
+  it('opens the complaint panel and closes any open edit form', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    await openEditor();
+    await userEvent.click(screen.getByText('Вопрос?'));
+    expect(screen.getByDisplayValue('Вопрос?')).toBeInTheDocument();
+
+    const complainButtons = screen.getAllByRole('button', {
+      name: /пожаловаться/i,
+    });
+    await userEvent.click(complainButtons[0]);
+    expect(screen.queryByDisplayValue('Вопрос?')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/что не понравилось/i)).toBeInTheDocument();
+  });
+
+  it('disables "Отправить" on empty text and calls reportQuestion with the typed complaint', async () => {
+    const reportQuestion = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        reportQuestion,
+      }),
+    );
+    await openEditor();
+    const complainButtons = screen.getAllByRole('button', {
+      name: /пожаловаться/i,
+    });
+    await userEvent.click(complainButtons[0]);
+
+    const sendButton = screen.getByRole('button', { name: /отправить/i });
+    expect(sendButton).toBeDisabled();
+
+    await userEvent.type(
+      screen.getByLabelText(/что не понравилось/i),
+      'слишком просто',
+    );
+    expect(sendButton).toBeEnabled();
+    await userEvent.click(sendButton);
+    expect(reportQuestion).toHaveBeenCalledWith(
+      'a.json',
+      'q1',
+      'слишком просто',
+    );
+  });
+
+  it('closes the complaint panel once a matching reportAckVersion arrives', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        reportAckVersion: 0,
+      }),
+    );
+    const { rerender } = render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    const complainButtons = screen.getAllByRole('button', {
+      name: /пожаловаться/i,
+    });
+    await userEvent.click(complainButtons[0]);
+    await userEvent.type(screen.getByLabelText(/что не понравилось/i), 'текст');
+    await userEvent.click(screen.getByRole('button', { name: /отправить/i }));
+
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        reportAckVersion: 1,
+      }),
+    );
+    rerender(<Admin />);
+    expect(
+      screen.queryByLabelText(/что не понравилось/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows reportError as an alert and keeps the panel open', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        reportError: 'вопрос с таким id не найден',
+      }),
+    );
+    await openEditor();
+    const complainButtons = screen.getAllByRole('button', {
+      name: /пожаловаться/i,
+    });
+    await userEvent.click(complainButtons[0]);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /вопрос с таким id не найден/i,
+    );
+    expect(screen.getByLabelText(/что не понравилось/i)).toBeInTheDocument();
+  });
+
+  it('"Отмена" closes the complaint panel without calling reportQuestion', async () => {
+    const reportQuestion = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        reportQuestion,
+      }),
+    );
+    await openEditor();
+    const complainButtons = screen.getAllByRole('button', {
+      name: /пожаловаться/i,
+    });
+    await userEvent.click(complainButtons[0]);
+    await userEvent.click(screen.getByRole('button', { name: /отмена/i }));
+    expect(
+      screen.queryByLabelText(/что не понравилось/i),
+    ).not.toBeInTheDocument();
+    expect(reportQuestion).not.toHaveBeenCalled();
+  });
+
+  it('switching view mode closes an open complaint panel', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    await openEditor();
+    const complainButtons = screen.getAllByRole('button', {
+      name: /пожаловаться/i,
+    });
+    await userEvent.click(complainButtons[0]);
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
+    expect(
+      screen.queryByLabelText(/что не понравилось/i),
+    ).not.toBeInTheDocument();
   });
 });

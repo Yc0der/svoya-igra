@@ -47,6 +47,10 @@ export function Admin() {
     getPack,
     updateQuestion,
     deleteQuestion,
+    reportError,
+    reportAckVersion,
+    clearReportError,
+    reportQuestion,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -70,6 +74,18 @@ export function Admin() {
   const [formComment, setFormComment] = useState('');
   const [formType, setFormType] = useState<Question['type']>('обычный');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Вид редактора: 'list' по умолчанию — беглый просмотр запрошен как
+  // основной сценарий входа (design.md, 2026-08-15).
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [complainingQuestionId, setComplainingQuestionId] = useState<
+    string | null
+  >(null);
+  const [complaintText, setComplaintText] = useState('');
+  // Тот же приём, что pendingSaveVersionRef у формы правки: версия
+  // reportAckVersion, зафиксированная в момент клика «Отправить» — эффект
+  // ниже закрывает панель жалобы только когда пришёл ack именно на эту
+  // жалобу, не на чужую (см. openComplaintPanel/handleSubmitComplaint).
+  const pendingReportVersionRef = useRef<number | null>(null);
   // editedPackVersion, зафиксированный в момент клика «Сохранить» — см.
   // эффект ниже, который закрывает форму, когда версия ушла вперёд (сервер
   // прислал новый admin-pack в ответ именно на этот save), но оставляет её
@@ -97,6 +113,17 @@ export function Admin() {
     }
   }, [editedPackVersion]);
 
+  useEffect(() => {
+    if (
+      pendingReportVersionRef.current !== null &&
+      reportAckVersion > pendingReportVersionRef.current
+    ) {
+      pendingReportVersionRef.current = null;
+      setComplainingQuestionId(null);
+      setComplaintText('');
+    }
+  }, [reportAckVersion]);
+
   function openQuestionForm(question: Question): void {
     setEditingQuestionId(question.id);
     setFormPrice(String(question.price));
@@ -112,7 +139,38 @@ export function Admin() {
     // отложенный ответ на save прежнего вопроса мог бы закрыть форму того,
     // который открыли только что.
     pendingSaveVersionRef.current = null;
+    // Форма правки и панель жалобы взаимоисключающие — открытие одной
+    // закрывает другую (design.md, «Правило»).
+    setComplainingQuestionId(null);
   }
+
+  function openComplaintPanel(questionId: string): void {
+    setComplainingQuestionId(questionId);
+    setComplaintText('');
+    clearReportError();
+    pendingReportVersionRef.current = null;
+    // Симметрично openQuestionForm — открытие панели жалобы закрывает
+    // форму правки, если та была открыта.
+    setEditingQuestionId(null);
+  }
+
+  function handleSubmitComplaint(): void {
+    if (!editingFilename || !complainingQuestionId) return;
+    pendingReportVersionRef.current = reportAckVersion;
+    reportQuestion(editingFilename, complainingQuestionId, complaintText);
+  }
+
+  function handleViewModeChange(mode: 'grid' | 'list'): void {
+    setViewMode(mode);
+    // Переключение вида закрывает любую открытую панель — «Пожаловаться»
+    // существует только в списке, а форма правки закрывается для
+    // симметрии, чтобы переключение вида было предсказуемым «чистым»
+    // действием в обе стороны (design.md, «Правило»).
+    setEditingQuestionId(null);
+    setComplainingQuestionId(null);
+  }
+
+  const isValidComplaint = complaintText.trim() !== '';
 
   function handleSaveQuestion(): void {
     if (!editingFilename || !editingQuestionId) return;
@@ -307,6 +365,30 @@ export function Admin() {
             )}
             {editedPackFilename === editingFilename && editedPack ? (
               <>
+                <div
+                  className="pack-editor-view-toggle"
+                  role="radiogroup"
+                  aria-label="Вид редактора"
+                >
+                  <label>
+                    <input
+                      type="radio"
+                      name="pack-editor-view"
+                      checked={viewMode === 'list'}
+                      onChange={() => handleViewModeChange('list')}
+                    />
+                    Список
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pack-editor-view"
+                      checked={viewMode === 'grid'}
+                      onChange={() => handleViewModeChange('grid')}
+                    />
+                    Сетка
+                  </label>
+                </div>
                 {editedPack.rounds.map((round, ri) => (
                   <div key={ri} className="pack-editor-round">
                     <h3>Раунд {ri + 1}</h3>
@@ -315,19 +397,77 @@ export function Admin() {
                         <span className="pack-editor-theme-name">
                           {theme.name}
                         </span>
-                        {theme.questions.map((q) => (
-                          <button
-                            key={q.id}
-                            className="button"
-                            onClick={() => openQuestionForm(q)}
-                          >
-                            {q.price}
-                          </button>
-                        ))}
+                        {viewMode === 'grid' ? (
+                          theme.questions.map((q) => (
+                            <button
+                              key={q.id}
+                              className="button"
+                              onClick={() => openQuestionForm(q)}
+                            >
+                              {q.price}
+                            </button>
+                          ))
+                        ) : (
+                          <ul className="pack-editor-list">
+                            {theme.questions.map((q) => (
+                              <li key={q.id} className="pack-editor-list-row">
+                                <button
+                                  className="button pack-editor-list-question"
+                                  onClick={() => openQuestionForm(q)}
+                                >
+                                  <span className="pack-editor-list-price">
+                                    {q.price}
+                                  </span>
+                                  <span className="pack-editor-list-text">
+                                    {q.text}
+                                  </span>
+                                </button>
+                                <button
+                                  className="button button--no"
+                                  onClick={() => openComplaintPanel(q.id)}
+                                >
+                                  Пожаловаться
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
                       </div>
                     ))}
                   </div>
                 ))}
+                {complainingQuestionId && (
+                  <div className="pack-editor-complaint">
+                    {reportError && (
+                      <p className="player-alert" role="alert">
+                        {reportError}
+                      </p>
+                    )}
+                    <label htmlFor="pack-editor-complaint-text">
+                      Что не понравилось
+                    </label>
+                    <textarea
+                      id="pack-editor-complaint-text"
+                      value={complaintText}
+                      onChange={(e) => setComplaintText(e.target.value)}
+                    />
+                    <div className="admin-actions">
+                      <button
+                        className="button button--primary"
+                        onClick={handleSubmitComplaint}
+                        disabled={!isValidComplaint}
+                      >
+                        Отправить
+                      </button>
+                      <button
+                        className="button"
+                        onClick={() => setComplainingQuestionId(null)}
+                      >
+                        Отмена
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {questionStillExists && (
                   <div className="pack-editor-form">
                     <label htmlFor="pack-editor-price">Цена</label>
