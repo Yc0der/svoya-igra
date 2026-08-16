@@ -438,4 +438,81 @@ describe('useAdminConnection', () => {
     expect(result.current.editedPackFilename).toBeNull();
     expect(result.current.editedPackError).toBeNull();
   });
+
+  it('sends admin-report-question with the complaint text', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      result.current.reportQuestion('a.json', 'q1', 'непонятная формулировка'),
+    );
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-report-question',
+        filename: 'a.json',
+        questionId: 'q1',
+        complaint: 'непонятная формулировка',
+      }),
+    );
+  });
+
+  it('increments reportAckVersion and clears reportError on admin-report-ack', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-report-error',
+        filename: 'a.json',
+        questionId: 'q1',
+        reason: 'ошибка',
+      }),
+    );
+    expect(result.current.reportError).toBe('ошибка');
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-report-ack',
+        filename: 'a.json',
+        questionId: 'q1',
+      }),
+    );
+    expect(result.current.reportError).toBeNull();
+    expect(result.current.reportAckVersion).toBe(1);
+  });
+
+  it('surfaces the reason from admin-report-error', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-report-error',
+        filename: 'a.json',
+        questionId: 'q1',
+        reason: 'вопрос с таким id не найден',
+      }),
+    );
+    expect(result.current.reportError).toBe('вопрос с таким id не найден');
+  });
+
+  it('clearReportError resets reportError locally without waiting for the server', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-report-error',
+        filename: 'a.json',
+        questionId: 'q1',
+        reason: 'ошибка',
+      }),
+    );
+    act(() => result.current.clearReportError());
+    expect(result.current.reportError).toBeNull();
+  });
 });

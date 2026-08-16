@@ -67,7 +67,14 @@ type ServerMessage =
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   | { type: 'select-pack-error'; reason: 'unknown-file' }
   | { type: 'admin-pack'; filename: string; pack: Pack }
-  | { type: 'admin-pack-error'; filename: string; reason: string };
+  | { type: 'admin-pack-error'; filename: string; reason: string }
+  | { type: 'admin-report-ack'; filename: string; questionId: string }
+  | {
+      type: 'admin-report-error';
+      filename: string;
+      questionId: string;
+      reason: string;
+    };
 
 type ClientMessage =
   | { type: 'admin-start-game' }
@@ -91,7 +98,13 @@ type ClientMessage =
       comment?: string;
       questionType: Question['type'];
     }
-  | { type: 'admin-delete-question'; filename: string; questionId: string };
+  | { type: 'admin-delete-question'; filename: string; questionId: string }
+  | {
+      type: 'admin-report-question';
+      filename: string;
+      questionId: string;
+      complaint: string;
+    };
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -146,6 +159,10 @@ export interface AdminConnection {
     },
   ): void;
   deleteQuestion(filename: string, questionId: string): void;
+  reportError: string | null;
+  reportAckVersion: number;
+  clearReportError(): void;
+  reportQuestion(filename: string, questionId: string, complaint: string): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -180,6 +197,8 @@ export function useAdminConnection(
   const [game, setGame] = useState<GameStateView | null>(null);
   const [startGameError, setStartGameError] =
     useState<StartGameErrorReason | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportAckVersion, setReportAckVersion] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -226,6 +245,13 @@ export function useAdminConnection(
         if (message.type === 'admin-pack-error') {
           setEditedPackFilename(message.filename);
           setEditedPackError(message.reason);
+        }
+        if (message.type === 'admin-report-ack') {
+          setReportError(null);
+          setReportAckVersion((v) => v + 1);
+        }
+        if (message.type === 'admin-report-error') {
+          setReportError(message.reason);
         }
       });
 
@@ -293,5 +319,10 @@ export function useAdminConnection(
       }),
     deleteQuestion: (filename, questionId) =>
       send({ type: 'admin-delete-question', filename, questionId }),
+    reportError,
+    reportAckVersion,
+    clearReportError: () => setReportError(null),
+    reportQuestion: (filename, questionId, complaint) =>
+      send({ type: 'admin-report-question', filename, questionId, complaint }),
   };
 }

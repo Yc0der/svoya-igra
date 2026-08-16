@@ -72,6 +72,10 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     getPack: vi.fn(),
     updateQuestion: vi.fn(),
     deleteQuestion: vi.fn(),
+    reportError: null,
+    reportAckVersion: 0,
+    clearReportError: vi.fn(),
+    reportQuestion: vi.fn(),
     ...overrides,
   };
 }
