@@ -411,23 +411,75 @@ export function Admin() {
                           <ul className="pack-editor-list">
                             {theme.questions.map((q) => (
                               <li key={q.id} className="pack-editor-list-row">
-                                <button
-                                  className="button pack-editor-list-question"
-                                  onClick={() => openQuestionForm(q)}
-                                >
-                                  <span className="pack-editor-list-price">
-                                    {q.price}
-                                  </span>
-                                  <span className="pack-editor-list-text">
-                                    {q.text}
-                                  </span>
-                                </button>
-                                <button
-                                  className="button button--no"
-                                  onClick={() => openComplaintPanel(q.id)}
-                                >
-                                  Пожаловаться
-                                </button>
+                                <div className="pack-editor-list-row-main">
+                                  <button
+                                    className="button pack-editor-list-question"
+                                    onClick={() => openQuestionForm(q)}
+                                  >
+                                    <span className="pack-editor-list-price">
+                                      {q.price}
+                                    </span>
+                                    <span className="pack-editor-list-text">
+                                      {q.text}
+                                    </span>
+                                  </button>
+                                  <button
+                                    className="button"
+                                    onClick={() => openComplaintPanel(q.id)}
+                                  >
+                                    Пожаловаться
+                                  </button>
+                                </div>
+                                {/* Fix 1/2 (финальное ревью) — панель жалобы
+                                    рендерится прямо внутри строки того
+                                    вопроса, на который жалуются: на реальном
+                                    паке (много вопросов) панель, отрисованная
+                                    после всего editedPack.rounds.map(...),
+                                    открывалась на тысячи пикселей ниже
+                                    видимой области и выглядела как
+                                    «ничего не произошло». complainingQuestionId
+                                    гарантирует, что открыта не больше одной
+                                    панели одновременно — единственный путь
+                                    рендера, без дублирования внизу редактора. */}
+                                {complainingQuestionId === q.id && (
+                                  <div className="pack-editor-complaint">
+                                    <p className="pack-editor-complaint-target">
+                                      «{q.price} — {q.text}»
+                                    </p>
+                                    {reportError && (
+                                      <p className="player-alert" role="alert">
+                                        {reportError}
+                                      </p>
+                                    )}
+                                    <label htmlFor="pack-editor-complaint-text">
+                                      Что не понравилось
+                                    </label>
+                                    <textarea
+                                      id="pack-editor-complaint-text"
+                                      value={complaintText}
+                                      onChange={(e) =>
+                                        setComplaintText(e.target.value)
+                                      }
+                                    />
+                                    <div className="admin-actions">
+                                      <button
+                                        className="button button--primary"
+                                        onClick={handleSubmitComplaint}
+                                        disabled={!isValidComplaint}
+                                      >
+                                        Отправить
+                                      </button>
+                                      <button
+                                        className="button"
+                                        onClick={() =>
+                                          setComplainingQuestionId(null)
+                                        }
+                                      >
+                                        Отмена
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </li>
                             ))}
                           </ul>
@@ -436,38 +488,6 @@ export function Admin() {
                     ))}
                   </div>
                 ))}
-                {complainingQuestionId && (
-                  <div className="pack-editor-complaint">
-                    {reportError && (
-                      <p className="player-alert" role="alert">
-                        {reportError}
-                      </p>
-                    )}
-                    <label htmlFor="pack-editor-complaint-text">
-                      Что не понравилось
-                    </label>
-                    <textarea
-                      id="pack-editor-complaint-text"
-                      value={complaintText}
-                      onChange={(e) => setComplaintText(e.target.value)}
-                    />
-                    <div className="admin-actions">
-                      <button
-                        className="button button--primary"
-                        onClick={handleSubmitComplaint}
-                        disabled={!isValidComplaint}
-                      >
-                        Отправить
-                      </button>
-                      <button
-                        className="button"
-                        onClick={() => setComplainingQuestionId(null)}
-                      >
-                        Отмена
-                      </button>
-                    </div>
-                  </div>
-                )}
                 {questionStillExists && (
                   <div className="pack-editor-form">
                     <label htmlFor="pack-editor-price">Цена</label>

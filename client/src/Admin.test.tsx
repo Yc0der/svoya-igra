@@ -957,6 +957,27 @@ describe('Admin — список и жалобы', () => {
     expect(screen.getByLabelText(/что не понравилось/i)).toBeInTheDocument();
   });
 
+  it('shows the target question price and text inside the complaint panel', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+      }),
+    );
+    await openEditor();
+    const complainButtons = screen.getAllByRole('button', {
+      name: /пожаловаться/i,
+    });
+    // Второй вопрос (q2, «200 — Второй вопрос?») — чтобы проверка не
+    // прошла случайно из-за того, что первый вопрос пакета и так везде
+    // виден на экране.
+    await userEvent.click(complainButtons[1]);
+    expect(screen.getByText(/«200 — Второй вопрос\?»/)).toBeInTheDocument();
+  });
+
   it('disables "Отправить" on empty text and calls reportQuestion with the typed complaint', async () => {
     const reportQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(

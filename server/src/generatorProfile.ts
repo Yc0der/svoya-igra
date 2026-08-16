@@ -14,10 +14,17 @@ export interface ComplaintEntry {
 const HEADING = '## Жалобы из ручного редактора';
 
 function formatEntry(entry: ComplaintEntry): string {
+  // Fix 8 (финальное ревью) — жалоба приходит из <textarea>, где переносы
+  // строк разрешены; вставленные как есть, они бы разорвали markdown-список
+  // (например «плохо\n## Что-то» превратилось бы в настоящий заголовок
+  // посреди файла). Продолжающая строка с тем же отступом, что и у
+  // «текст/ответ» строки этого же буллета — держит многострочную жалобу
+  // внутри одного элемента списка.
+  const complaint = entry.complaint.replace(/\n/g, '\n  ');
   return (
     `- **${entry.date}, «${entry.packTitle}» (${entry.packFilename}), ` +
     `тема «${entry.themeName}», вопрос за ${entry.price}:**\n` +
-    `  «${entry.questionText}» (ответ: «${entry.answer}») — ${entry.complaint}`
+    `  «${entry.questionText}» (ответ: «${entry.answer}») — ${complaint}`
   );
 }
 
@@ -37,9 +44,15 @@ export async function appendComplaint(
 ): Promise<void> {
   const current = await readFile(profilePath, 'utf8');
   const bullet = formatEntry(entry);
-  const updated = current.includes(HEADING)
-    ? `${current}${bullet}\n`
-    : `${current}\n---\n\n${HEADING}\n\n${bullet}\n`;
+  // Fix 6 (финальное ревью) — обе ветки ниже полагаются на то, что current
+  // уже заканчивается переводом строки (иначе новый буллет приклеится к
+  // концу последней существующей строки). Это верно для каждой записи,
+  // которую делает сама эта функция, но не гарантировано, если файл кто-то
+  // отредактировал руками и обрезал хвостовой \n.
+  const base = current.endsWith('\n') ? current : `${current}\n`;
+  const updated = base.includes(HEADING)
+    ? `${base}${bullet}\n`
+    : `${base}\n---\n\n${HEADING}\n\n${bullet}\n`;
   const tmpPath = `${profilePath}.tmp`;
   await writeFile(tmpPath, updated, 'utf8');
   await rename(tmpPath, profilePath);

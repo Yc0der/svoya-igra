@@ -71,4 +71,51 @@ describe('appendComplaint', () => {
 
     await expect(readFile(`${profilePath}.tmp`, 'utf8')).rejects.toThrow();
   });
+
+  it('starts the new bullet on its own line even if the file was missing a trailing newline', async () => {
+    // Fix 6 (финальное ревью) — файл без хвостового \n перед разделом
+    // «Жалобы из ручного редактора» не должен склеивать новый буллет с
+    // последней существующей строкой.
+    const withoutTrailingNewline =
+      '# Профиль компании\n\nВступление.\n\n---\n\n## Жалобы из ручного редактора\n\n' +
+      '- **2026-08-14, «Старый пак» (old.json), тема «Старое», вопрос за 100:**\n' +
+      '  «Старый вопрос?» (ответ: «Старый ответ») — старая жалоба без переноса в конце';
+    await writeFile(profilePath, withoutTrailingNewline, 'utf8');
+
+    await appendComplaint(profilePath, ENTRY);
+
+    const content = await readFile(profilePath, 'utf8');
+    const lines = content.split('\n');
+    const newBulletLineIndex = lines.findIndex((line) =>
+      line.startsWith('- **2026-08-15,'),
+    );
+    expect(newBulletLineIndex).toBeGreaterThan(-1);
+    // Новый буллет — самостоятельная строка, а не хвост предыдущей.
+    expect(lines[newBulletLineIndex]).not.toContain('старая жалоба');
+    expect(
+      lines[newBulletLineIndex - 1].endsWith(
+        'старая жалоба без переноса в конце',
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps a multi-line complaint as an indented continuation, not a top-level markdown break', async () => {
+    // Fix 8 (финальное ревью) — перенос строки внутри жалобы не должен
+    // вырваться из буллета (например превратиться в собственный
+    // markdown-заголовок посреди файла).
+    await writeFile(profilePath, '# Профиль компании\n\nВступление.\n', 'utf8');
+
+    await appendComplaint(profilePath, {
+      ...ENTRY,
+      complaint: 'плохо сформулировано\n## Что-то постороннее',
+    });
+
+    const content = await readFile(profilePath, 'utf8');
+    expect(content).not.toMatch(/^## Что-то постороннее/m);
+    expect(content).toContain('плохо сформулировано\n  ## Что-то постороннее');
+    // Ровно один заголовок раздела «Жалобы» — инъекция не создала второй.
+    const headingCount =
+      content.split('## Жалобы из ручного редактора').length - 1;
+    expect(headingCount).toBe(1);
+  });
 });

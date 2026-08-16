@@ -573,13 +573,21 @@ export function createServer(options: CreateServerOptions): GameServer {
       ): Promise<void> {
         if (basename(filename) !== filename) return;
         if (!profilePath) return;
+        // Fix 7 (финальное ревью) — две разные операции могут провалиться
+        // здесь (поиск пакета/вопроса vs. запись жалобы в профиль), и общий
+        // catch на весь метод стирал это различие: ENOENT от appendComplaint
+        // (файл профиля пропал/переехал) и ENOENT от loadPack (пакет
+        // пропал/переехал) оба превращались в одинаковое «файл не найден» —
+        // не видно, какой из двух файлов имелся в виду. Два отдельных
+        // try/catch держат сообщения однозначными.
+        let entry: ComplaintEntry;
         try {
           const pack = await loadPack(join(packsDir, filename));
           const location = findQuestionLocation(pack, questionId);
           if (!location) {
             throw new Error(`вопрос с id "${questionId}" не найден в пакете`);
           }
-          const entry: ComplaintEntry = {
+          entry = {
             date: new Date().toISOString().slice(0, 10),
             packFilename: filename,
             packTitle: pack.title,
@@ -589,6 +597,16 @@ export function createServer(options: CreateServerOptions): GameServer {
             answer: location.question.answer,
             complaint,
           };
+        } catch (err) {
+          send(ws, {
+            type: 'admin-report-error',
+            filename,
+            questionId,
+            reason: adminPackErrorReason(err),
+          });
+          return;
+        }
+        try {
           await withProfileWriteLock(() => appendComplaint(profilePath, entry));
           send(ws, { type: 'admin-report-ack', filename, questionId });
         } catch (err) {
@@ -596,7 +614,10 @@ export function createServer(options: CreateServerOptions): GameServer {
             type: 'admin-report-error',
             filename,
             questionId,
-            reason: adminPackErrorReason(err),
+            reason:
+              (err as NodeJS.ErrnoException).code === 'ENOENT'
+                ? 'не удалось сохранить жалобу — файл профиля не найден'
+                : adminPackErrorReason(err),
           });
         }
       }

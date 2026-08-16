@@ -680,14 +680,16 @@ code {
   font-weight: 600;
 }
 
-.pack-editor-form {
+.pack-editor-form,
+.pack-editor-complaint {
   display: flex;
   flex-direction: column;
   gap: 8px;
   max-width: 500px;
 }
 
-.pack-editor-form textarea {
+.pack-editor-form textarea,
+.pack-editor-complaint textarea {
   min-height: 60px;
   font: inherit;
 }
@@ -716,6 +718,12 @@ code {
 
 .pack-editor-list-row {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pack-editor-list-row-main {
+  display: flex;
   align-items: center;
   gap: 8px;
 }
@@ -738,14 +746,6 @@ code {
   flex: 1;
 }
 
-.pack-editor-complaint {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 500px;
-}
-
-.pack-editor-complaint textarea {
-  min-height: 60px;
-  font: inherit;
+.pack-editor-complaint-target {
+  font-weight: 600;
 }

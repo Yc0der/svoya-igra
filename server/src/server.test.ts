@@ -2372,4 +2372,29 @@ describe('createServer pack editor', () => {
     expect(headingCount).toBe(1);
     admin.ws.close();
   });
+
+  it('admin-report-question with a missing profile file returns a distinct reason from a missing pack file', async () => {
+    // Fix 7 (финальное ревью) — ENOENT из appendComplaint (файл профиля
+    // пропал) не должен звучать как ENOENT из loadPack (файл пакета
+    // пропал) — иначе непонятно, какой из двух файлов на самом деле не
+    // найден.
+    await rm(profilePath, { force: true });
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-report-question',
+        filename: 'a.json',
+        questionId: 'a1',
+        complaint: 'жалоба',
+      }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toEqual({
+      type: 'admin-report-error',
+      filename: 'a.json',
+      questionId: 'a1',
+      reason: 'не удалось сохранить жалобу — файл профиля не найден',
+    });
+    admin.ws.close();
+  });
 });
