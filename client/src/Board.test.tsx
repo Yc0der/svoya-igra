@@ -222,6 +222,42 @@ describe('Board', () => {
     expect(screen.getByText('Столица Франции?')).toBeInTheDocument();
   });
 
+  it('shows the question image when present', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            text: 'Что за цветок на картинке?',
+            price: 100,
+            themeName: 'Тема',
+            image: '/media/sport/flower.jpg',
+          },
+        }),
+      }),
+    );
+    render(<Board />);
+    const img = screen.getByRole('img') as HTMLImageElement;
+    expect(img.src).toContain('/media/sport/flower.jpg');
+  });
+
+  it('does not show an image when the question has none', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            text: 'Столица Франции?',
+            price: 100,
+            themeName: 'Тема',
+          },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
   it('shows a countdown while the question is open', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
