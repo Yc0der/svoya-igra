@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -892,6 +892,7 @@ describe('createServer cat-in-the-bag', () => {
       text: null,
       price: 100,
       themeName: 'Тема',
+      image: null,
     });
 
     picker.ws.send(
@@ -912,6 +913,7 @@ describe('createServer cat-in-the-bag', () => {
       text: 'Вопрос-кот?',
       price: 100,
       themeName: 'Тема',
+      image: null,
     });
     expect(afterAssign.game.exclusiveAnswererParticipantId).toBe(
       other.participantId,
@@ -2396,5 +2398,42 @@ describe('createServer pack editor', () => {
       reason: 'не удалось сохранить жалобу — файл профиля не найден',
     });
     admin.ws.close();
+  });
+});
+
+describe('createServer media static route', () => {
+  let server: GameServer;
+  let dir: string;
+  let packsDir: string;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-media-route-'));
+    packsDir = await mkdtemp(join(tmpdir(), 'svoya-igra-media-route-packs-'));
+    const mediaDir = join(packsDir, 'media', 'sport');
+    await mkdir(mediaDir, { recursive: true });
+    await writeFile(join(mediaDir, 'photo.jpg'), 'fake image bytes', 'utf8');
+    const room = new Room();
+    server = createServer({ room, clientDistPath: dir, port: 8080, packsDir });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+    await rm(packsDir, { recursive: true, force: true });
+  });
+
+  it('serves a file under packs/media/ at /media/', async () => {
+    const res = await fetch(`${baseUrl}/media/sport/photo.jpg`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('fake image bytes');
+  });
+
+  it('returns 404 for a media path that does not exist, not the client SPA fallback', async () => {
+    const res = await fetch(`${baseUrl}/media/sport/ghost.jpg`);
+    expect(res.status).toBe(404);
   });
 });

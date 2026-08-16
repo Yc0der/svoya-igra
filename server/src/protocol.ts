@@ -27,6 +27,11 @@ export interface GameStateView {
     text: string | null;
     price: number;
     themeName: string;
+    // Готовый относительный URL картинки (`/media/<пак>/<файл>`) или null,
+    // если у вопроса нет картинки. Та же видимость, что у text — null во
+    // время cat-handoff/торгов, пока получатель/победитель ещё не
+    // определён (design.md, 2026-08-16, «Сервер и клиент»).
+    image: string | null;
   } | null;
   buzzedParticipantId: string | null;
   // Не null только пока фаза — question-open/buzzed/judging для вопроса,

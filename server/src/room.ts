@@ -727,6 +727,19 @@ export class Room {
                 : currentQuestionData.text,
             price: currentQuestionData.price,
             themeName: currentThemeName!,
+            // Та же видимость, что у text выше — скрыта во время
+            // cat-handoff/торгов. this.activePackFilename почти всегда
+            // задан вместе с this.pack (constructor/selectPack всегда
+            // присваивают их парой) — на случай расхождения фолбэк на
+            // null безопаснее, чем бросать ошибку ради поля, которое и
+            // так необязательно.
+            image:
+              (game.phase === 'cat-handoff' ||
+                game.phase === 'auction-bidding') ||
+              !currentQuestionData.image ||
+              !this.activePackFilename
+                ? null
+                : `/media/${this.activePackFilename.replace(/\.json$/, '')}/${currentQuestionData.image}`,
           }
         : null,
       buzzedParticipantId: game.buzzedCounterId,
