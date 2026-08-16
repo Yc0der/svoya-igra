@@ -1,6 +1,7 @@
 import type { Phase } from './engine.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
+import type { Pack, Question } from './pack.js';
 
 export interface ParticipantView {
   id: string;
@@ -114,7 +115,32 @@ export type ClientMessage =
   | { type: 'refresh-packs' }
   | { type: 'select-pack'; filename: string }
   | { type: 'admin-refresh-packs' }
-  | { type: 'admin-select-pack'; filename: string };
+  | { type: 'admin-select-pack'; filename: string }
+  // Ручной редактор пакетов, веха A (design.md, 2026-08-15) — просмотр,
+  // правка и удаление существующего вопроса. id не редактируется, только
+  // используется для поиска вопроса внутри пакета.
+  | { type: 'admin-get-pack'; filename: string }
+  | {
+      type: 'admin-update-question';
+      filename: string;
+      questionId: string;
+      price: number;
+      text: string;
+      answer: string;
+      comment?: string;
+      // Не «type» — не путать с полем-дискриминантом самого сообщения.
+      questionType: Question['type'];
+    }
+  | { type: 'admin-delete-question'; filename: string; questionId: string }
+  // Жалоба на вопрос — список для беглого просмотра (design.md, 2026-08-15).
+  // Контекст вопроса (текст/ответ/тема/цена) сервер достаёт сам по
+  // filename+questionId, от клиента нужен только текст жалобы.
+  | {
+      type: 'admin-report-question';
+      filename: string;
+      questionId: string;
+      complaint: string;
+    };
 
 export type StartGameErrorReason =
   | 'not-enough-players'
@@ -149,4 +175,18 @@ export type ServerMessage =
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   // Попытка select-pack/admin-select-pack на файл, ставший невалидным или
   // исчезнувший между обновлением списка и выбором.
-  | { type: 'select-pack-error'; reason: 'unknown-file' };
+  | { type: 'select-pack-error'; reason: 'unknown-file' }
+  // Ответ на все три admin-get-pack/admin-update-question/
+  // admin-delete-question сразу — один тип на три запроса, чтобы клиенту
+  // не нужно было по-разному обрабатывать три разных формы успеха.
+  | { type: 'admin-pack'; filename: string; pack: Pack }
+  | { type: 'admin-pack-error'; filename: string; reason: string }
+  // Отдельные от admin-pack/admin-pack-error — жалоба не редактирует пакет,
+  // её ошибка не должна путаться с ошибкой правки вопроса.
+  | { type: 'admin-report-ack'; filename: string; questionId: string }
+  | {
+      type: 'admin-report-error';
+      filename: string;
+      questionId: string;
+      reason: string;
+    };

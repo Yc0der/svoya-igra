@@ -11,14 +11,26 @@ import type {
   ParticipantView,
   ServerMessage,
 } from './protocol.js';
-import { listAvailablePacks } from './packs.js';
+import {
+  listAvailablePacks,
+  updateQuestion,
+  deleteQuestion,
+  findQuestionLocation,
+} from './packs.js';
 import { loadPack } from './pack.js';
+import type { Question } from './pack.js';
+import { appendComplaint, type ComplaintEntry } from './generatorProfile.js';
 
 export interface CreateServerOptions {
   room: Room;
   clientDistPath: string;
   port: number;
   packsDir: string;
+  // Опционально: нужен только для admin-report-question. Опционален, чтобы
+  // не менять все существующие вызовы createServer в тестах, которым этот
+  // путь не нужен вовсе — сервер без него просто не может принимать жалобы
+  // (тихий no-op, см. handleReportQuestion).
+  profilePath?: string;
 }
 
 export interface GameServer {
@@ -59,7 +71,7 @@ function lanUrlFor(address: string | null, port: number): string {
 }
 
 export function createServer(options: CreateServerOptions): GameServer {
-  const { room, clientDistPath, port, packsDir } = options;
+  const { room, clientDistPath, port, packsDir, profilePath } = options;
   const assets = sirv(clientDistPath, { single: true });
 
   const httpServer = createHttpServer((req, res) => {
@@ -140,6 +152,27 @@ export function createServer(options: CreateServerOptions): GameServer {
   // Сокеты, ответившие на последний пинг (или только что подключившиеся).
   // WeakSet, чтобы закрытые сокеты не удерживались в памяти.
   const alive = new WeakSet<WebSocket>();
+
+  // Сериализует конкурентные записи в один и тот же файл между собой — общий
+  // паттерн для обоих ресурсов, которые сервер пишет: файлы пакетов
+  // (updateQuestion/deleteQuestion) и profile.md (appendComplaint). Без
+  // этого два запроса подряд читают файл до того, как предыдущий успел его
+  // перезаписать, и один результат теряет правку другого (см. комментарий у
+  // исходного withPackWriteLock, Веха A) — тот же баг возможен и для
+  // profile.md, только там вместо потерянной правки вопроса теряется вся
+  // жалоба целиком. .catch(() => {}) на очереди — не глотает ошибку
+  // вызывающего (та уже ушла через результат withLock), а не даёт
+  // отклонённому промису прервать очередь для последующих операций.
+  function createWriteLock(): <T>(fn: () => Promise<T>) => Promise<T> {
+    let queue: Promise<unknown> = Promise.resolve();
+    return function withLock<T>(fn: () => Promise<T>): Promise<T> {
+      const result = queue.then(fn, fn);
+      queue = result.catch(() => {});
+      return result;
+    };
+  }
+  const withPackWriteLock = createWriteLock();
+  const withProfileWriteLock = createWriteLock();
 
   wss.on('connection', (ws) => {
     alive.add(ws);
@@ -407,6 +440,186 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.filename === 'string'
       ) {
         await handleSelectPack(null, message.filename);
+      }
+
+      if (
+        message.type === 'admin-get-pack' &&
+        typeof message.filename === 'string'
+      ) {
+        await handleGetPack(message.filename);
+      }
+
+      if (
+        message.type === 'admin-update-question' &&
+        typeof message.filename === 'string' &&
+        typeof message.questionId === 'string' &&
+        typeof message.price === 'number' &&
+        typeof message.text === 'string' &&
+        typeof message.answer === 'string' &&
+        (message.comment === undefined ||
+          typeof message.comment === 'string') &&
+        typeof message.questionType === 'string'
+      ) {
+        await handleUpdateQuestion(message.filename, message.questionId, {
+          price: message.price,
+          text: message.text,
+          answer: message.answer,
+          comment: message.comment,
+          questionType: message.questionType as Question['type'],
+        });
+      }
+
+      if (
+        message.type === 'admin-delete-question' &&
+        typeof message.filename === 'string' &&
+        typeof message.questionId === 'string'
+      ) {
+        await handleDeleteQuestion(message.filename, message.questionId);
+      }
+
+      if (
+        message.type === 'admin-report-question' &&
+        typeof message.filename === 'string' &&
+        typeof message.questionId === 'string' &&
+        typeof message.complaint === 'string'
+      ) {
+        await handleReportQuestion(
+          message.filename,
+          message.questionId,
+          message.complaint,
+        );
+      }
+
+      // Сырые сообщения Node (ENOENT: ... open 'C:\...\packs\ghost.json') не
+      // годятся для отправки в админку — они на английском и раскрывают
+      // абсолютный путь на диске сервера. Ошибки validatePack/updateQuestion/
+      // deleteQuestion, наоборот, уже человекочитаемые по-русски и должны
+      // доходить как есть — от файловых их отличает код ENOENT, которого у
+      // тех ошибок нет.
+      function adminPackErrorReason(err: unknown): string {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          return 'файл не найден';
+        }
+        return (err as Error).message;
+      }
+
+      // Тот же приём, что у handleSelectPack: легитимный клиент никогда сам
+      // не конструирует filename — эхом отправляет то, что уже видел в
+      // availablePacks. Значение, не прошедшее эту проверку, может прийти
+      // только от нестандартного отправителя — тихий no-op.
+      async function handleGetPack(filename: string): Promise<void> {
+        if (basename(filename) !== filename) return;
+        try {
+          const pack = await loadPack(join(packsDir, filename));
+          send(ws, { type: 'admin-pack', filename, pack });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: adminPackErrorReason(err),
+          });
+        }
+      }
+
+      async function handleUpdateQuestion(
+        filename: string,
+        questionId: string,
+        fields: {
+          price: number;
+          text: string;
+          answer: string;
+          comment?: string;
+          questionType: Question['type'];
+        },
+      ): Promise<void> {
+        if (basename(filename) !== filename) return;
+        try {
+          const pack = await withPackWriteLock(() =>
+            updateQuestion(packsDir, filename, questionId, fields),
+          );
+          send(ws, { type: 'admin-pack', filename, pack });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: adminPackErrorReason(err),
+          });
+        }
+      }
+
+      async function handleDeleteQuestion(
+        filename: string,
+        questionId: string,
+      ): Promise<void> {
+        if (basename(filename) !== filename) return;
+        try {
+          const pack = await withPackWriteLock(() =>
+            deleteQuestion(packsDir, filename, questionId),
+          );
+          send(ws, { type: 'admin-pack', filename, pack });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: adminPackErrorReason(err),
+          });
+        }
+      }
+
+      async function handleReportQuestion(
+        filename: string,
+        questionId: string,
+        complaint: string,
+      ): Promise<void> {
+        if (basename(filename) !== filename) return;
+        if (!profilePath) return;
+        // Fix 7 (финальное ревью) — две разные операции могут провалиться
+        // здесь (поиск пакета/вопроса vs. запись жалобы в профиль), и общий
+        // catch на весь метод стирал это различие: ENOENT от appendComplaint
+        // (файл профиля пропал/переехал) и ENOENT от loadPack (пакет
+        // пропал/переехал) оба превращались в одинаковое «файл не найден» —
+        // не видно, какой из двух файлов имелся в виду. Два отдельных
+        // try/catch держат сообщения однозначными.
+        let entry: ComplaintEntry;
+        try {
+          const pack = await loadPack(join(packsDir, filename));
+          const location = findQuestionLocation(pack, questionId);
+          if (!location) {
+            throw new Error(`вопрос с id "${questionId}" не найден в пакете`);
+          }
+          entry = {
+            date: new Date().toISOString().slice(0, 10),
+            packFilename: filename,
+            packTitle: pack.title,
+            themeName: location.themeName,
+            price: location.question.price,
+            questionText: location.question.text,
+            answer: location.question.answer,
+            complaint,
+          };
+        } catch (err) {
+          send(ws, {
+            type: 'admin-report-error',
+            filename,
+            questionId,
+            reason: adminPackErrorReason(err),
+          });
+          return;
+        }
+        try {
+          await withProfileWriteLock(() => appendComplaint(profilePath, entry));
+          send(ws, { type: 'admin-report-ack', filename, questionId });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-report-error',
+            filename,
+            questionId,
+            reason:
+              (err as NodeJS.ErrnoException).code === 'ENOENT'
+                ? 'не удалось сохранить жалобу — файл профиля не найден'
+                : adminPackErrorReason(err),
+          });
+        }
       }
 
       async function handleSelectPack(

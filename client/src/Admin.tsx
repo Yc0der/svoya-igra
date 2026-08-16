@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAdminConnection } from './useAdminConnection';
+import type { Question } from './useAdminConnection';
 import type { GameStateView } from './useRoomConnection';
 import { START_GAME_ERROR_TEXT } from './errorText';
 
@@ -37,6 +38,19 @@ export function Admin() {
     selectPackError,
     refreshPacks,
     selectPack,
+    editedPack,
+    editedPackFilename,
+    editedPackError,
+    editedPackVersion,
+    clearPackError,
+    resetPackEditor,
+    getPack,
+    updateQuestion,
+    deleteQuestion,
+    reportError,
+    reportAckVersion,
+    clearReportError,
+    reportQuestion,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -45,6 +59,170 @@ export function Admin() {
   // (design.md), лишняя защита на каждой кнопке не соответствовала бы этому
   // выбору.
   const [confirmingWipe, setConfirmingWipe] = useState(false);
+  // Режим редактора: какой файл сейчас открыт (null — обычный список
+  // пакетов), какой вопрос открыт формой, и текущие значения формы —
+  // отдельные строковые поля, а не готовые number/enum: значение в инпуте
+  // цены должно оставаться редактируемым текстом (в том числе временно
+  // невалидным, «0» или пустым), пока не нажали «Сохранить».
+  const [editingFilename, setEditingFilename] = useState<string | null>(null);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(
+    null,
+  );
+  const [formPrice, setFormPrice] = useState('');
+  const [formText, setFormText] = useState('');
+  const [formAnswer, setFormAnswer] = useState('');
+  const [formComment, setFormComment] = useState('');
+  const [formType, setFormType] = useState<Question['type']>('обычный');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Вид редактора: 'list' по умолчанию — беглый просмотр запрошен как
+  // основной сценарий входа (design.md, 2026-08-15).
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [complainingQuestionId, setComplainingQuestionId] = useState<
+    string | null
+  >(null);
+  const [complaintText, setComplaintText] = useState('');
+  // Тот же приём, что pendingSaveVersionRef у формы правки: версия
+  // reportAckVersion, зафиксированная в момент клика «Отправить» — эффект
+  // ниже закрывает панель жалобы только когда пришёл ack именно на эту
+  // жалобу, не на чужую (см. openComplaintPanel/handleSubmitComplaint).
+  const pendingReportVersionRef = useRef<number | null>(null);
+  // editedPackVersion, зафиксированный в момент клика «Сохранить» — см.
+  // эффект ниже, который закрывает форму, когда версия ушла вперёд (сервер
+  // прислал новый admin-pack в ответ именно на этот save), но оставляет её
+  // открытой при admin-pack-error (версия не меняется). null — нет
+  // незавершённого save, чтобы этот эффект не реагировал на чужие обновления
+  // пакета (первичная загрузка, фоновое обновление, save другого вопроса).
+  const pendingSaveVersionRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (editingFilename) getPack(editingFilename);
+    // Смена файла — закрыть открытую форму вопроса предыдущего пакета.
+    setEditingQuestionId(null);
+  }, [editingFilename]);
+
+  // Fix 2 (Веха A, финальное ревью): успешный save не даёт иного видимого
+  // сигнала, кроме нового admin-pack — закрываем форму, когда видим версию
+  // старше зафиксированной в handleSaveQuestion.
+  useEffect(() => {
+    if (
+      pendingSaveVersionRef.current !== null &&
+      editedPackVersion > pendingSaveVersionRef.current
+    ) {
+      pendingSaveVersionRef.current = null;
+      setEditingQuestionId(null);
+    }
+  }, [editedPackVersion]);
+
+  useEffect(() => {
+    if (
+      pendingReportVersionRef.current !== null &&
+      reportAckVersion > pendingReportVersionRef.current
+    ) {
+      pendingReportVersionRef.current = null;
+      setComplainingQuestionId(null);
+      setComplaintText('');
+    }
+  }, [reportAckVersion]);
+
+  function openQuestionForm(question: Question): void {
+    setEditingQuestionId(question.id);
+    setFormPrice(String(question.price));
+    setFormText(question.text);
+    setFormAnswer(question.answer);
+    setFormComment(question.comment ?? '');
+    setFormType(question.type);
+    setConfirmingDelete(false);
+    // Fix 3 — не тащить ошибку от предыдущего открытого вопроса в форму
+    // другого.
+    clearPackError();
+    // Открытие другого вопроса делает эту ссылку неактуальной — иначе
+    // отложенный ответ на save прежнего вопроса мог бы закрыть форму того,
+    // который открыли только что.
+    pendingSaveVersionRef.current = null;
+    // Форма правки и панель жалобы взаимоисключающие — открытие одной
+    // закрывает другую (design.md, «Правило»).
+    setComplainingQuestionId(null);
+  }
+
+  function openComplaintPanel(questionId: string): void {
+    setComplainingQuestionId(questionId);
+    setComplaintText('');
+    clearReportError();
+    pendingReportVersionRef.current = null;
+    // Симметрично openQuestionForm — открытие панели жалобы закрывает
+    // форму правки, если та была открыта.
+    setEditingQuestionId(null);
+  }
+
+  function handleSubmitComplaint(): void {
+    if (!editingFilename || !complainingQuestionId) return;
+    pendingReportVersionRef.current = reportAckVersion;
+    reportQuestion(editingFilename, complainingQuestionId, complaintText);
+  }
+
+  function handleViewModeChange(mode: 'grid' | 'list'): void {
+    setViewMode(mode);
+    // Переключение вида закрывает любую открытую панель — «Пожаловаться»
+    // существует только в списке, а форма правки закрывается для
+    // симметрии, чтобы переключение вида было предсказуемым «чистым»
+    // действием в обе стороны (design.md, «Правило»).
+    setEditingQuestionId(null);
+    setComplainingQuestionId(null);
+  }
+
+  const isValidComplaint = complaintText.trim() !== '';
+
+  function handleSaveQuestion(): void {
+    if (!editingFilename || !editingQuestionId) return;
+    pendingSaveVersionRef.current = editedPackVersion;
+    updateQuestion(editingFilename, editingQuestionId, {
+      price: Number(formPrice),
+      text: formText,
+      answer: formAnswer,
+      comment: formComment.trim() === '' ? undefined : formComment,
+      questionType: formType,
+    });
+  }
+
+  function handleDeleteQuestion(): void {
+    if (!confirmingDelete) {
+      setConfirmingDelete(true);
+      return;
+    }
+    if (editingFilename && editingQuestionId) {
+      deleteQuestion(editingFilename, editingQuestionId);
+    }
+    setConfirmingDelete(false);
+  }
+
+  // Fix 1 (Веха A, финальное ревью) — форма держится открытой не только по
+  // editingQuestionId, а по тому, что вопрос с этим id всё ещё есть в
+  // editedPack: после успешного delete сервер шлёт новый пакет без этого
+  // вопроса, и форма должна закрыться сама, а не показывать значения уже
+  // не существующего вопроса. При admin-pack-error (напр. «нельзя удалить
+  // последний вопрос в теме») editedPack не меняется, вопрос никуда не
+  // делся, и форма остаётся открытой с ошибкой — как и раньше.
+  const questionStillExists =
+    editingQuestionId !== null &&
+    editedPack !== null &&
+    editedPack.rounds.some((round) =>
+      round.themes.some((theme) =>
+        theme.questions.some((q) => q.id === editingQuestionId),
+      ),
+    );
+
+  // Те же границы, что проверяет сервер (packs.ts, validatePack/
+  // validateQuestion): цена — положительное число, текст и ответ — не
+  // пустые строки. Без этой проверки кнопка «Сохранить» всегда кликабельна,
+  // а недопустимое значение молча улетает в admin-pack-error — тот же
+  // принцип, что уже применён к форме ставки в аукционе (Player.tsx).
+  const parsedFormPrice = Number(formPrice);
+  const isValidForm =
+    Number.isFinite(parsedFormPrice) &&
+    Number.isInteger(parsedFormPrice) &&
+    parsedFormPrice > 0 &&
+    formText.trim() !== '' &&
+    formAnswer.trim() !== '';
 
   function roleOf(participantId: string): string {
     if (game) {
@@ -122,37 +300,259 @@ export function Admin() {
             Не удалось выбрать пакет — файл стал невалиден или исчез.
           </p>
         )}
-        <div className="admin-actions">
-          <button className="button" onClick={refreshPacks}>
-            Обновить
-          </button>
-        </div>
-        {availablePacks.length === 0 ? (
-          <p>
-            Пакеты не найдены — положите файлы в packs/ и нажмите «Обновить».
-          </p>
+        {editingFilename === null ? (
+          <>
+            <div className="admin-actions">
+              <button className="button" onClick={refreshPacks}>
+                Обновить
+              </button>
+              <button
+                className="button"
+                onClick={() => setEditingFilename(activePackFilename)}
+                disabled={activePackFilename === null}
+              >
+                Редактировать
+              </button>
+            </div>
+            {availablePacks.length === 0 ? (
+              <p>
+                Пакеты не найдены — положите файлы в packs/ и нажмите
+                «Обновить».
+              </p>
+            ) : (
+              <ul className="admin-packs">
+                {availablePacks.map((p) => {
+                  const selected = p.filename === activePackFilename;
+                  return (
+                    <li key={p.filename}>
+                      <button
+                        className={`button${selected ? ' is-selected' : ''}`}
+                        onClick={() => selectPack(p.filename)}
+                        disabled={selected}
+                      >
+                        <span className="admin-pack-title">{p.title}</span>
+                        {p.description && (
+                          <span className="admin-pack-description">
+                            {p.description}
+                          </span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </>
         ) : (
-          <ul className="admin-packs">
-            {availablePacks.map((p) => {
-              const selected = p.filename === activePackFilename;
-              return (
-                <li key={p.filename}>
-                  <button
-                    className={`button${selected ? ' is-selected' : ''}`}
-                    onClick={() => selectPack(p.filename)}
-                    disabled={selected}
-                  >
-                    <span className="admin-pack-title">{p.title}</span>
-                    {p.description && (
-                      <span className="admin-pack-description">
-                        {p.description}
-                      </span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="pack-editor">
+            <div className="admin-actions">
+              <button
+                className="button"
+                onClick={() => {
+                  setEditingFilename(null);
+                  // Fix 6 — не тащить содержимое этого пакета в следующее
+                  // открытие редактора: без сброса до ответа сервера мог бы
+                  // мелькнуть старый пакет.
+                  resetPackEditor();
+                }}
+              >
+                Готово
+              </button>
+            </div>
+            {editedPackError && (
+              <p className="player-alert" role="alert">
+                {editedPackError}
+              </p>
+            )}
+            {editedPackFilename === editingFilename && editedPack ? (
+              <>
+                <div
+                  className="pack-editor-view-toggle"
+                  role="radiogroup"
+                  aria-label="Вид редактора"
+                >
+                  <label>
+                    <input
+                      type="radio"
+                      name="pack-editor-view"
+                      checked={viewMode === 'list'}
+                      onChange={() => handleViewModeChange('list')}
+                    />
+                    Список
+                  </label>
+                  <label>
+                    <input
+                      type="radio"
+                      name="pack-editor-view"
+                      checked={viewMode === 'grid'}
+                      onChange={() => handleViewModeChange('grid')}
+                    />
+                    Сетка
+                  </label>
+                </div>
+                {editedPack.rounds.map((round, ri) => (
+                  <div key={ri} className="pack-editor-round">
+                    <h3>Раунд {ri + 1}</h3>
+                    {round.themes.map((theme, ti) => (
+                      <div key={ti} className="pack-editor-theme">
+                        <span className="pack-editor-theme-name">
+                          {theme.name}
+                        </span>
+                        {viewMode === 'grid' ? (
+                          theme.questions.map((q) => (
+                            <button
+                              key={q.id}
+                              className="button"
+                              onClick={() => openQuestionForm(q)}
+                            >
+                              {q.price}
+                            </button>
+                          ))
+                        ) : (
+                          <ul className="pack-editor-list">
+                            {theme.questions.map((q) => (
+                              <li key={q.id} className="pack-editor-list-row">
+                                <div className="pack-editor-list-row-main">
+                                  <button
+                                    className="button pack-editor-list-question"
+                                    onClick={() => openQuestionForm(q)}
+                                  >
+                                    <span className="pack-editor-list-price">
+                                      {q.price}
+                                    </span>
+                                    <span className="pack-editor-list-text">
+                                      {q.text}
+                                    </span>
+                                  </button>
+                                  <button
+                                    className="button"
+                                    onClick={() => openComplaintPanel(q.id)}
+                                  >
+                                    Пожаловаться
+                                  </button>
+                                </div>
+                                {/* Fix 1/2 (финальное ревью) — панель жалобы
+                                    рендерится прямо внутри строки того
+                                    вопроса, на который жалуются: на реальном
+                                    паке (много вопросов) панель, отрисованная
+                                    после всего editedPack.rounds.map(...),
+                                    открывалась на тысячи пикселей ниже
+                                    видимой области и выглядела как
+                                    «ничего не произошло». complainingQuestionId
+                                    гарантирует, что открыта не больше одной
+                                    панели одновременно — единственный путь
+                                    рендера, без дублирования внизу редактора. */}
+                                {complainingQuestionId === q.id && (
+                                  <div className="pack-editor-complaint">
+                                    <p className="pack-editor-complaint-target">
+                                      «{q.price} — {q.text}»
+                                    </p>
+                                    {reportError && (
+                                      <p className="player-alert" role="alert">
+                                        {reportError}
+                                      </p>
+                                    )}
+                                    <label htmlFor="pack-editor-complaint-text">
+                                      Что не понравилось
+                                    </label>
+                                    <textarea
+                                      id="pack-editor-complaint-text"
+                                      value={complaintText}
+                                      onChange={(e) =>
+                                        setComplaintText(e.target.value)
+                                      }
+                                    />
+                                    <div className="admin-actions">
+                                      <button
+                                        className="button button--primary"
+                                        onClick={handleSubmitComplaint}
+                                        disabled={!isValidComplaint}
+                                      >
+                                        Отправить
+                                      </button>
+                                      <button
+                                        className="button"
+                                        onClick={() =>
+                                          setComplainingQuestionId(null)
+                                        }
+                                      >
+                                        Отмена
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                {questionStillExists && (
+                  <div className="pack-editor-form">
+                    <label htmlFor="pack-editor-price">Цена</label>
+                    <input
+                      id="pack-editor-price"
+                      type="number"
+                      value={formPrice}
+                      onChange={(e) => setFormPrice(e.target.value)}
+                    />
+                    <label htmlFor="pack-editor-text">Текст</label>
+                    <textarea
+                      id="pack-editor-text"
+                      value={formText}
+                      onChange={(e) => setFormText(e.target.value)}
+                    />
+                    <label htmlFor="pack-editor-answer">Ответ</label>
+                    <textarea
+                      id="pack-editor-answer"
+                      value={formAnswer}
+                      onChange={(e) => setFormAnswer(e.target.value)}
+                    />
+                    <label htmlFor="pack-editor-comment">
+                      Комментарий (необязательно)
+                    </label>
+                    <textarea
+                      id="pack-editor-comment"
+                      value={formComment}
+                      onChange={(e) => setFormComment(e.target.value)}
+                    />
+                    <label htmlFor="pack-editor-type">Тип</label>
+                    <select
+                      id="pack-editor-type"
+                      value={formType}
+                      onChange={(e) =>
+                        setFormType(e.target.value as Question['type'])
+                      }
+                    >
+                      <option value="обычный">обычный</option>
+                      <option value="кот">кот</option>
+                      <option value="аукцион">аукцион</option>
+                    </select>
+                    <div className="admin-actions">
+                      <button
+                        className="button button--primary"
+                        onClick={handleSaveQuestion}
+                        disabled={!isValidForm}
+                      >
+                        Сохранить
+                      </button>
+                      <button
+                        className={`button button--no${confirmingDelete ? ' is-selected' : ''}`}
+                        onClick={handleDeleteQuestion}
+                        onBlur={() => setConfirmingDelete(false)}
+                      >
+                        {confirmingDelete ? 'Точно?' : 'Удалить'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p>Загрузка…</p>
+            )}
+          </div>
         )}
       </section>
 

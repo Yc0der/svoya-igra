@@ -253,4 +253,266 @@ describe('useAdminConnection', () => {
 
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
+
+  it('sends admin-get-pack and picks up the returned pack', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.getPack('a.json'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+
+    const pack = {
+      title: 'Пак',
+      author: 'Автор',
+      createdAt: '2026-08-04',
+      rounds: [],
+    };
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPack).toEqual(pack);
+    expect(result.current.editedPackFilename).toBe('a.json');
+    expect(result.current.editedPackError).toBeNull();
+  });
+
+  it('sends admin-update-question with all fields, including the optional comment', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      result.current.updateQuestion('a.json', 'q1', {
+        price: 200,
+        text: 'Текст?',
+        answer: 'Ответ',
+        comment: 'Комментарий',
+        questionType: 'обычный',
+      }),
+    );
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-update-question',
+        filename: 'a.json',
+        questionId: 'q1',
+        price: 200,
+        text: 'Текст?',
+        answer: 'Ответ',
+        comment: 'Комментарий',
+        questionType: 'обычный',
+      }),
+    );
+  });
+
+  it('sends admin-delete-question', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.deleteQuestion('a.json', 'q1'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-delete-question',
+        filename: 'a.json',
+        questionId: 'q1',
+      }),
+    );
+  });
+
+  it('surfaces an admin-pack-error reason and filename from the server', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-pack-error',
+        filename: 'a.json',
+        reason: 'вопрос с id "ghost" не найден в пакете',
+      }),
+    );
+    expect(result.current.editedPackError).toBe(
+      'вопрос с id "ghost" не найден в пакете',
+    );
+    expect(result.current.editedPackFilename).toBe('a.json');
+  });
+
+  it('clears editedPackError once a later admin-pack arrives', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-pack-error',
+        filename: 'a.json',
+        reason: 'ошибка',
+      }),
+    );
+    expect(result.current.editedPackError).toBe('ошибка');
+
+    const pack = {
+      title: 'Пак',
+      author: 'Автор',
+      createdAt: '2026-08-04',
+      rounds: [],
+    };
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPackError).toBeNull();
+    expect(result.current.editedPack).toEqual(pack);
+  });
+
+  it('increments editedPackVersion on every admin-pack, but not on admin-pack-error', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+    expect(result.current.editedPackVersion).toBe(0);
+
+    const pack = {
+      title: 'Пак',
+      author: 'Автор',
+      createdAt: '2026-08-04',
+      rounds: [],
+    };
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPackVersion).toBe(1);
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-pack-error',
+        filename: 'a.json',
+        reason: 'ошибка',
+      }),
+    );
+    expect(result.current.editedPackVersion).toBe(1);
+
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPackVersion).toBe(2);
+  });
+
+  it('clearPackError resets editedPackError to null locally, without a server round-trip', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-pack-error',
+        filename: 'a.json',
+        reason: 'ошибка',
+      }),
+    );
+    expect(result.current.editedPackError).toBe('ошибка');
+
+    act(() => result.current.clearPackError());
+    expect(result.current.editedPackError).toBeNull();
+    expect(socket.sent).toEqual([]);
+  });
+
+  it('resetPackEditor clears editedPack, editedPackFilename and editedPackError', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    const pack = {
+      title: 'Пак',
+      author: 'Автор',
+      createdAt: '2026-08-04',
+      rounds: [],
+    };
+    act(() =>
+      socket.emitMessage({ type: 'admin-pack', filename: 'a.json', pack }),
+    );
+    expect(result.current.editedPack).toEqual(pack);
+
+    act(() => result.current.resetPackEditor());
+    expect(result.current.editedPack).toBeNull();
+    expect(result.current.editedPackFilename).toBeNull();
+    expect(result.current.editedPackError).toBeNull();
+  });
+
+  it('sends admin-report-question with the complaint text', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      result.current.reportQuestion('a.json', 'q1', 'непонятная формулировка'),
+    );
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-report-question',
+        filename: 'a.json',
+        questionId: 'q1',
+        complaint: 'непонятная формулировка',
+      }),
+    );
+  });
+
+  it('increments reportAckVersion and clears reportError on admin-report-ack', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-report-error',
+        filename: 'a.json',
+        questionId: 'q1',
+        reason: 'ошибка',
+      }),
+    );
+    expect(result.current.reportError).toBe('ошибка');
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-report-ack',
+        filename: 'a.json',
+        questionId: 'q1',
+      }),
+    );
+    expect(result.current.reportError).toBeNull();
+    expect(result.current.reportAckVersion).toBe(1);
+  });
+
+  it('surfaces the reason from admin-report-error', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-report-error',
+        filename: 'a.json',
+        questionId: 'q1',
+        reason: 'вопрос с таким id не найден',
+      }),
+    );
+    expect(result.current.reportError).toBe('вопрос с таким id не найден');
+  });
+
+  it('clearReportError resets reportError locally without waiting for the server', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-report-error',
+        filename: 'a.json',
+        questionId: 'q1',
+        reason: 'ошибка',
+      }),
+    );
+    act(() => result.current.clearReportError());
+    expect(result.current.reportError).toBeNull();
+  });
 });
