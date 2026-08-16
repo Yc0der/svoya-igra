@@ -306,6 +306,13 @@ export function Admin() {
               <button className="button" onClick={refreshPacks}>
                 Обновить
               </button>
+              <button
+                className="button"
+                onClick={() => setEditingFilename(activePackFilename)}
+                disabled={activePackFilename === null}
+              >
+                Редактировать
+              </button>
             </div>
             {availablePacks.length === 0 ? (
               <p>
@@ -329,12 +336,6 @@ export function Admin() {
                             {p.description}
                           </span>
                         )}
-                      </button>
-                      <button
-                        className="button"
-                        onClick={() => setEditingFilename(p.filename)}
-                      >
-                        Редактировать
                       </button>
                     </li>
                   );

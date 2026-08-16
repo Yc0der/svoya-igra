@@ -446,6 +446,7 @@ describe('Admin — редактор пакета', () => {
     const getPack = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -459,10 +460,48 @@ describe('Admin — редактор пакета', () => {
     expect(getPack).toHaveBeenCalledWith('a.json');
   });
 
+  it('shows a single "Редактировать" button regardless of how many packs are listed, editing whichever pack is active', async () => {
+    const getPack = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        activePackFilename: 'b.json',
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+          { filename: 'b.json', title: 'Пак Б', description: null },
+        ],
+        getPack,
+      }),
+    );
+    render(<Admin />);
+    expect(
+      screen.getAllByRole('button', { name: /редактировать/i }),
+    ).toHaveLength(1);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    expect(getPack).toHaveBeenCalledWith('b.json');
+  });
+
+  it('disables "Редактировать" when no pack is currently active', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        activePackFilename: null,
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+      }),
+    );
+    render(<Admin />);
+    expect(
+      screen.getByRole('button', { name: /редактировать/i }),
+    ).toBeDisabled();
+  });
+
   it('renders the grid once the pack arrives, with a button per question price', async () => {
     const getPack = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -476,6 +515,7 @@ describe('Admin — редактор пакета', () => {
 
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -493,6 +533,7 @@ describe('Admin — редактор пакета', () => {
   it('opens the edit form with the question’s current values on price click', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -515,6 +556,7 @@ describe('Admin — редактор пакета', () => {
     const updateQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -547,6 +589,7 @@ describe('Admin — редактор пакета', () => {
   it('disables "Сохранить" for an invalid price or empty text', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -570,6 +613,7 @@ describe('Admin — редактор пакета', () => {
   it('shows the error from editedPackError and keeps the form open', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -593,6 +637,7 @@ describe('Admin — редактор пакета', () => {
     const deleteQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -621,6 +666,7 @@ describe('Admin — редактор пакета', () => {
     const deleteQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -648,6 +694,7 @@ describe('Admin — редактор пакета', () => {
     // только реакция формы на исчезновение вопроса из editedPack).
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -675,6 +722,7 @@ describe('Admin — редактор пакета', () => {
     const updateQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -702,6 +750,7 @@ describe('Admin — редактор пакета', () => {
     // форма закрывается»).
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -736,6 +785,7 @@ describe('Admin — редактор пакета', () => {
   it('does not close the form when editedPackError arrives without a new editedPackVersion', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -755,6 +805,7 @@ describe('Admin — редактор пакета', () => {
     // невалидная цена). Форма должна остаться открытой с текстом ошибки.
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -776,6 +827,7 @@ describe('Admin — редактор пакета', () => {
     const resetPackEditor = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -824,6 +876,7 @@ describe('Admin — редактор пакета', () => {
     };
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -888,6 +941,7 @@ describe('Admin — список и жалобы', () => {
   it('shows the list view by default, with a "Пожаловаться" button per question', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -905,6 +959,7 @@ describe('Admin — список и жалобы', () => {
   it('switches to the grid when the "Сетка" radio is picked, hiding "Пожаловаться"', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -923,6 +978,7 @@ describe('Admin — список и жалобы', () => {
   it('opens the edit form from a list row click, not the complaint button', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -938,6 +994,7 @@ describe('Admin — список и жалобы', () => {
   it('opens the complaint panel and closes any open edit form', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -960,6 +1017,7 @@ describe('Admin — список и жалобы', () => {
   it('shows the target question price and text inside the complaint panel', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -982,6 +1040,7 @@ describe('Admin — список и жалобы', () => {
     const reportQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -1015,6 +1074,7 @@ describe('Admin — список и жалобы', () => {
   it('closes the complaint panel once a matching reportAckVersion arrives', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -1036,6 +1096,7 @@ describe('Admin — список и жалобы', () => {
 
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -1053,6 +1114,7 @@ describe('Admin — список и жалобы', () => {
   it('shows reportError as an alert and keeps the panel open', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -1076,6 +1138,7 @@ describe('Admin — список и жалобы', () => {
     const reportQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
@@ -1099,6 +1162,7 @@ describe('Admin — список и жалобы', () => {
   it('switching view mode closes an open complaint panel', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
+        activePackFilename: 'a.json',
         availablePacks: [
           { filename: 'a.json', title: 'Пак А', description: null },
         ],
