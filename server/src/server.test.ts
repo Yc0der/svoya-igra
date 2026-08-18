@@ -939,6 +939,51 @@ describe('createServer cat-in-the-bag', () => {
 
     server.close();
   });
+
+  it('replies select-question-error to the picker alone when nobody else is online to receive the cat, without broadcasting anything', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-cat-no-recipient-'));
+    const room = new Room(undefined, CAT_TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage();
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const aState = (await settle(a, b, a)) as {
+      game: { phase: string; turnParticipantId: string };
+    };
+    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+    const other = picker === a ? b : a;
+
+    other.ws.close();
+    await picker.nextMessage(); // трансляция отключения other
+
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'cat1',
+      }),
+    );
+    const reply = await picker.nextMessage();
+    expect(reply).toEqual({
+      type: 'select-question-error',
+      reason: 'no-recipient',
+    });
+
+    server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
 });
 
 const AUCTION_TEST_PACK: Pack = {

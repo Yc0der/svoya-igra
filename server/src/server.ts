@@ -277,11 +277,14 @@ export function createServer(options: CreateServerOptions): GameServer {
           typeof message.themeIndex === 'number' &&
           typeof message.questionId === 'string'
         ) {
-          room.selectQuestion(
+          const result = room.selectQuestion(
             participantId,
             message.themeIndex,
             message.questionId,
           );
+          if ('error' in result) {
+            send(ws, { type: 'select-question-error', reason: result.error });
+          }
         }
       }
 

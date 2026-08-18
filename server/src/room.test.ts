@@ -1773,8 +1773,9 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     const other = picker === vanya ? katya : vanya;
     room.disconnect(other);
 
-    room.selectQuestion(picker, 0, 'cat1');
+    const result = room.selectQuestion(picker, 0, 'cat1');
 
+    expect(result).toEqual({ error: 'no-recipient' });
     expect(room.toGameStateView()?.phase).toBe('selecting');
   });
 
@@ -1786,8 +1787,9 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     const view = room.toGameStateView()!;
     const picker = view.turnParticipantId;
 
-    room.selectQuestion(picker, 0, 'cat1');
+    const result = room.selectQuestion(picker, 0, 'cat1');
 
+    expect(result).toEqual({ ok: true });
     expect(room.toGameStateView()?.phase).toBe('cat-handoff');
   });
 
@@ -1916,8 +1918,9 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     room.disconnect(picker);
     room.disconnect(other);
 
-    room.selectQuestion(picker, 0, 'cat1');
+    const result = room.selectQuestion(picker, 0, 'cat1');
 
+    expect(result).toEqual({ error: 'no-recipient' });
     expect(room.toGameStateView(petya)?.phase).toBe('selecting');
   });
 });

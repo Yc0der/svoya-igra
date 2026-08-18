@@ -75,6 +75,7 @@ export type StartGameResult =
         | 'host-required'
         | 'host-only';
     };
+export type SelectQuestionResult = { ok: true } | { error: 'no-recipient' };
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
@@ -411,11 +412,17 @@ export class Room {
   // получатели — он participant, но никогда не counter (не входит в
   // this.game.scores), поэтому кандидатность дополнительно проверяется
   // членством в scores, а не только участием в комнате.
+  //
+  // Возвращает результат (а не void), чтобы server.ts мог сообщить именно
+  // тому, кто выбирал, почему клик ничего не сделал — до этой правки отказ
+  // был полностью безмолвным для игрока (обратная связь, живая партия
+  // 2026-08-17): пикер видел, что ничего не произошло, и не мог понять,
+  // сломано что-то или нет.
   selectQuestion(
     participantId: string,
     themeIndex: number,
     questionId: string,
-  ): void {
+  ): SelectQuestionResult {
     if (this.game?.phase === 'selecting') {
       const question = findQuestion(
         this.game.pack,
@@ -428,7 +435,7 @@ export class Room {
           (p) =>
             p.connected && p.id !== participantId && p.id in this.game!.scores,
         );
-        if (!hasRecipient) return;
+        if (!hasRecipient) return { error: 'no-recipient' };
       }
     }
     this.dispatch({
@@ -437,6 +444,7 @@ export class Room {
       themeIndex,
       questionId,
     });
+    return { ok: true };
   }
 
   // Тот же принцип, что у selectQuestion() выше — офлайн-получателя движок
@@ -734,8 +742,8 @@ export class Room {
             // null безопаснее, чем бросать ошибку ради поля, которое и
             // так необязательно.
             image:
-              (game.phase === 'cat-handoff' ||
-                game.phase === 'auction-bidding') ||
+              game.phase === 'cat-handoff' ||
+              game.phase === 'auction-bidding' ||
               !currentQuestionData.image ||
               !this.activePackFilename
                 ? null

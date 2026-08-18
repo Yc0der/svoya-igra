@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { useRoomConnection, type GameStateView } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
-import { START_GAME_ERROR_TEXT } from './errorText';
+import { SELECT_QUESTION_ERROR_TEXT, START_GAME_ERROR_TEXT } from './errorText';
 
 export function Player() {
   const {
@@ -18,6 +18,7 @@ export function Player() {
     selfId,
     participants,
     falsestart,
+    selectQuestionBlocked,
     hostParticipantId,
     isHost,
     startGameError,
@@ -1005,6 +1006,11 @@ export function Player() {
         <div className="player-toast" role="status">
           Вашу ставку перебили — {outbidNotice.newLeaderName} поставил{' '}
           {outbidNotice.amount}
+        </div>
+      )}
+      {selectQuestionBlocked && (
+        <div className="player-toast" role="status">
+          {SELECT_QUESTION_ERROR_TEXT['no-recipient']}
         </div>
       )}
       {isHost && !isFinalPhase ? (
