@@ -14,6 +14,7 @@ import {
   FINAL_REVEAL_TIMER_MS,
   CAT_HANDOFF_TIMER_MS,
   AUCTION_BID_TIMER_MS,
+  MEDIA_TIMER_MS,
   type EngineState,
 } from './engine.js';
 import type { Pack } from './pack.js';
@@ -2007,5 +2008,245 @@ describe('resolveVote — вопрос-аукцион', () => {
     expect(effects).toEqual([
       { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
     ]);
+  });
+});
+
+const VIDEO_PACK = makePack({
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема A',
+          questions: [
+            {
+              id: 'a1',
+              price: 100,
+              text: 'A1?',
+              answer: 'ответ a1',
+              type: 'обычный',
+              video: { youtubeId: 'abc', startSeconds: 0, durationSeconds: 8 },
+            },
+            {
+              id: 'a2',
+              price: 200,
+              text: 'A2?',
+              answer: 'ответ a2',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const VIDEO_CAT_PACK = makePack({
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема A',
+          questions: [
+            {
+              id: 'a1',
+              price: 100,
+              text: 'A1?',
+              answer: 'ответ a1',
+              type: 'кот',
+              video: { youtubeId: 'abc', startSeconds: 0, durationSeconds: 8 },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+const VIDEO_AUCTION_PACK = makePack({
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема A',
+          questions: [
+            {
+              id: 'a1',
+              price: 100,
+              text: 'A1?',
+              answer: 'ответ a1',
+              type: 'аукцион',
+              video: { youtubeId: 'abc', startSeconds: 0, durationSeconds: 8 },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+// Видео-вопрос уже после того, как клип доиграл: дальше он ведёт себя как
+// любой обычный открытый вопрос.
+function videoQuestionOpen(state: EngineState) {
+  const media = selectFirst(state).state;
+  return reduce(media, { type: 'media-finished', questionId: 'a1' }).state;
+}
+
+describe('question-media phase', () => {
+  it('sends a question with video into question-media and does not start the question timer yet', () => {
+    const initial = createInitialState(VIDEO_PACK, ['p1', 'p2']);
+    const { state: next, effects } = selectFirst(initial);
+
+    expect(next.phase).toBe('question-media');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'media', ms: MEDIA_TIMER_MS },
+    ]);
+  });
+
+  it('sends a question without video straight to question-open, exactly as before', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2']);
+    const { state: next, effects } = selectFirst(initial);
+
+    expect(next.phase).toBe('question-open');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+
+  it('starts the full question timer once the clip has finished', () => {
+    const media = selectFirst(
+      createInitialState(VIDEO_PACK, ['p1', 'p2']),
+    ).state;
+    const { state: next, effects } = reduce(media, {
+      type: 'media-finished',
+      questionId: 'a1',
+    });
+
+    expect(next.phase).toBe('question-open');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+
+  it('ignores a media-finished signal naming a different question', () => {
+    const media = selectFirst(
+      createInitialState(VIDEO_PACK, ['p1', 'p2']),
+    ).state;
+    const { state: next, effects } = reduce(media, {
+      type: 'media-finished',
+      questionId: 'a2',
+    });
+
+    expect(next.phase).toBe('question-media');
+    expect(effects).toEqual([]);
+  });
+
+  it('ignores a media-finished signal arriving outside question-media', () => {
+    const open = videoQuestionOpen(
+      createInitialState(VIDEO_PACK, ['p1', 'p2']),
+    );
+    const { state: next, effects } = reduce(open, {
+      type: 'media-finished',
+      questionId: 'a1',
+    });
+
+    expect(next.phase).toBe('question-open');
+    expect(effects).toEqual([]);
+  });
+
+  it('falls through to question-open when the safety timer expires instead', () => {
+    const media = selectFirst(
+      createInitialState(VIDEO_PACK, ['p1', 'p2']),
+    ).state;
+    const { state: next, effects } = reduce(media, {
+      type: 'timer-expired',
+      timer: 'media',
+    });
+
+    expect(next.phase).toBe('question-open');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+
+  it('refuses a buzz while the clip is still playing', () => {
+    const media = selectFirst(
+      createInitialState(VIDEO_PACK, ['p1', 'p2']),
+    ).state;
+    const { state: next } = reduce(media, { type: 'buzz', counterId: 'p1' });
+
+    expect(next.phase).toBe('question-media');
+    expect(next.buzzedCounterId).toBeNull();
+  });
+
+  it('plays the clip after the cat has been handed off, not before', () => {
+    const initial = createInitialState(VIDEO_CAT_PACK, ['p1', 'p2']);
+    const handoff = selectCat(initial).state;
+    const recipient = handoff.turnCounterId === 'p1' ? 'p2' : 'p1';
+    const { state: next, effects } = reduce(handoff, {
+      type: 'assign-cat',
+      counterId: handoff.turnCounterId,
+      recipientCounterId: recipient,
+    });
+
+    expect(next.phase).toBe('question-media');
+    expect(next.exclusiveAnswererCounterId).toBe(recipient);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'media', ms: MEDIA_TIMER_MS },
+    ]);
+  });
+
+  it('plays the clip once the auction has a winner, not during bidding', () => {
+    const initial = createInitialState(VIDEO_AUCTION_PACK, ['p1', 'p2']);
+    const bidding = selectAuction(initial).state;
+    const bidder = bidding.auctionTurnCounterId!;
+    const afterBid = reduce(bidding, {
+      type: 'place-bid',
+      counterId: bidder,
+      amount: 100,
+    }).state;
+    const other = bidder === 'p1' ? 'p2' : 'p1';
+    const { state: next, effects } = reduce(afterBid, {
+      type: 'pass-bid',
+      counterId: other,
+    });
+
+    expect(next.phase).toBe('question-media');
+    expect(next.exclusiveAnswererCounterId).toBe(bidder);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'media', ms: MEDIA_TIMER_MS },
+    ]);
+  });
+
+  it('does not replay the clip when a wrong answer reopens the question under a host', () => {
+    const open = videoQuestionOpen(
+      createInitialState(VIDEO_PACK, ['p1', 'p2', 'p3'], 'judge'),
+    );
+    const judging = reduce(buzzP1(open), {
+      type: 'said-answer',
+      counterId: 'p1',
+    }).state;
+    const { state: next, effects } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: false,
+    });
+
+    expect(next.phase).toBe('question-open');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+
+  it('lets the host cancel the question while the clip is playing', () => {
+    const media = selectFirst(
+      createInitialState(VIDEO_PACK, ['p1', 'p2'], 'judge'),
+    ).state;
+    const { state: next } = reduce(media, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    });
+
+    expect(next.phase).toBe('reveal');
+    expect(next.answeredQuestionIds).toEqual(['a1']);
   });
 });

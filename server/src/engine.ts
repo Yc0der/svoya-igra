@@ -4,6 +4,10 @@ export type Phase =
   | 'selecting'
   | 'cat-handoff'
   | 'auction-bidding'
+  // Вопрос уже открыт и виден, но играет клип: таймер вопроса ещё не идёт и
+  // жать «Ответ» нельзя. Только для вопросов с video (design.md,
+  // 2026-08-18-video-questions-design.md, «Фаза проигрывания медиа»).
+  | 'question-media'
   | 'question-open'
   | 'buzzed'
   | 'judging'
@@ -18,6 +22,7 @@ export type Phase =
 
 export type TimerName =
   | 'question'
+  | 'media'
   | 'cat-handoff'
   | 'auction-bid'
   | 'said-answer'
@@ -31,6 +36,13 @@ export type TimerName =
   | 'final-reveal';
 
 export const QUESTION_TIMER_MS = 30_000;
+// Страховка, а не рабочий сценарий: если табло не пришлёт «клип доиграл»
+// (закрыли вкладку, отвалилась сеть, ролик не загрузился, автозапуск не
+// сработал и кнопку никто не нажал), партия обязана поехать дальше сама.
+// Заведомо больше самого длинного разумного клипа вместе с загрузкой — в
+// нормальной партии срабатывать не должен (design.md,
+// 2026-08-18-video-questions-design.md, «Фаза проигрывания медиа»).
+export const MEDIA_TIMER_MS = 45_000;
 export const CAT_HANDOFF_TIMER_MS = 15_000;
 export const AUCTION_BID_TIMER_MS = 20_000;
 export const SAID_ANSWER_TIMER_MS = 10_000;
@@ -100,6 +112,11 @@ export type EngineEvent =
     }
   | { type: 'place-bid'; counterId: string; amount: number }
   | { type: 'pass-bid'; counterId: string }
+  // Порождает табло, доигравшее клип, — движок при этом по-прежнему не знает
+  // ни про YouTube, ни про сеть, ни про часы (инвариант 1): для него это
+  // обычное входящее событие, как «истёк таймер N». questionId — защита от
+  // опоздавшего сигнала по предыдущему вопросу.
+  | { type: 'media-finished'; questionId: string }
   | { type: 'buzz'; counterId: string }
   | { type: 'said-answer'; counterId: string }
   | { type: 'vote'; counterId: string; correct: boolean }
@@ -214,6 +231,8 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
       return handleSaidAnswer(state, event);
     case 'vote':
       return handleVote(state, event);
+    case 'media-finished':
+      return handleMediaFinished(state, event);
     case 'timer-expired':
       return handleTimerExpired(state, event);
     case 'adjust-score':
@@ -231,6 +250,59 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
     case 'final-vote':
       return handleFinalVote(state, event);
   }
+}
+
+// Единственная точка входа в открытый вопрос. У вопроса с video сначала идёт
+// фаза проигрывания клипа, и только после неё — обычные QUESTION_TIMER_MS;
+// без video всё как было всегда. Три вызывающих (обычный выбор, «кот»,
+// победа в торгах) обязаны идти через неё, иначе механики разъедутся между
+// собой (design.md, «Фаза проигрывания медиа»). Переоткрытие вопроса после
+// неверного ответа сюда НЕ ходит — там клип уже смотрели, см. resolveVote.
+function openQuestion(
+  state: EngineState,
+  extra: Partial<EngineState> = {},
+): Result {
+  // extra применяется до чтения currentQuestion: при обычном выборе вопроса
+  // он приходит именно отсюда и в state ещё не лежит.
+  const next = { ...state, ...extra };
+  const question = findQuestion(
+    next.pack,
+    next.roundIndex,
+    next.currentQuestion!.themeIndex,
+    next.currentQuestion!.questionId,
+  )!;
+  if (question.video) {
+    return {
+      state: { ...next, phase: 'question-media' },
+      effects: [{ type: 'start-timer', timer: 'media', ms: MEDIA_TIMER_MS }],
+    };
+  }
+  return {
+    state: { ...next, phase: 'question-open' },
+    effects: [
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ],
+  };
+}
+
+function handleMediaFinished(
+  state: EngineState,
+  event: Extract<EngineEvent, { type: 'media-finished' }>,
+): Result {
+  if (
+    state.phase !== 'question-media' ||
+    state.currentQuestion?.questionId !== event.questionId
+  ) {
+    // Дубль от второго открытого табло или опоздавший сигнал по прошлому
+    // вопросу — молчаливый no-op (design.md, «Фаза проигрывания медиа»).
+    return unchanged(state);
+  }
+  return {
+    state: { ...state, phase: 'question-open' },
+    effects: [
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ],
+  };
 }
 
 function handleSelectQuestion(
@@ -288,12 +360,7 @@ function handleSelectQuestion(
       ],
     };
   }
-  return {
-    state: { ...state, phase: 'question-open', currentQuestion },
-    effects: [
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
-    ],
-  };
+  return openQuestion(state, { currentQuestion });
 }
 
 // Онлайн-статус получателя здесь тоже не проверяется — та же причина, что
@@ -311,16 +378,9 @@ function handleAssignCat(
   ) {
     return unchanged(state);
   }
-  return {
-    state: {
-      ...state,
-      phase: 'question-open',
-      exclusiveAnswererCounterId: event.recipientCounterId,
-    },
-    effects: [
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
-    ],
-  };
+  return openQuestion(state, {
+    exclusiveAnswererCounterId: event.recipientCounterId,
+  });
 }
 
 function handlePlaceBid(
@@ -406,19 +466,12 @@ function afterBidOrPass(state: EngineState): Result {
     // — единственный путь, которым в итоге закрывается любой вопрос-аукцион
     // (верный ответ, неверный, тайм-аут) — сама сбросит оба поля своим общим
     // резетом, но только после того, как resolveVote() успеет их прочитать.
-    return {
-      state: {
-        ...state,
-        phase: 'question-open',
-        exclusiveAnswererCounterId: active[0],
-        auctionOrder: null,
-        auctionTurnCounterId: null,
-        auctionPassedCounterIds: [],
-      },
-      effects: [
-        { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
-      ],
-    };
+    return openQuestion(state, {
+      exclusiveAnswererCounterId: active[0],
+      auctionOrder: null,
+      auctionTurnCounterId: null,
+      auctionPassedCounterIds: [],
+    });
   }
   const currentIndex = state.auctionOrder!.indexOf(state.auctionTurnCounterId!);
   let nextIndex = currentIndex;
@@ -608,6 +661,14 @@ function handleTimerExpired(
   switch (event.timer) {
     case 'question':
       return revealQuestion(state, null);
+    case 'media':
+      // Табло промолчало — ведём себя ровно так же, как если бы оно
+      // сообщило о конце клипа, тем же кодом (design.md, «Фаза
+      // проигрывания медиа», страховочный таймер).
+      return handleMediaFinished(state, {
+        type: 'media-finished',
+        questionId: state.currentQuestion!.questionId,
+      });
     case 'cat-handoff': {
       const candidates = Object.keys(state.scores).filter(
         (id) => id !== state.turnCounterId,
