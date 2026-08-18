@@ -385,6 +385,53 @@ describe('VideoPlayer', () => {
       ).not.toBeInTheDocument();
     });
 
+    it('starts the player prerollMs earlier than startSeconds, so the visible part matches what the pack intended', async () => {
+      vi.useFakeTimers();
+      const { Player } = mockYouTube();
+
+      render(
+        <VideoPlayer video={VIDEO} onFinished={vi.fn()} prerollMs={4000} />,
+      );
+      await flush();
+
+      const options = Player.mock.calls[0][1] as {
+        playerVars: Record<string, unknown>;
+      };
+      // VIDEO.startSeconds === 30, 4 секунды предзапуска → старт с 26-й.
+      expect(options.playerVars.start).toBe(26);
+    });
+
+    it('never starts before second 0, even when prerollMs exceeds startSeconds', async () => {
+      vi.useFakeTimers();
+      const { Player } = mockYouTube();
+
+      render(
+        <VideoPlayer
+          video={{ ...VIDEO, startSeconds: 2 }}
+          onFinished={vi.fn()}
+          prerollMs={4000}
+        />,
+      );
+      await flush();
+
+      const options = Player.mock.calls[0][1] as {
+        playerVars: Record<string, unknown>;
+      };
+      expect(options.playerVars.start).toBe(0);
+    });
+
+    it('shows the sound-wave placeholder instead of a blank screen while an ordinary (non-audioOnly) clip is still in preroll', async () => {
+      vi.useFakeTimers();
+      mockYouTube();
+
+      render(
+        <VideoPlayer video={VIDEO} onFinished={vi.fn()} prerollMs={3000} />,
+      );
+      await flush();
+
+      expect(screen.getByAltText(/видео скоро начнётся/i)).toBeInTheDocument();
+    });
+
     it('does not mute or hide anything when prerollMs is 0 (default)', async () => {
       vi.useFakeTimers();
       const { Player } = mockYouTube();

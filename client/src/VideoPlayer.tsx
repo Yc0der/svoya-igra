@@ -144,13 +144,25 @@ export function VideoPlayer({
     loadYouTubeApi().then(() => {
       if (cancelled || !containerRef.current || !window.YT) return;
       const endsAt = video.startSeconds + video.durationSeconds;
+      // ВРЕМЕННО — стартуем на prerollMs раньше задуманной в паке секунды
+      // (не раньше нуля), чтобы после раскрытия зритель увидел ровно тот же
+      // отрезок, что задуман: иначе первые prerollMs секунд самого клипа
+      // просто терялись бы вместе с предзапуском. endsAt намеренно не
+      // трогаем — конец клипа остаётся тем, что задуман в паке. Math.floor,
+      // не round: YouTube API документирует start как целое число секунд —
+      // округление вниз гарантирует, что видимая часть не станет короче
+      // задуманной, а не наоборот.
+      const actualStart = Math.max(
+        0,
+        Math.floor(video.startSeconds - prerollMs / 1000),
+      );
       playerRef.current = new window.YT.Player(containerRef.current, {
         host: 'https://www.youtube-nocookie.com',
         width: '960',
         height: '540',
         videoId: video.youtubeId,
         playerVars: {
-          start: video.startSeconds,
+          start: actualStart,
           rel: 0,
           modestbranding: 1,
           autoplay: 1,
@@ -253,11 +265,14 @@ export function VideoPlayer({
 
   return (
     <div className={video.audioOnly ? 'board-video-audio-only' : 'board-video'}>
-      {video.audioOnly && (
+      {/* ВРЕМЕННО — та же заглушка, что у audioOnly, но теперь ещё и на
+          время предзапуска обычного видео-вопроса: пустой экран несколько
+          секунд ощущался как зависание, а не ожидание. */}
+      {visuallyHidden && (
         <img
           src={soundWave}
           className="board-video-audio-placeholder"
-          alt="Играет аудио"
+          alt={video.audioOnly ? 'Играет аудио' : 'Видео скоро начнётся'}
         />
       )}
       {/* Класс — на этой обёртке, не на containerRef напрямую: YouTube
