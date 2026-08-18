@@ -281,9 +281,10 @@ describe('Board', () => {
       }),
     );
     render(<Board />);
+    expect(document.querySelector('.board-video')).toBeInTheDocument();
     expect(
-      document.querySelector('.board-video-titleguard'),
-    ).toBeInTheDocument();
+      document.querySelector('.board-video-hidden'),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /играть/i }),
     ).not.toBeInTheDocument();
@@ -329,9 +330,10 @@ describe('Board', () => {
       }),
     );
     render(<Board />);
+    expect(document.querySelector('.board-video')).toBeInTheDocument();
     expect(
-      document.querySelector('.board-video-titleguard'),
-    ).toBeInTheDocument();
+      document.querySelector('.board-video-hidden'),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
@@ -359,9 +361,10 @@ describe('Board', () => {
     render(<Board />);
 
     expect(screen.getByText('Что за фильм?')).toBeInTheDocument();
+    expect(document.querySelector('.board-video')).toBeInTheDocument();
     expect(
-      document.querySelector('.board-video-titleguard'),
-    ).toBeInTheDocument();
+      document.querySelector('.board-video-hidden'),
+    ).not.toBeInTheDocument();
     // Отсчёт идёт по страховочному таймеру медиа — игрокам его показывать
     // незачем, время на ответ ещё не началось.
     expect(document.querySelector('.board-timer')).not.toBeInTheDocument();

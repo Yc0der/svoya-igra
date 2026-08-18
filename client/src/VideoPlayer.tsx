@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import soundWave from './assets/sound-wave.gif';
+// ВРЕМЕННО — заглушка на время предзапуска обычного (не audioOnly)
+// видео-вопроса. Положена вручную, как и sound-wave.gif выше.
+import videoLoading from './assets/video-loading.gif';
 
 interface YouTubePlayerInstance {
   // Всё опционально: тестовые двойники реализуют не каждый метод, а вызывать
@@ -265,14 +268,24 @@ export function VideoPlayer({
 
   return (
     <div className={video.audioOnly ? 'board-video-audio-only' : 'board-video'}>
-      {/* ВРЕМЕННО — та же заглушка, что у audioOnly, но теперь ещё и на
-          время предзапуска обычного видео-вопроса: пустой экран несколько
-          секунд ощущался как зависание, а не ожидание. */}
-      {visuallyHidden && (
+      {video.audioOnly && (
         <img
           src={soundWave}
           className="board-video-audio-placeholder"
-          alt={video.audioOnly ? 'Играет аудио' : 'Видео скоро начнётся'}
+          alt="Играет аудио"
+        />
+      )}
+      {/* ВРЕМЕННО — заглушка на время предзапуска обычного видео-вопроса:
+          пустой экран несколько секунд ощущался как зависание, а не
+          ожидание. Живая проверка (2026-08-18) подтвердила 4 секунды как
+          рабочее число — плашка YouTube с названием надёжно пропадает за
+          это время, поэтому полоса поверх кадра (board-video-titleguard)
+          больше не нужна: видео теперь показывается в полную высоту. */}
+      {!video.audioOnly && visuallyHidden && (
+        <img
+          src={videoLoading}
+          className="board-video-audio-placeholder"
+          alt="Видео скоро начнётся"
         />
       )}
       {/* Класс — на этой обёртке, не на containerRef напрямую: YouTube
@@ -285,13 +298,6 @@ export function VideoPlayer({
       <div className={visuallyHidden ? 'board-video-hidden' : undefined}>
         <div ref={containerRef} />
       </div>
-      {/* Полоса поверх верхней зоны плеера: название ролика там выдаёт ответ,
-          а настройками эмбеда оно не убирается (modestbranding устарел).
-          Не рендерится, пока сам кадр ещё скрыт предзапуском — иначе на его
-          месте висела бы пустая полоса цвета фона без видео под ней. */}
-      {!video.audioOnly && !visuallyHidden && (
-        <div className="board-video-titleguard" />
-      )}
       {needsClick && (
         <button
           className="button button--primary"

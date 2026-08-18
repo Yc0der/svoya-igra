@@ -218,18 +218,6 @@ describe('VideoPlayer', () => {
     expect(screen.getByText(/видео недоступно/i)).toBeInTheDocument();
   });
 
-  it('covers the YouTube title area so it cannot spoil the answer', async () => {
-    vi.useFakeTimers();
-    mockYouTube();
-
-    render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
-    await flush();
-
-    expect(
-      document.querySelector('.board-video-titleguard'),
-    ).toBeInTheDocument();
-  });
-
   it('shows the sound-wave placeholder instead of the visible player when audioOnly is true', async () => {
     vi.useFakeTimers();
     mockYouTube();
@@ -283,9 +271,7 @@ describe('VideoPlayer', () => {
       };
       expect(options.playerVars.mute).toBe(1);
       expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
-      expect(
-        document.querySelector('.board-video-titleguard'),
-      ).not.toBeInTheDocument();
+      expect(screen.getByAltText(/видео скоро начнётся/i)).toBeInTheDocument();
 
       events().onReady!();
       // prerollMs отсчитывается не от onReady, а от первого тика опроса,
@@ -300,8 +286,8 @@ describe('VideoPlayer', () => {
         document.querySelector('.board-video-hidden'),
       ).not.toBeInTheDocument();
       expect(
-        document.querySelector('.board-video-titleguard'),
-      ).toBeInTheDocument();
+        screen.queryByAltText(/видео скоро начнётся/i),
+      ).not.toBeInTheDocument();
     });
 
     it('does not start the preroll clock while the player is still buffering, only once it actually starts playing', async () => {

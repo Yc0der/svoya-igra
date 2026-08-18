@@ -63,9 +63,9 @@ describe('Room.getLanInfo / setLanAddress / onLanChange', () => {
 
 // ВРЕМЕННО (2026-08-18) — см. комментарий у Room.videoPrerollMs.
 describe('Room.getVideoPrerollMs / setVideoPrerollMs / onVideoPrerollChange', () => {
-  it('defaults to 0', () => {
+  it('defaults to 4000 — the value picked live on 2026-08-18', () => {
     const room = new Room();
-    expect(room.getVideoPrerollMs()).toBe(0);
+    expect(room.getVideoPrerollMs()).toBe(4000);
   });
 
   it('sets the value and notifies listeners', () => {
@@ -87,7 +87,7 @@ describe('Room.getVideoPrerollMs / setVideoPrerollMs / onVideoPrerollChange', ()
     room.setVideoPrerollMs(-1);
     room.setVideoPrerollMs(NaN);
 
-    expect(room.getVideoPrerollMs()).toBe(0);
+    expect(room.getVideoPrerollMs()).toBe(4000);
     expect(seen).toEqual([]);
   });
 });

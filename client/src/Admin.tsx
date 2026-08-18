@@ -64,7 +64,7 @@ export function Admin() {
   // ВРЕМЕННО (2026-08-18) — подбор числа секунд предзапуска видео вживую,
   // см. server/src/protocol.ts, StateMessage.videoPrerollMs. Убрать вместе с
   // полем, как только число зафиксируется в спеке.
-  const [prerollInput, setPrerollInput] = useState('0');
+  const [prerollInput, setPrerollInput] = useState('4');
   // Режим редактора: какой файл сейчас открыт (null — обычный список
   // пакетов), какой вопрос открыт формой, и текущие значения формы —
   // отдельные строковые поля, а не готовые number/enum: значение в инпуте
