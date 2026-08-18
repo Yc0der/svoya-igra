@@ -2,6 +2,7 @@ import { Fragment, type CSSProperties } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoomConnection } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
+import { VideoPlayer } from './VideoPlayer';
 
 export function Board() {
   const { participants, lanUrl, game } = useRoomConnection();
@@ -185,12 +186,15 @@ export function Board() {
               {game.currentQuestion.themeName} за {game.currentQuestion.price}
             </p>
           )}
-          {game.currentQuestion.image && (
+          {game.currentQuestion.image && !game.currentQuestion.video && (
             <img
               className="board-question-image"
               src={game.currentQuestion.image}
               alt="Картинка к вопросу"
             />
+          )}
+          {game.currentQuestion.video && (
+            <VideoPlayer video={game.currentQuestion.video} />
           )}
           {(game.phase === 'question-open' || game.phase === 'cat-handoff') &&
             remainingSeconds !== null && (

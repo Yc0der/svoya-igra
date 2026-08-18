@@ -259,6 +259,73 @@ describe('Board', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
+  it('shows a "Играть" button when the question has video', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            text: 'Что за фильм?',
+            price: 100,
+            themeName: 'Тема',
+            video: {
+              youtubeId: 'dQw4w9WgXcQ',
+              startSeconds: 30,
+              durationSeconds: 15,
+              audioOnly: false,
+            },
+          },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByRole('button', { name: /играть/i })).toBeInTheDocument();
+  });
+
+  it('does not show a video button when the question has no video', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            text: 'Столица Франции?',
+            price: 100,
+            themeName: 'Тема',
+          },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(
+      screen.queryByRole('button', { name: /играть/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows only video, not the image, when a question somehow has both', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            text: 'Что за фильм?',
+            price: 100,
+            themeName: 'Тема',
+            image: '/media/sport/flower.jpg',
+            video: {
+              youtubeId: 'dQw4w9WgXcQ',
+              startSeconds: 30,
+              durationSeconds: 15,
+              audioOnly: false,
+            },
+          },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByRole('button', { name: /играть/i })).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
   it('shows a countdown while the question is open', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
