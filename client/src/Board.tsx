@@ -5,7 +5,8 @@ import { useCountdown } from './useCountdown';
 import { VideoPlayer } from './VideoPlayer';
 
 export function Board() {
-  const { participants, lanUrl, game, mediaFinished } = useRoomConnection();
+  const { participants, lanUrl, game, mediaFinished, videoPrerollMs } =
+    useRoomConnection();
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
 
   function nameOf(participantId: string): string {
@@ -200,6 +201,7 @@ export function Board() {
               // клип по второму разу.
               key={game.currentQuestion.id}
               video={game.currentQuestion.video}
+              prerollMs={videoPrerollMs}
               onFinished={() => {
                 if (game.currentQuestion?.id) {
                   mediaFinished(game.currentQuestion.id);

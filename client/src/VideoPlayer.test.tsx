@@ -9,9 +9,10 @@ const VIDEO = {
   audioOnly: false,
 };
 
-// Состояния плеера из IFrame API: 1 — играет, 2 — на паузе.
+// Состояния плеера из IFrame API: 1 — играет, 2 — на паузе, 3 — буферизуется.
 const PLAYING = 1;
 const PAUSED = 2;
+const STATE_BUFFERING = 3;
 
 type Events = {
   onReady?: () => void;
@@ -30,6 +31,7 @@ function mockYouTube(options: { currentTime?: number; state?: number } = {}) {
     getCurrentTime: vi.fn(() => options.currentTime ?? 0),
     getPlayerState: vi.fn(() => options.state ?? PLAYING),
     destroy: vi.fn(),
+    unMute: vi.fn(),
   };
   let events: Events = {};
   const Player = vi.fn(function (_container: HTMLElement, opts: unknown) {
@@ -262,5 +264,158 @@ describe('VideoPlayer', () => {
     await flush();
 
     expect(Player).toHaveBeenCalled();
+  });
+
+  // ВРЕМЕННО (2026-08-18) — см. server/src/protocol.ts,
+  // StateMessage.videoPrerollMs.
+  describe('prerollMs (временно)', () => {
+    it('starts muted and hidden, then unmutes and reveals once prerollMs elapses', async () => {
+      vi.useFakeTimers();
+      const { instance, Player, events } = mockYouTube();
+
+      render(
+        <VideoPlayer video={VIDEO} onFinished={vi.fn()} prerollMs={3000} />,
+      );
+      await flush();
+
+      const options = Player.mock.calls[0][1] as {
+        playerVars: Record<string, unknown>;
+      };
+      expect(options.playerVars.mute).toBe(1);
+      expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
+      expect(
+        document.querySelector('.board-video-titleguard'),
+      ).not.toBeInTheDocument();
+
+      events().onReady!();
+      // prerollMs отсчитывается не от onReady, а от первого тика опроса,
+      // где getPlayerState() реально вернул «играет» — плюс сам этот тик
+      // (PROGRESS_POLL_MS), иначе таймер ещё не успеет сработать.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000 + 300);
+      });
+
+      expect(instance.unMute).toHaveBeenCalled();
+      expect(
+        document.querySelector('.board-video-hidden'),
+      ).not.toBeInTheDocument();
+      expect(
+        document.querySelector('.board-video-titleguard'),
+      ).toBeInTheDocument();
+    });
+
+    it('does not start the preroll clock while the player is still buffering, only once it actually starts playing', async () => {
+      // Живая проверка (2026-08-18): предзапуск, отсчитанный от onReady, а
+      // не от факта STATE_PLAYING, засчитывал буферизацию как часть своих
+      // секунд — клип успевал раскрыться игрокам уже почти доигранным или
+      // ещё не начавшим идти вовсе.
+      let currentState = STATE_BUFFERING;
+      const instance = {
+        playVideo: vi.fn(),
+        pauseVideo: vi.fn(),
+        getCurrentTime: vi.fn(() => 0),
+        getPlayerState: vi.fn(() => currentState),
+        destroy: vi.fn(),
+        unMute: vi.fn(),
+      };
+      let capturedEvents: Events = {};
+      window.YT = {
+        Player: vi.fn(function (_container: HTMLElement, opts: unknown) {
+          capturedEvents = (opts as { events?: Events }).events ?? {};
+          return instance;
+        }),
+      } as unknown as Window['YT'];
+
+      vi.useFakeTimers();
+      render(
+        <VideoPlayer video={VIDEO} onFinished={vi.fn()} prerollMs={3000} />,
+      );
+      await flush();
+      capturedEvents.onReady!();
+
+      // Буферизуется 4 секунды — дольше самого предзапуска. Часы
+      // предзапуска не должны за это время успеть истечь.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(4000);
+      });
+      expect(instance.unMute).not.toHaveBeenCalled();
+      expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
+
+      // Только теперь видео реально заиграло — отсюда и должен пойти отсчёт.
+      currentState = PLAYING;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000 + 300);
+      });
+      expect(instance.unMute).toHaveBeenCalled();
+      expect(
+        document.querySelector('.board-video-hidden'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('reveals the clip anyway if it physically ends before the preroll clock runs out, instead of staying hidden forever', async () => {
+      // Живая проверка (2026-08-18): клип на 8 секунд, предзапуск 2 секунды
+      // — но реальная буферизация до STATE_PLAYING сама по себе съела
+      // время, и к моменту, когда видео технически заиграло, оставшейся
+      // длины клипа уже не хватило на полные 2 секунды предзапуска. Видео
+      // так и осталось скрытым весь вопрос: свой отдельный таймер раскрытия
+      // должен был сработать позже, чем клип уже закончился и вопрос
+      // закрылся.
+      vi.useFakeTimers();
+      const onFinished = vi.fn();
+      // currentTime сразу за endsAt (30+15=45) — клип «закончился» с самого
+      // первого тика после начала воспроизведения.
+      const { instance, events } = mockYouTube({
+        state: PLAYING,
+        currentTime: 46,
+      });
+
+      render(
+        <VideoPlayer video={VIDEO} onFinished={onFinished} prerollMs={2000} />,
+      );
+      await flush();
+      events().onReady!();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+
+      expect(onFinished).toHaveBeenCalledTimes(1);
+      expect(instance.unMute).toHaveBeenCalled();
+      expect(
+        document.querySelector('.board-video-hidden'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not mute or hide anything when prerollMs is 0 (default)', async () => {
+      vi.useFakeTimers();
+      const { Player } = mockYouTube();
+
+      render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
+      await flush();
+
+      const options = Player.mock.calls[0][1] as {
+        playerVars: Record<string, unknown>;
+      };
+      expect(options.playerVars.mute).toBeUndefined();
+      expect(
+        document.querySelector('.board-video-hidden'),
+      ).not.toBeInTheDocument();
+    });
+
+    it('still ends the clip at the same startSeconds + durationSeconds, regardless of preroll', async () => {
+      vi.useFakeTimers();
+      const onFinished = vi.fn();
+      const { events } = mockYouTube({ currentTime: 46 });
+
+      render(
+        <VideoPlayer video={VIDEO} onFinished={onFinished} prerollMs={3000} />,
+      );
+      await flush();
+      events().onReady!();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+
+      expect(onFinished).toHaveBeenCalledTimes(1);
+    });
   });
 });

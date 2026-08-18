@@ -96,6 +96,7 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      videoPrerollMs: 0,
     });
 
     ws.close();
@@ -133,6 +134,7 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      videoPrerollMs: 0,
     });
 
     board.close();
@@ -189,6 +191,7 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      videoPrerollMs: 0,
     });
 
     const reconnected = new WebSocket(url);
@@ -218,6 +221,7 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      videoPrerollMs: 0,
     });
 
     board.close();
@@ -333,6 +337,7 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      videoPrerollMs: 0,
     });
 
     other.close();
@@ -384,6 +389,7 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      videoPrerollMs: 0,
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -419,6 +425,7 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      videoPrerollMs: 0,
     });
 
     board.close();
@@ -498,6 +505,7 @@ describe('createServer heartbeat', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      videoPrerollMs: 0,
     });
 
     board.close();

@@ -61,6 +61,37 @@ describe('Room.getLanInfo / setLanAddress / onLanChange', () => {
   });
 });
 
+// ВРЕМЕННО (2026-08-18) — см. комментарий у Room.videoPrerollMs.
+describe('Room.getVideoPrerollMs / setVideoPrerollMs / onVideoPrerollChange', () => {
+  it('defaults to 0', () => {
+    const room = new Room();
+    expect(room.getVideoPrerollMs()).toBe(0);
+  });
+
+  it('sets the value and notifies listeners', () => {
+    const room = new Room();
+    const seen: number[] = [];
+    room.onVideoPrerollChange((ms) => seen.push(ms));
+
+    room.setVideoPrerollMs(2500);
+
+    expect(room.getVideoPrerollMs()).toBe(2500);
+    expect(seen).toEqual([2500]);
+  });
+
+  it('ignores negative or non-finite values', () => {
+    const room = new Room();
+    const seen: number[] = [];
+    room.onVideoPrerollChange((ms) => seen.push(ms));
+
+    room.setVideoPrerollMs(-1);
+    room.setVideoPrerollMs(NaN);
+
+    expect(room.getVideoPrerollMs()).toBe(0);
+    expect(seen).toEqual([]);
+  });
+});
+
 describe('Room.getPackInfo / refreshAvailablePacks / selectPack / onPackChange', () => {
   const PACK_A = {
     title: 'Пак А',
