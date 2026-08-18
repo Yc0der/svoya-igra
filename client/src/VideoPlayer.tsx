@@ -22,6 +22,7 @@ interface YouTubePlayerOptions {
     rel: 0;
     modestbranding: 1;
     autoplay: 1;
+    controls: 0;
   };
   events?: {
     onReady?: () => void;
@@ -118,14 +119,33 @@ export function VideoPlayer({
           rel: 0,
           modestbranding: 1,
           autoplay: 1,
+          // Живая проверка (2026-08-18): нативная панель управления
+          // (таймкод, прогресс-бар, лого YouTube, кнопка полноэкранного
+          // режима) оставалась видна внизу кадра даже с pointer-events:none
+          // — сама панель не пряталась, только переставала откликаться на
+          // клики. controls:0 убирает её целиком, а не пытается закрывать
+          // сверху ещё одной полосой.
+          controls: 0,
         },
         events: {
           onReady: () => {
             if (cancelled) return;
             pollHandle = setInterval(() => {
-              const at = playerRef.current?.getCurrentTime?.();
+              const player = playerRef.current;
+              if (!player) return;
+              // Живая проверка (2026-08-18): ролик с медленным преролом ещё
+              // не играл к моменту проверки автозапуска ниже, кнопка
+              // появилась, — но затем всё-таки заиграл сам (буферизация
+              // просто заняла больше AUTOPLAY_GRACE_MS). Без этой строки
+              // кнопка так и висела бы поверх уже идущего клипа: ничего не
+              // сбрасывало needsClick обратно после того, как оно однажды
+              // стало true.
+              if (player.getPlayerState?.() === STATE_PLAYING) {
+                setNeedsClick(false);
+              }
+              const at = player.getCurrentTime?.();
               if (typeof at !== 'number' || at < endsAt) return;
-              playerRef.current?.pauseVideo?.();
+              player.pauseVideo?.();
               if (pollHandle) clearInterval(pollHandle);
               pollHandle = null;
               finishOnce();

@@ -80,7 +80,13 @@ describe('VideoPlayer', () => {
     expect(options).toMatchObject({
       host: 'https://www.youtube-nocookie.com',
       videoId: 'dQw4w9WgXcQ',
-      playerVars: { start: 30, rel: 0, modestbranding: 1, autoplay: 1 },
+      playerVars: {
+        start: 30,
+        rel: 0,
+        modestbranding: 1,
+        autoplay: 1,
+        controls: 0,
+      },
     });
     expect(options.playerVars).not.toHaveProperty('end');
   });
@@ -131,6 +137,49 @@ describe('VideoPlayer', () => {
     fireEvent.click(button);
 
     expect(instance.playVideo).toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: /играть/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the play button again once playback starts on its own, even after the grace period already showed it', async () => {
+    // Живая проверка (2026-08-18): ролик с преролом/медленной буферизацией
+    // (HBO Max-трейлер) ещё не играл к моменту проверки на 1500мс — кнопка
+    // появилась, — но затем всё-таки заиграл сам. Кнопка осталась висеть
+    // поверх уже идущего клипа, потому что ничего не сбрасывало needsClick
+    // обратно после того, как оно однажды стало true.
+    vi.useFakeTimers();
+    let currentState = PAUSED;
+    let capturedEvents: Events = {};
+    const instance = {
+      playVideo: vi.fn(),
+      pauseVideo: vi.fn(),
+      getCurrentTime: vi.fn(() => 0),
+      getPlayerState: vi.fn(() => currentState),
+      destroy: vi.fn(),
+    };
+    window.YT = {
+      Player: vi.fn(function (_container: HTMLElement, opts: unknown) {
+        capturedEvents = (opts as { events?: Events }).events ?? {};
+        return instance;
+      }),
+    } as unknown as Window['YT'];
+
+    render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
+    await flush();
+    capturedEvents.onReady!();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(screen.getByRole('button', { name: /играть/i })).toBeInTheDocument();
+
+    // Буферизация закончилась, ролик заиграл сам — без клика по кнопке.
+    // act() нужен по той же причине, что и в тесте на onError: тик опроса
+    // приходит снаружи React, без обёртки состояние не успеет отрисоваться
+    // к проверке ниже.
+    currentState = PLAYING;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
     expect(
       screen.queryByRole('button', { name: /играть/i }),
     ).not.toBeInTheDocument();
