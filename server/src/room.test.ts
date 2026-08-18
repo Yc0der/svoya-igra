@@ -1285,6 +1285,7 @@ describe('Room game flow', () => {
       price: 100,
       themeName: 'Тема',
       image: null,
+      video: null,
     });
 
     expect(room.buzz(picker)).toBe('ok');
@@ -1335,6 +1336,86 @@ describe('Room game flow', () => {
     const { room, picker } = startedRoom();
     room.selectQuestion(picker, 0, 'q1');
     expect(room.toGameStateView()?.currentQuestion?.image).toBeNull();
+  });
+
+  it('exposes video for a question with video, defaulting audioOnly to false when absent', () => {
+    const packWithVideo: Pack = {
+      ...TEST_PACK,
+      rounds: [
+        {
+          themes: [
+            {
+              name: 'Тема',
+              questions: [
+                {
+                  ...TEST_PACK.rounds[0].themes[0].questions[0],
+                  video: {
+                    youtubeId: 'dQw4w9WgXcQ',
+                    startSeconds: 30,
+                    durationSeconds: 15,
+                  },
+                },
+                TEST_PACK.rounds[0].themes[0].questions[1],
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const room = new Room(undefined, packWithVideo);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame('requester');
+    const picker = room.toGameStateView()!.turnParticipantId;
+    room.selectQuestion(picker, 0, 'q1');
+    expect(room.toGameStateView()?.currentQuestion?.video).toEqual({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 30,
+      durationSeconds: 15,
+      audioOnly: false,
+    });
+  });
+
+  it('exposes audioOnly: true when the pack sets it', () => {
+    const packWithVideo: Pack = {
+      ...TEST_PACK,
+      rounds: [
+        {
+          themes: [
+            {
+              name: 'Тема',
+              questions: [
+                {
+                  ...TEST_PACK.rounds[0].themes[0].questions[0],
+                  video: {
+                    youtubeId: 'dQw4w9WgXcQ',
+                    startSeconds: 30,
+                    durationSeconds: 15,
+                    audioOnly: true,
+                  },
+                },
+                TEST_PACK.rounds[0].themes[0].questions[1],
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const room = new Room(undefined, packWithVideo);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame('requester');
+    const picker = room.toGameStateView()!.turnParticipantId;
+    room.selectQuestion(picker, 0, 'q1');
+    expect(room.toGameStateView()?.currentQuestion?.video?.audioOnly).toBe(
+      true,
+    );
+  });
+
+  it('does not expose video for a question without video', () => {
+    const { room, picker } = startedRoom();
+    room.selectQuestion(picker, 0, 'q1');
+    expect(room.toGameStateView()?.currentQuestion?.video).toBeNull();
   });
 
   it('rejects a buzz outside question-open as a falsestart, without touching game state', () => {
@@ -1841,6 +1922,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       price: 100,
       themeName: 'Тема',
       image: null,
+      video: null,
     });
 
     room.assignCat(picker, other);
@@ -1850,6 +1932,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       price: 100,
       themeName: 'Тема',
       image: null,
+      video: null,
     });
   });
 
@@ -2003,6 +2086,7 @@ describe('Room — вопрос-аукцион', () => {
       price: 100,
       themeName: 'Тема',
       image: null,
+      video: null,
     });
 
     room.placeBid(picker, 150);

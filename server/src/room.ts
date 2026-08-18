@@ -748,6 +748,17 @@ export class Room {
               !this.activePackFilename
                 ? null
                 : `/media/${this.activePackFilename.replace(/\.json$/, '')}/${currentQuestionData.image}`,
+            video:
+              game.phase === 'cat-handoff' ||
+              game.phase === 'auction-bidding' ||
+              !currentQuestionData.video
+                ? null
+                : {
+                    youtubeId: currentQuestionData.video.youtubeId,
+                    startSeconds: currentQuestionData.video.startSeconds,
+                    durationSeconds: currentQuestionData.video.durationSeconds,
+                    audioOnly: currentQuestionData.video.audioOnly ?? false,
+                  },
           }
         : null,
       buzzedParticipantId: game.buzzedCounterId,

@@ -32,6 +32,18 @@ export interface GameStateView {
     // время cat-handoff/торгов, пока получатель/победитель ещё не
     // определён (design.md, 2026-08-16, «Сервер и клиент»).
     image: string | null;
+    // Тот же принцип видимости, что у image/text — null во время
+    // cat-handoff/торгов аукциона, иначе объект с youtubeId/таймкодом или
+    // null, если у вопроса нет video (design.md,
+    // 2026-08-18-video-questions-design.md, «Сервер и клиент»). audioOnly
+    // здесь уже разрешён (false, если в паке отсутствовал) — клиенту не
+    // нужно самому обрабатывать undefined.
+    video: {
+      youtubeId: string;
+      startSeconds: number;
+      durationSeconds: number;
+      audioOnly: boolean;
+    } | null;
   } | null;
   buzzedParticipantId: string | null;
   // Не null только пока фаза — question-open/buzzed/judging для вопроса,

@@ -893,6 +893,7 @@ describe('createServer cat-in-the-bag', () => {
       price: 100,
       themeName: 'Тема',
       image: null,
+      video: null,
     });
 
     picker.ws.send(
@@ -914,6 +915,7 @@ describe('createServer cat-in-the-bag', () => {
       price: 100,
       themeName: 'Тема',
       image: null,
+      video: null,
     });
     expect(afterAssign.game.exclusiveAnswererParticipantId).toBe(
       other.participantId,
