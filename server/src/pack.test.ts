@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadPack, validatePack } from './pack.js';
+import { findMissingMedia, loadPack, validatePack } from './pack.js';
 
 function validPackData() {
   return {
@@ -44,6 +44,48 @@ describe('validatePack', () => {
     expect(validatePack(data).rounds[0].themes[0].questions[0].comment).toBe(
       'Комментарий',
     );
+  });
+
+  it('accepts a question with an optional image', () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: string }).image =
+      'eiffel-tower.jpg';
+    expect(validatePack(data).rounds[0].themes[0].questions[0].image).toBe(
+      'eiffel-tower.jpg',
+    );
+  });
+
+  it('accepts a question with no image at all', () => {
+    const data = validPackData();
+    expect(
+      validatePack(data).rounds[0].themes[0].questions[0].image,
+    ).toBeUndefined();
+  });
+
+  it('rejects a non-string image when present', () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: unknown }).image = 123;
+    expect(() => validatePack(data)).toThrow(/image/);
+  });
+
+  it('rejects an empty string image', () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: string }).image = '';
+    expect(() => validatePack(data)).toThrow(/image/);
+  });
+
+  it('rejects an image containing a forward slash', () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: string }).image =
+      '../../current.json';
+    expect(() => validatePack(data)).toThrow(/image/);
+  });
+
+  it('rejects an image containing a backslash', () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: string }).image =
+      '..\\..\\current.json';
+    expect(() => validatePack(data)).toThrow(/image/);
   });
 
   it('accepts a pack with an optional description', () => {
@@ -275,6 +317,42 @@ describe('loadPack', () => {
 
   it('throws when the file does not exist', async () => {
     await expect(loadPack(join(dir, 'missing.json'))).rejects.toThrow();
+  });
+});
+
+describe('findMissingMedia', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-media-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('returns an empty list when no question has an image', async () => {
+    const pack = validatePack(validPackData());
+    expect(await findMissingMedia(pack, dir)).toEqual([]);
+  });
+
+  it('returns an empty list when the referenced file exists', async () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: string }).image =
+      'exists.jpg';
+    const pack = validatePack(data);
+    await writeFile(join(dir, 'exists.jpg'), 'fake image bytes', 'utf8');
+    expect(await findMissingMedia(pack, dir)).toEqual([]);
+  });
+
+  it('reports a question whose image file is missing', async () => {
+    const data = validPackData();
+    (data.rounds[0].themes[0].questions[0] as { image?: string }).image =
+      'missing.jpg';
+    const pack = validatePack(data);
+    expect(await findMissingMedia(pack, dir)).toEqual([
+      { questionId: 'q1', image: 'missing.jpg' },
+    ]);
   });
 });
 

@@ -196,6 +196,13 @@ code {
   line-height: 130%;
 }
 
+.board-question-image {
+  max-width: min(95vw, 1100px);
+  max-height: 65vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
 .board-answer {
   font-size: 32px;
   color: var(--text-h);
@@ -447,7 +454,16 @@ code {
   .board-grid,
   .player-grid {
     gap: 6px 8px;
-    grid-template-columns: minmax(88px, auto) repeat(4, 1fr);
+    /* Тот же --price-columns, что и в базовом правиле выше (не «4»
+       константой) — иначе любой пак с числом вопросов в теме, отличным от
+       4 (например, 5 у пакетов из pack-generator), ломается именно здесь:
+       десктоп правильно берёт число колонок из данных, а этот брейкпоинт
+       тихо его игнорировал и всегда рисовал 4 колонки (обратная связь,
+       живая партия 2026-08-18 — «поехала сетка вопросов на телефоне»). */
+    grid-template-columns: minmax(88px, auto) repeat(
+        var(--price-columns, 4),
+        1fr
+      );
   }
 
   .board-grid .theme-name,

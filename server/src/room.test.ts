@@ -1284,6 +1284,7 @@ describe('Room game flow', () => {
       text: 'Вопрос 1?',
       price: 100,
       themeName: 'Тема',
+      image: null,
     });
 
     expect(room.buzz(picker)).toBe('ok');
@@ -1297,6 +1298,43 @@ describe('Room game flow', () => {
     // Голосование разрешается только по таймеру (Task 2) — до него фаза не
     // меняется, даже когда все имеющие право уже проголосовали.
     expect(room.toGameStateView()?.phase).toBe('judging');
+  });
+
+  it('exposes the media URL for a question with an image, built from the active pack filename', () => {
+    const packWithImage: Pack = {
+      ...TEST_PACK,
+      rounds: [
+        {
+          themes: [
+            {
+              name: 'Тема',
+              questions: [
+                {
+                  ...TEST_PACK.rounds[0].themes[0].questions[0],
+                  image: 'photo.jpg',
+                },
+                TEST_PACK.rounds[0].themes[0].questions[1],
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const room = new Room(undefined, packWithImage, undefined, 'sport.json');
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame('requester');
+    const picker = room.toGameStateView()!.turnParticipantId;
+    room.selectQuestion(picker, 0, 'q1');
+    expect(room.toGameStateView()?.currentQuestion?.image).toBe(
+      '/media/sport/photo.jpg',
+    );
+  });
+
+  it('does not build a media URL for a question without an image', () => {
+    const { room, picker } = startedRoom();
+    room.selectQuestion(picker, 0, 'q1');
+    expect(room.toGameStateView()?.currentQuestion?.image).toBeNull();
   });
 
   it('rejects a buzz outside question-open as a falsestart, without touching game state', () => {
@@ -1735,8 +1773,9 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     const other = picker === vanya ? katya : vanya;
     room.disconnect(other);
 
-    room.selectQuestion(picker, 0, 'cat1');
+    const result = room.selectQuestion(picker, 0, 'cat1');
 
+    expect(result).toEqual({ error: 'no-recipient' });
     expect(room.toGameStateView()?.phase).toBe('selecting');
   });
 
@@ -1748,8 +1787,9 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     const view = room.toGameStateView()!;
     const picker = view.turnParticipantId;
 
-    room.selectQuestion(picker, 0, 'cat1');
+    const result = room.selectQuestion(picker, 0, 'cat1');
 
+    expect(result).toEqual({ ok: true });
     expect(room.toGameStateView()?.phase).toBe('cat-handoff');
   });
 
@@ -1800,6 +1840,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       text: null,
       price: 100,
       themeName: 'Тема',
+      image: null,
     });
 
     room.assignCat(picker, other);
@@ -1808,6 +1849,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       text: 'Вопрос-кот?',
       price: 100,
       themeName: 'Тема',
+      image: null,
     });
   });
 
@@ -1876,8 +1918,9 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     room.disconnect(picker);
     room.disconnect(other);
 
-    room.selectQuestion(picker, 0, 'cat1');
+    const result = room.selectQuestion(picker, 0, 'cat1');
 
+    expect(result).toEqual({ error: 'no-recipient' });
     expect(room.toGameStateView(petya)?.phase).toBe('selecting');
   });
 });
@@ -1959,6 +2002,7 @@ describe('Room — вопрос-аукцион', () => {
       text: null,
       price: 100,
       themeName: 'Тема',
+      image: null,
     });
 
     room.placeBid(picker, 150);

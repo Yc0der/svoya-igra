@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 export interface Question {
   id: string;
@@ -7,6 +8,16 @@ export interface Question {
   answer: string;
   comment?: string;
   type: 'обычный' | 'кот' | 'аукцион';
+  // docs/superpowers/specs/2026-08-16-photo-questions-design.md, «Правило» —
+  // имя файла без пути; полный путь/URL собирает сервер (room.ts) как
+  // `/media/<пак>/<image>`. Только основной раунд — финал
+  // (FinalTheme.question) картинок не получает в этой вехе.
+  image?: string;
+}
+
+export interface MissingMedia {
+  questionId: string;
+  image: string;
 }
 
 export interface Theme {
@@ -80,6 +91,13 @@ function validateQuestion(data: unknown, where: string): Question {
   if (question.comment !== undefined && typeof question.comment !== 'string') {
     throw new Error(`${where}.comment: если есть, должно быть строкой`);
   }
+  let image: string | undefined;
+  if (question.image !== undefined) {
+    image = requireNonEmptyString(question.image, `${where}.image`);
+    if (image.includes('/') || image.includes('\\')) {
+      throw new Error(`${where}.image: должно быть именем файла без пути`);
+    }
+  }
   const type = question.type;
   if (typeof type !== 'string' || !QUESTION_TYPES.has(type)) {
     throw new Error(
@@ -92,6 +110,7 @@ function validateQuestion(data: unknown, where: string): Question {
     text,
     answer,
     comment: question.comment as string | undefined,
+    image,
     type: type as Question['type'],
   };
 }
@@ -220,4 +239,31 @@ export async function loadPack(path: string): Promise<Pack> {
     );
   }
   return validatePack(parsed);
+}
+
+/**
+ * Для каждого вопроса с `image` — существует ли файл `<mediaDir>/<image>`.
+ * Возвращает список вопросов, для которых файла нет. Не используется живым
+ * игровым сервером — только генератором (см. `scripts/validate-pack.ts`,
+ * design.md «Валидация при генерации»): лишний I/O на каждый вопрос каждого
+ * пака при обычной загрузке не нужен.
+ */
+export async function findMissingMedia(
+  pack: Pack,
+  mediaDir: string,
+): Promise<MissingMedia[]> {
+  const missing: MissingMedia[] = [];
+  for (const round of pack.rounds) {
+    for (const theme of round.themes) {
+      for (const question of theme.questions) {
+        if (!question.image) continue;
+        try {
+          await access(join(mediaDir, question.image));
+        } catch {
+          missing.push({ questionId: question.id, image: question.image });
+        }
+      }
+    }
+  }
+  return missing;
 }

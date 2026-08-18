@@ -185,6 +185,13 @@ export function Board() {
               {game.currentQuestion.themeName} за {game.currentQuestion.price}
             </p>
           )}
+          {game.currentQuestion.image && (
+            <img
+              className="board-question-image"
+              src={game.currentQuestion.image}
+              alt="Картинка к вопросу"
+            />
+          )}
           {(game.phase === 'question-open' || game.phase === 'cat-handoff') &&
             remainingSeconds !== null && (
               <p className="board-timer">{remainingSeconds}с</p>

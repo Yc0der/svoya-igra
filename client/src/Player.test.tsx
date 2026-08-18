@@ -49,6 +49,7 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     lanUrl: null,
     game: null,
     falsestart: false,
+    selectQuestionBlocked: false,
     hostParticipantId: null,
     isHost: false,
     startGameError: null,
@@ -442,6 +443,20 @@ describe('Player', () => {
     );
     render(<Player />);
     expect(screen.getByRole('button', { name: /^ответ$/i })).toBeDisabled();
+  });
+
+  it('shows a toast explaining why a question could not be selected, without naming the reason as a cat question', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({ phase: 'selecting', turnParticipantId: 'me' }),
+        selectQuestionBlocked: true,
+      }),
+    );
+    render(<Player />);
+    const toast = screen.getByRole('status');
+    expect(toast).toHaveTextContent(/не хватает игроков онлайн/i);
+    expect(toast).not.toHaveTextContent(/кот/i);
   });
 
   it('shows a list of online participants to pick a cat recipient from, when it is my turn', () => {

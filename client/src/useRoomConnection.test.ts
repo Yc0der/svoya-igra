@@ -307,6 +307,24 @@ describe('useRoomConnection', () => {
     expect(result.current.falsestart).toBe(false);
   });
 
+  it('sets selectQuestionBlocked on a select-question-error message and clears it again after 5 seconds', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() =>
+      socket.emitMessage({
+        type: 'select-question-error',
+        reason: 'no-recipient',
+      }),
+    );
+    expect(result.current.selectQuestionBlocked).toBe(true);
+
+    act(() => vi.advanceTimersByTime(5000));
+    expect(result.current.selectQuestionBlocked).toBe(false);
+  });
+
   it('picks up availablePacks and activePackFilename from state broadcasts', () => {
     const { result } = renderHook(() => useRoomConnection(factory));
     const socket = FakeWebSocket.instances[0];

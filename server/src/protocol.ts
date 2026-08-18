@@ -27,6 +27,11 @@ export interface GameStateView {
     text: string | null;
     price: number;
     themeName: string;
+    // Готовый относительный URL картинки (`/media/<пак>/<файл>`) или null,
+    // если у вопроса нет картинки. Та же видимость, что у text — null во
+    // время cat-handoff/торгов, пока получатель/победитель ещё не
+    // определён (design.md, 2026-08-16, «Сервер и клиент»).
+    image: string | null;
   } | null;
   buzzedParticipantId: string | null;
   // Не null только пока фаза — question-open/buzzed/judging для вопроса,
@@ -149,6 +154,12 @@ export type StartGameErrorReason =
   | 'host-required'
   | 'host-only';
 
+// Единственная причина сейчас — «кота» некому передать (room.ts,
+// SelectQuestionResult). Отдельный тип, а не переиспользование
+// StartGameErrorReason — по смыслу это разные отказы, и раздельные типы не
+// дадут по ошибке присвоить одно на месте другого.
+export type SelectQuestionErrorReason = 'no-recipient';
+
 export type ServerMessage =
   | { type: 'joined'; participantId: string; token: string; name: string }
   | { type: 'name-taken' }
@@ -173,6 +184,11 @@ export type ServerMessage =
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
+  // Адресован только тому, кто пытался выбрать вопрос (server.ts шлёт его
+  // отправителю, а не рассылает всем) — остальным участникам ничего не
+  // видно, чтобы не выдать раньше времени, что это был именно «кот»
+  // (design.md, «Правило» вехи 2026-08-12-cat-in-bag).
+  | { type: 'select-question-error'; reason: SelectQuestionErrorReason }
   // Попытка select-pack/admin-select-pack на файл, ставший невалидным или
   // исчезнувший между обновлением списка и выбором.
   | { type: 'select-pack-error'; reason: 'unknown-file' }

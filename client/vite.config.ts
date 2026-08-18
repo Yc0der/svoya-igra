@@ -8,6 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/ws': { target: 'ws://localhost:8080', ws: true },
+      '/media': { target: 'http://localhost:8080' },
     },
   },
   test: {

@@ -73,8 +73,30 @@ function lanUrlFor(address: string | null, port: number): string {
 export function createServer(options: CreateServerOptions): GameServer {
   const { room, clientDistPath, port, packsDir, profilePath } = options;
   const assets = sirv(clientDistPath, { single: true });
+  // Раздаёт packsDir/media/... под префиксом /media/ — БЕЗ single:true:
+  // отсутствующая картинка обязана дать настоящий 404, а не откат на
+  // клиентский index.html (design.md, 2026-08-16, «Отказы»). Смонтирован
+  // на packsDir/media (не на сам packsDir) — префикс /media/ снимается с
+  // req.url перед вызовом, поэтому dir для sirv должен совпадать с тем,
+  // что остаётся ПОСЛЕ снятия префикса.
+  // dev: true — иначе sirv синхронно сканирует directory (readdirSync) уже
+  // в момент создания и бросает ENOENT, если packsDir/media ещё не
+  // существует (обычный случай — большинство паков без картинок вообще не
+  // создают эту папку). С dev: true поиск файла ленивый, по одному
+  // request'у (fs.existsSync), без скана каталога и без исключения при
+  // старте — отсутствие результата по-прежнему уходит в наш собственный
+  // 404-обработчик ниже, а не в SPA-фолбэк.
+  const media = sirv(join(packsDir, 'media'), { dev: true });
 
   const httpServer = createHttpServer((req, res) => {
+    if (req.url?.startsWith('/media/')) {
+      req.url = req.url.slice('/media'.length);
+      media(req, res, () => {
+        res.statusCode = 404;
+        res.end('Not found');
+      });
+      return;
+    }
     assets(req, res, () => {
       res.statusCode = 404;
       res.end('Not found');
@@ -255,11 +277,14 @@ export function createServer(options: CreateServerOptions): GameServer {
           typeof message.themeIndex === 'number' &&
           typeof message.questionId === 'string'
         ) {
-          room.selectQuestion(
+          const result = room.selectQuestion(
             participantId,
             message.themeIndex,
             message.questionId,
           );
+          if ('error' in result) {
+            send(ws, { type: 'select-question-error', reason: result.error });
+          }
         }
       }
 

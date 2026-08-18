@@ -35,10 +35,20 @@ export interface GameStateView {
   // text — null только во время cat-handoff: цена и тема не секрет (видны
   // на сетке ещё до выбора), скрывается только текст, пока получатель не
   // назначен.
+  // image — необязательное поле в этом локальном типе (в отличие от
+  // сервера, где оно обязательное) намеренно: делает его опциональным
+  // для тестовых фикстур в Board.test.tsx/Player.test.tsx, у которых
+  // `currentQuestion` собирается вручную — без этого пришлось бы
+  // дописывать `image: null` в ~18 уже существующих мест в обоих файлах
+  // ради поля, которого эти тесты не касаются. Реальные сообщения с
+  // сервера всегда содержат image — на строгость разбора реальных
+  // сообщений это не влияет, недостающий у TypeScript-типа необязательный
+  // ключ не отбрасывает лишние поля во входящих данных.
   currentQuestion: {
     text: string | null;
     price: number;
     themeName: string;
+    image?: string | null;
   } | null;
   buzzedParticipantId: string | null;
   exclusiveAnswererParticipantId: string | null;
@@ -67,6 +77,10 @@ export type StartGameErrorReason =
   | 'host-required'
   | 'host-only';
 
+// Единственная причина сейчас — «кота» некому передать (room.ts,
+// SelectQuestionResult) — см. select-question-error ниже.
+export type SelectQuestionErrorReason = 'no-recipient';
+
 export interface PackSummary {
   filename: string;
   title: string;
@@ -88,7 +102,8 @@ type ServerMessage =
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
-  | { type: 'select-pack-error'; reason: 'unknown-file' };
+  | { type: 'select-pack-error'; reason: 'unknown-file' }
+  | { type: 'select-question-error'; reason: SelectQuestionErrorReason };
 
 type ClientMessage =
   | { type: 'join'; name: string }
@@ -122,6 +137,11 @@ export interface RoomConnection {
   lanUrl: string | null;
   game: GameStateView | null;
   falsestart: boolean;
+  // Самоочищающийся сигнал (как falsestart) — сервер молча отклонил
+  // select-question (сейчас единственная причина — «кота» некому передать),
+  // и без этого поля пикер не видел бы вообще никакой реакции на клик
+  // (обратная связь, живая партия 2026-08-17).
+  selectQuestionBlocked: boolean;
   hostParticipantId: string | null;
   isHost: boolean;
   startGameError: StartGameErrorReason | null;
@@ -152,6 +172,9 @@ export interface RoomConnection {
 const TOKEN_KEY = 'svoya-igra-token';
 const RECONNECT_DELAY_MS = 2000;
 const FALSESTART_LOCK_MS = 2000;
+// Дольше, чем FALSESTART_LOCK_MS — здесь целое предложение, а не мгновенная
+// блокировка кнопки, читать его нужно больше 2 секунд.
+const SELECT_QUESTION_BLOCKED_MS = 5000;
 
 type WebSocketFactory = (url: string) => WebSocket;
 
@@ -173,6 +196,7 @@ export function useRoomConnection(
   );
   const [game, setGame] = useState<GameStateView | null>(null);
   const [falsestart, setFalsestart] = useState(false);
+  const [selectQuestionBlocked, setSelectQuestionBlocked] = useState(false);
   const [hostParticipantId, setHostParticipantId] = useState<string | null>(
     null,
   );
@@ -185,6 +209,7 @@ export function useRoomConnection(
     let cancelled = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let falsestartTimer: ReturnType<typeof setTimeout> | undefined;
+    let selectQuestionBlockedTimer: ReturnType<typeof setTimeout> | undefined;
 
     function connect(): void {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -260,6 +285,14 @@ export function useRoomConnection(
             FALSESTART_LOCK_MS,
           );
         }
+        if (message.type === 'select-question-error') {
+          setSelectQuestionBlocked(true);
+          clearTimeout(selectQuestionBlockedTimer);
+          selectQuestionBlockedTimer = setTimeout(
+            () => setSelectQuestionBlocked(false),
+            SELECT_QUESTION_BLOCKED_MS,
+          );
+        }
       });
 
       ws.addEventListener('close', () => {
@@ -275,6 +308,7 @@ export function useRoomConnection(
       cancelled = true;
       clearTimeout(reconnectTimer);
       clearTimeout(falsestartTimer);
+      clearTimeout(selectQuestionBlockedTimer);
       wsRef.current?.close();
     };
   }, [wsFactory]);
@@ -302,6 +336,7 @@ export function useRoomConnection(
     lanUrl,
     game,
     falsestart,
+    selectQuestionBlocked,
     hostParticipantId,
     isHost:
       selfId !== null && selfId === (game ? game.hostId : hostParticipantId),
