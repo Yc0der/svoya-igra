@@ -2,8 +2,13 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { findMissingMedia, loadPack, validatePack } from './pack.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  findMissingMedia,
+  findUnreachableVideos,
+  loadPack,
+  validatePack,
+} from './pack.js';
 
 function validPackData() {
   return {
@@ -29,6 +34,12 @@ function validPackData() {
       },
     ],
   };
+}
+
+function packDataWithVideo(video: unknown) {
+  const data = validPackData();
+  (data.rounds[0].themes[0].questions[0] as { video?: unknown }).video = video;
+  return data;
 }
 
 describe('validatePack', () => {
@@ -291,6 +302,105 @@ describe('validatePack — final', () => {
   });
 });
 
+describe('validatePack — video', () => {
+  it('accepts a question with a full video object', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 30,
+      durationSeconds: 15,
+      audioOnly: true,
+    });
+    expect(validatePack(data).rounds[0].themes[0].questions[0].video).toEqual({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 30,
+      durationSeconds: 15,
+      audioOnly: true,
+    });
+  });
+
+  it('accepts a question with video but no audioOnly', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 0,
+      durationSeconds: 10,
+    });
+    expect(
+      validatePack(data).rounds[0].themes[0].questions[0].video?.audioOnly,
+    ).toBeUndefined();
+  });
+
+  it('accepts a question with no video at all', () => {
+    expect(
+      validatePack(validPackData()).rounds[0].themes[0].questions[0].video,
+    ).toBeUndefined();
+  });
+
+  it('rejects a non-object video', () => {
+    const data = packDataWithVideo('not an object');
+    expect(() => validatePack(data)).toThrow(/video/);
+  });
+
+  it('rejects a missing youtubeId', () => {
+    const data = packDataWithVideo({ startSeconds: 0, durationSeconds: 10 });
+    expect(() => validatePack(data)).toThrow(/youtubeId/);
+  });
+
+  it('rejects an empty youtubeId', () => {
+    const data = packDataWithVideo({
+      youtubeId: '',
+      startSeconds: 0,
+      durationSeconds: 10,
+    });
+    expect(() => validatePack(data)).toThrow(/youtubeId/);
+  });
+
+  it('rejects a non-number startSeconds', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: '30',
+      durationSeconds: 10,
+    });
+    expect(() => validatePack(data)).toThrow(/startSeconds/);
+  });
+
+  it('rejects a negative startSeconds', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: -1,
+      durationSeconds: 10,
+    });
+    expect(() => validatePack(data)).toThrow(/startSeconds/);
+  });
+
+  it('rejects a zero durationSeconds', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 0,
+      durationSeconds: 0,
+    });
+    expect(() => validatePack(data)).toThrow(/durationSeconds/);
+  });
+
+  it('rejects a negative durationSeconds', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 0,
+      durationSeconds: -5,
+    });
+    expect(() => validatePack(data)).toThrow(/durationSeconds/);
+  });
+
+  it('rejects a non-boolean audioOnly', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 0,
+      durationSeconds: 10,
+      audioOnly: 'yes',
+    });
+    expect(() => validatePack(data)).toThrow(/audioOnly/);
+  });
+});
+
 describe('loadPack', () => {
   let dir: string;
 
@@ -352,6 +462,60 @@ describe('findMissingMedia', () => {
     const pack = validatePack(data);
     expect(await findMissingMedia(pack, dir)).toEqual([
       { questionId: 'q1', image: 'missing.jpg' },
+    ]);
+  });
+});
+
+describe('findUnreachableVideos', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns an empty list when no question has video', async () => {
+    const pack = validatePack(validPackData());
+    expect(await findUnreachableVideos(pack)).toEqual([]);
+  });
+
+  it('returns an empty list when the oEmbed lookup responds ok', async () => {
+    const pack = validatePack(
+      packDataWithVideo({
+        youtubeId: 'dQw4w9WgXcQ',
+        startSeconds: 0,
+        durationSeconds: 10,
+      }),
+    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true } as Response));
+    expect(await findUnreachableVideos(pack)).toEqual([]);
+  });
+
+  it('reports a question whose oEmbed lookup responds not-ok', async () => {
+    const pack = validatePack(
+      packDataWithVideo({
+        youtubeId: 'dQw4w9WgXcQ',
+        startSeconds: 0,
+        durationSeconds: 10,
+      }),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false } as Response),
+    );
+    expect(await findUnreachableVideos(pack)).toEqual([
+      { questionId: 'q1', youtubeId: 'dQw4w9WgXcQ' },
+    ]);
+  });
+
+  it('reports a question whose oEmbed request throws', async () => {
+    const pack = validatePack(
+      packDataWithVideo({
+        youtubeId: 'dQw4w9WgXcQ',
+        startSeconds: 0,
+        durationSeconds: 10,
+      }),
+    );
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network')));
+    expect(await findUnreachableVideos(pack)).toEqual([
+      { questionId: 'q1', youtubeId: 'dQw4w9WgXcQ' },
     ]);
   });
 });
