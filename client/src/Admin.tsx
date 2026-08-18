@@ -195,6 +195,17 @@ export function Admin() {
     setConfirmingDelete(false);
   }
 
+  // Закрывает форму без сохранения — поля формы (formPrice/formText/...)
+  // держат несохранённый черновик до клика «Сохранить»; без этой кнопки
+  // единственный выход из формы либо сохраняет черновик, либо требует
+  // закрыть весь редактор пакета целиком (design.md обратной связи,
+  // 2026-08-17).
+  function handleCancelEdit(): void {
+    setEditingQuestionId(null);
+    setConfirmingDelete(false);
+    clearPackError();
+  }
+
   // Fix 1 (Веха A, финальное ревью) — форма держится открытой не только по
   // editingQuestionId, а по тому, что вопрос с этим id всё ещё есть в
   // editedPack: после успешного delete сервер шлёт новый пакет без этого
@@ -544,6 +555,9 @@ export function Admin() {
                         onBlur={() => setConfirmingDelete(false)}
                       >
                         {confirmingDelete ? 'Точно?' : 'Удалить'}
+                      </button>
+                      <button className="button" onClick={handleCancelEdit}>
+                        Отменить изменения
                       </button>
                     </div>
                   </div>

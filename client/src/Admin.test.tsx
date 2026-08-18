@@ -662,6 +662,38 @@ describe('Admin — редактор пакета', () => {
     expect(deleteQuestion).toHaveBeenCalledWith('a.json', 'q1');
   });
 
+  it('closes the form without saving when "Отменить изменения" is clicked', async () => {
+    const updateQuestion = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        activePackFilename: 'a.json',
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        editedPack: PACK,
+        editedPackFilename: 'a.json',
+        updateQuestion,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать/i }),
+    );
+    await userEvent.click(screen.getByRole('radio', { name: /сетка/i }));
+    await userEvent.click(screen.getByRole('button', { name: '100' }));
+
+    const priceInput = screen.getByDisplayValue('100');
+    await userEvent.clear(priceInput);
+    await userEvent.type(priceInput, '300');
+    await userEvent.click(
+      screen.getByRole('button', { name: /отменить изменения/i }),
+    );
+
+    expect(updateQuestion).not.toHaveBeenCalled();
+    expect(screen.queryByDisplayValue('300')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '100' })).toBeInTheDocument();
+  });
+
   it('closes the form after a successful delete, once editedPack no longer contains the question', async () => {
     const deleteQuestion = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
