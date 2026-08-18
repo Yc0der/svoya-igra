@@ -5,6 +5,7 @@ import {
   reduce,
   findQuestion,
   QUESTION_TIMER_MS,
+  MEDIA_TIMER_MS,
   CAT_HANDOFF_TIMER_MS,
   AUCTION_BID_TIMER_MS,
   SAID_ANSWER_TIMER_MS,
@@ -89,6 +90,7 @@ function normalizeName(name: string): string {
 // таймера (спека не ограничивает время на выбор вопроса).
 const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   'question-open': { timer: 'question', ms: QUESTION_TIMER_MS },
+  'question-media': { timer: 'media', ms: MEDIA_TIMER_MS },
   'cat-handoff': { timer: 'cat-handoff', ms: CAT_HANDOFF_TIMER_MS },
   'auction-bidding': { timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
   buzzed: { timer: 'said-answer', ms: SAID_ANSWER_TIMER_MS },
@@ -445,6 +447,17 @@ export class Room {
       questionId,
     });
     return { ok: true };
+  }
+
+  // Шлёт табло, доигравшее клип. Без participantId: табло не участник партии
+  // и никогда не делает join — авторизация здесь такая же, как у админских
+  // вызовов, по самому факту типа сообщения. Всю проверку осмысленности
+  // (та ли фаза, тот ли вопрос) делает движок, чтобы правило жило в одном
+  // месте (design.md, 2026-08-18-video-questions-design.md, «Фаза
+  // проигрывания медиа»).
+  mediaFinished(questionId: string): void {
+    if (!this.game) return;
+    this.dispatch({ type: 'media-finished', questionId });
   }
 
   // Тот же принцип, что у selectQuestion() выше — офлайн-получателя движок

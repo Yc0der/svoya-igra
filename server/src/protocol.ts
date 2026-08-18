@@ -100,6 +100,12 @@ export type ClientMessage =
   | { type: 'pass-bid' }
   | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
+  // Шлёт табло, доигравшее клип видео-вопроса. Как и admin-*, не привязано к
+  // личности отправителя: табло не участник и никогда не шлёт 'join'.
+  // questionId — защита от опоздавшего сигнала по предыдущему вопросу
+  // (design.md, 2026-08-18-video-questions-design.md, «Фаза проигрывания
+  // медиа»).
+  | { type: 'media-finished'; questionId: string }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
   // Панель ведущего — сервер сам проверяет, что отправитель и есть hostId,

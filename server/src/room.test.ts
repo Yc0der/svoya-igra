@@ -6,6 +6,7 @@ import {
   REVEAL_TIMER_MS,
   CAT_HANDOFF_TIMER_MS,
   AUCTION_BID_TIMER_MS,
+  MEDIA_TIMER_MS,
 } from './engine.js';
 
 // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — кандидаты и
@@ -340,6 +341,38 @@ describe('Room.disconnect', () => {
 });
 
 import type { Pack } from './pack.js';
+
+const VIDEO_PACK: Pack = {
+  title: 'Тест с видео',
+  author: 'Автор',
+  createdAt: '2026-08-18',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'q1',
+              price: 100,
+              text: 'Вопрос 1?',
+              answer: 'ответ 1',
+              type: 'обычный',
+              video: { youtubeId: 'abc', startSeconds: 0, durationSeconds: 8 },
+            },
+            {
+              id: 'q2',
+              price: 200,
+              text: 'Вопрос 2?',
+              answer: 'ответ 2',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
 
 const TEST_PACK: Pack = {
   title: 'Тест',
@@ -1550,6 +1583,80 @@ describe('Room game flow', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // Та же защита от зависания, но для фазы проигрывания клипа: без записи в
+  // PHASE_TIMER партия, пережившая перезапуск сервера прямо на ролике,
+  // осталась бы в question-media навсегда — табло свой сигнал уже послало (или
+  // не пошлёт вовсе), а страховочный таймер погиб вместе со старым процессом.
+  it('restarts the media safety timer for a game restored mid-clip from a snapshot', () => {
+    const first = new Room(undefined, VIDEO_PACK);
+    joinedId(first, 'Ваня');
+    joinedId(first, 'Катя');
+    first.startGame('requester');
+    const picker = first.toGameStateView()!.turnParticipantId;
+    first.selectQuestion(picker, 0, 'q1');
+    expect(first.toGameStateView()?.phase).toBe('question-media');
+    const snapshot = first.getState();
+
+    vi.useFakeTimers();
+    try {
+      const restored = new Room(snapshot, VIDEO_PACK);
+      expect(restored.toGameStateView()?.phase).toBe('question-media');
+
+      vi.advanceTimersByTime(MEDIA_TIMER_MS);
+      expect(restored.toGameStateView()?.phase).toBe('question-open');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('Room.mediaFinished', () => {
+  function roomOnClip(): { room: Room; picker: string } {
+    const room = new Room(undefined, VIDEO_PACK);
+    joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    room.startGame('requester');
+    const picker = room.toGameStateView()!.turnParticipantId;
+    room.selectQuestion(picker, 0, 'q1');
+    return { room, picker };
+  }
+
+  it('opens the question for answering once the board reports the clip finished', () => {
+    const { room } = roomOnClip();
+    expect(room.toGameStateView()?.phase).toBe('question-media');
+
+    room.mediaFinished('q1');
+
+    expect(room.toGameStateView()?.phase).toBe('question-open');
+    expect(room.toGameStateView()?.timerDeadline).not.toBeNull();
+  });
+
+  it('ignores a signal naming a question that is not the current one', () => {
+    const { room } = roomOnClip();
+
+    room.mediaFinished('q2');
+
+    expect(room.toGameStateView()?.phase).toBe('question-media');
+  });
+
+  it('shows the question text and the video while the clip is playing', () => {
+    const { room } = roomOnClip();
+    const view = room.toGameStateView()!.currentQuestion!;
+
+    expect(view.text).toBe('Вопрос 1?');
+    expect(view.video).toEqual({
+      youtubeId: 'abc',
+      startSeconds: 0,
+      durationSeconds: 8,
+      audioOnly: false,
+    });
+  });
+
+  it('is a no-op when there is no game at all', () => {
+    const room = new Room(undefined, VIDEO_PACK);
+    expect(() => room.mediaFinished('q1')).not.toThrow();
   });
 });
 
