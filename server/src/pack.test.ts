@@ -390,6 +390,24 @@ describe('validatePack — video', () => {
     expect(() => validatePack(data)).toThrow(/durationSeconds/);
   });
 
+  it('rejects a non-integer startSeconds', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 30.5,
+      durationSeconds: 10,
+    });
+    expect(() => validatePack(data)).toThrow(/startSeconds/);
+  });
+
+  it('rejects a non-integer durationSeconds', () => {
+    const data = packDataWithVideo({
+      youtubeId: 'dQw4w9WgXcQ',
+      startSeconds: 0,
+      durationSeconds: 10.5,
+    });
+    expect(() => validatePack(data)).toThrow(/durationSeconds/);
+  });
+
   it('rejects a non-boolean audioOnly', () => {
     const data = packDataWithVideo({
       youtubeId: 'dQw4w9WgXcQ',

@@ -122,21 +122,21 @@ function validateQuestion(data: unknown, where: string): Question {
     const startSeconds = videoData.startSeconds;
     if (
       typeof startSeconds !== 'number' ||
-      !Number.isFinite(startSeconds) ||
+      !Number.isInteger(startSeconds) ||
       startSeconds < 0
     ) {
       throw new Error(
-        `${where}.video.startSeconds: должно быть неотрицательным числом`,
+        `${where}.video.startSeconds: должно быть неотрицательным целым числом`,
       );
     }
     const durationSeconds = videoData.durationSeconds;
     if (
       typeof durationSeconds !== 'number' ||
-      !Number.isFinite(durationSeconds) ||
+      !Number.isInteger(durationSeconds) ||
       durationSeconds <= 0
     ) {
       throw new Error(
-        `${where}.video.durationSeconds: должно быть положительным числом`,
+        `${where}.video.durationSeconds: должно быть положительным целым числом`,
       );
     }
     if (
