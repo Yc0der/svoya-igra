@@ -52,6 +52,7 @@ describe('VideoPlayer', () => {
     fireEvent.click(screen.getByRole('button', { name: /играть/i }));
 
     expect(await screen.findByAltText(/играет аудио/i)).toBeInTheDocument();
+    expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
   });
 
   it('shows an error message when the player reports onError', async () => {
