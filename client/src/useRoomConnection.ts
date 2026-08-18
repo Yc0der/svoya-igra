@@ -49,6 +49,16 @@ export interface GameStateView {
     price: number;
     themeName: string;
     image?: string | null;
+    // Тот же приём, что и у image выше — необязательное поле в этом
+    // локальном типе ради тестовых фикстур, которые собирают
+    // currentQuestion вручную (Board.test.tsx). Реальные сообщения с
+    // сервера всегда содержат video (Task 2, server/src/protocol.ts).
+    video?: {
+      youtubeId: string;
+      startSeconds: number;
+      durationSeconds: number;
+      audioOnly: boolean;
+    } | null;
   } | null;
   buzzedParticipantId: string | null;
   exclusiveAnswererParticipantId: string | null;
