@@ -11,6 +11,7 @@ export interface GameStateView {
     | 'selecting'
     | 'cat-handoff'
     | 'auction-bidding'
+    | 'question-media'
     | 'question-open'
     | 'buzzed'
     | 'judging'
@@ -45,6 +46,10 @@ export interface GameStateView {
   // сообщений это не влияет, недостающий у TypeScript-типа необязательный
   // ключ не отбрасывает лишние поля во входящих данных.
   currentQuestion: {
+    // Необязательное здесь по той же причине, что image/video ниже — ради
+    // тестовых фикстур, собирающих currentQuestion вручную. Реальные
+    // сообщения с сервера всегда его содержат (server/src/protocol.ts).
+    id?: string;
     text: string | null;
     price: number;
     themeName: string;
@@ -125,6 +130,7 @@ type ClientMessage =
   | { type: 'pass-bid' }
   | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
+  | { type: 'media-finished'; questionId: string }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
   | { type: 'adjust-score'; participantId: string; delta: number }
@@ -163,6 +169,7 @@ export interface RoomConnection {
   passBid(): void;
   assignCat(recipientParticipantId: string): void;
   buzz(): void;
+  mediaFinished(questionId: string): void;
   saidAnswer(): void;
   vote(correct: boolean): void;
   adjustScore(participantId: string, delta: number): void;
@@ -361,6 +368,11 @@ export function useRoomConnection(
     assignCat: (recipientParticipantId) =>
       send({ type: 'assign-cat', recipientParticipantId }),
     buzz: () => send({ type: 'buzz' }),
+    // Шлёт только табло, доиграв клип: по этому сигналу сервер запускает
+    // таймер вопроса (design.md, 2026-08-18-video-questions-design.md,
+    // «Фаза проигрывания медиа»).
+    mediaFinished: (questionId: string) =>
+      send({ type: 'media-finished', questionId }),
     saidAnswer: () => send({ type: 'said-answer' }),
     vote: (correct) => send({ type: 'vote', correct }),
     adjustScore: (participantId, delta) =>

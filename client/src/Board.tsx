@@ -5,7 +5,7 @@ import { useCountdown } from './useCountdown';
 import { VideoPlayer } from './VideoPlayer';
 
 export function Board() {
-  const { participants, lanUrl, game } = useRoomConnection();
+  const { participants, lanUrl, game, mediaFinished } = useRoomConnection();
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
 
   function nameOf(participantId: string): string {
@@ -194,7 +194,18 @@ export function Board() {
             />
           )}
           {game.currentQuestion.video && (
-            <VideoPlayer video={game.currentQuestion.video} />
+            <VideoPlayer
+              // Ключ по вопросу, а не по фазе: переход question-media →
+              // question-open не должен пересоздавать плеер и запускать
+              // клип по второму разу.
+              key={game.currentQuestion.id}
+              video={game.currentQuestion.video}
+              onFinished={() => {
+                if (game.currentQuestion?.id) {
+                  mediaFinished(game.currentQuestion.id);
+                }
+              }}
+            />
           )}
           {(game.phase === 'question-open' || game.phase === 'cat-handoff') &&
             remainingSeconds !== null && (

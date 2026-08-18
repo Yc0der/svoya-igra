@@ -303,6 +303,7 @@ export function Player() {
     const questionActive =
       game.phase === 'cat-handoff' ||
       game.phase === 'auction-bidding' ||
+      game.phase === 'question-media' ||
       game.phase === 'question-open' ||
       game.phase === 'buzzed' ||
       game.phase === 'judging';
@@ -518,6 +519,17 @@ export function Player() {
           </div>
         );
       }
+
+      // Пока идёт клип, кнопки «Ответ» нет ни у кого и отсчёта тоже: сначала
+      // все досматривают целиком, и только потом вопрос открывается
+      // (design.md, 2026-08-18-video-questions-design.md, «Фаза проигрывания
+      // медиа»).
+      case 'question-media':
+        return (
+          <div className="player player--center">
+            <p>Идёт ролик — смотрите на табло</p>
+          </div>
+        );
 
       case 'question-open': {
         if (isHost) {

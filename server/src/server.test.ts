@@ -971,6 +971,7 @@ describe('createServer cat-in-the-bag', () => {
     };
     expect(afterSelect.game.phase).toBe('cat-handoff');
     expect(afterSelect.game.currentQuestion).toEqual({
+      id: 'cat1',
       text: null,
       price: 100,
       themeName: 'Тема',
@@ -993,6 +994,7 @@ describe('createServer cat-in-the-bag', () => {
     };
     expect(afterAssign.game.phase).toBe('question-open');
     expect(afterAssign.game.currentQuestion).toEqual({
+      id: 'cat1',
       text: 'Вопрос-кот?',
       price: 100,
       themeName: 'Тема',

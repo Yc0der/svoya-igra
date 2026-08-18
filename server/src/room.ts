@@ -742,6 +742,11 @@ export class Room {
       // «кота» — торговаться, уже зная вопрос, значит не торговаться вовсе).
       currentQuestion: currentQuestionData
         ? {
+            // Не секрет: тот же id уже лежит в grid выше. Табло возвращает
+            // его в media-finished, чтобы опоздавший сигнал по прошлому
+            // вопросу не оборвал клип следующего (инвариант 3 — стабильный
+            // id вопроса — ровно для таких связей и заведён).
+            id: currentQuestionData.id,
             text:
               game.phase === 'cat-handoff' || game.phase === 'auction-bidding'
                 ? null

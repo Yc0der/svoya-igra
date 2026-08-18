@@ -61,6 +61,7 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     passBid: vi.fn(),
     assignCat: vi.fn(),
     buzz: vi.fn(),
+    mediaFinished: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
     adjustScore: vi.fn(),
@@ -355,6 +356,24 @@ describe('Player', () => {
     render(<Player />);
     await userEvent.click(screen.getByRole('button', { name: /100/ }));
     expect(selectQuestion).toHaveBeenCalledWith(0, 'q1');
+  });
+
+  it('offers no buzz button while the clip is still playing — everyone watches it through first', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-media',
+          timerDeadline: Date.now() + 45000,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /^ответ$/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/идёт ролик/i)).toBeInTheDocument();
+    // Отсчёт на экране — это страховочный таймер медиа, а не время на ответ.
+    expect(screen.queryByText(/^\d+с$/)).not.toBeInTheDocument();
   });
 
   it('shows the buzz button while the question is open', () => {

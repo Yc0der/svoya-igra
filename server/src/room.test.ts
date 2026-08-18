@@ -1314,6 +1314,7 @@ describe('Room game flow', () => {
     room.selectQuestion(picker, 0, 'q1');
     expect(room.toGameStateView()?.phase).toBe('question-open');
     expect(room.toGameStateView()?.currentQuestion).toEqual({
+      id: 'q1',
       text: 'Вопрос 1?',
       price: 100,
       themeName: 'Тема',
@@ -2025,6 +2026,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     room.selectQuestion(picker, 0, 'cat1');
 
     expect(room.toGameStateView()?.currentQuestion).toEqual({
+      id: 'cat1',
       text: null,
       price: 100,
       themeName: 'Тема',
@@ -2035,6 +2037,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     room.assignCat(picker, other);
 
     expect(room.toGameStateView()?.currentQuestion).toEqual({
+      id: 'cat1',
       text: 'Вопрос-кот?',
       price: 100,
       themeName: 'Тема',
@@ -2189,6 +2192,7 @@ describe('Room — вопрос-аукцион', () => {
     expect(room.toGameStateView()?.phase).toBe('auction-bidding');
     expect(room.toGameStateView()!.currentQuestion!.text).toBeNull();
     expect(room.toGameStateView()?.currentQuestion).toEqual({
+      id: 'auc1',
       text: null,
       price: 100,
       themeName: 'Тема',
