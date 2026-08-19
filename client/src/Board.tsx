@@ -2,11 +2,17 @@ import { Fragment, type CSSProperties } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoomConnection } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
+import { useWordReveal } from './useWordReveal';
 import { VideoPlayer } from './VideoPlayer';
 
 export function Board() {
   const { participants, lanUrl, game, mediaFinished } = useRoomConnection();
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
+  const revealedQuestionText = useWordReveal(
+    game?.phase === 'question-reveal' ? (game.timerDeadline ?? null) : null,
+    game?.currentQuestion?.revealMs ?? null,
+    game?.currentQuestion?.text ?? '',
+  );
 
   function nameOf(participantId: string): string {
     return (
@@ -180,7 +186,11 @@ export function Board() {
               Room.toGameStateView) — показываем тему и цену, не пустой
               абзац. */}
           {game.currentQuestion.text !== null ? (
-            <p className="board-question">{game.currentQuestion.text}</p>
+            <p className="board-question">
+              {game.phase === 'question-reveal'
+                ? revealedQuestionText
+                : game.currentQuestion.text}
+            </p>
           ) : (
             <p className="board-question">
               {game.currentQuestion.themeName} за {game.currentQuestion.price}

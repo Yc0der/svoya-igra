@@ -58,6 +58,8 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     setHost: vi.fn(),
     skipToFinal: vi.fn(),
     setLanAddress: vi.fn(),
+    textRevealWordsPerSecond: 2.5,
+    setTextRevealWordsPerSecond: vi.fn(),
     availablePacks: [],
     activePackFilename: null,
     selectPackError: null,
