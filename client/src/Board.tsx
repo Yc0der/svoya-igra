@@ -2,13 +2,13 @@ import { Fragment, type CSSProperties } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoomConnection } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
-import { useWordReveal } from './useWordReveal';
+import { useTextReveal } from './useTextReveal';
 import { VideoPlayer } from './VideoPlayer';
 
 export function Board() {
   const { participants, lanUrl, game, mediaFinished } = useRoomConnection();
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
-  const revealedQuestionText = useWordReveal(
+  const revealedQuestionText = useTextReveal(
     game?.phase === 'question-reveal' ? (game.timerDeadline ?? null) : null,
     game?.currentQuestion?.revealMs ?? null,
     game?.currentQuestion?.text ?? '',

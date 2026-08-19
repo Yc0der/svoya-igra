@@ -368,18 +368,19 @@ describe('Board', () => {
     expect(document.querySelector('.board-timer')).not.toBeInTheDocument();
   });
 
-  it('shows only the words revealed so far during question-reveal, synced to timerDeadline/revealMs', () => {
+  it('shows only the characters revealed so far during question-reveal, synced to timerDeadline/revealMs', () => {
     vi.useFakeTimers();
     try {
       const now = Date.now();
       vi.setSystemTime(now);
+      const text = 'Первое второе третье четвёртое'; // length 30
       mockedUseRoomConnection.mockReturnValue(
         connection({
           game: baseGame({
             phase: 'question-reveal',
             currentQuestion: {
               id: 'q1',
-              text: 'Первое второе третье четвёртое',
+              text,
               price: 100,
               themeName: 'Тема',
               revealMs: 4000,
@@ -389,17 +390,20 @@ describe('Board', () => {
         }),
       );
       render(<Board />);
-      // count = floor(4 * 0 / 4000) + 1 = 1 — первое слово видно сразу
-      // (useWordReveal.ts), остальные — ещё нет.
-      expect(screen.getByText('Первое')).toBeInTheDocument();
-      expect(screen.queryByText(/второе/)).not.toBeInTheDocument();
+      // count = floor(30 * 0 / 4000) + 1 = 1 — первая буква видна сразу
+      // (useTextReveal.ts), остальной текст — ещё нет.
+      expect(screen.getByText('П')).toBeInTheDocument();
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
 
       act(() => {
+        // advanceTimersByTime двигает подложные часы вместе с таймером —
+        // реальный elapsed на момент срабатывания интервала 2000+250=2250мс,
+        // не 2000 (см. useTextReveal.test.ts).
         vi.setSystemTime(now + 2000);
         vi.advanceTimersByTime(250);
       });
-      // count = floor(4 * 2000 / 4000) + 1 = 2 + 1 = 3.
-      expect(screen.getByText('Первое второе третье')).toBeInTheDocument();
+      // count = floor(30 * 2250 / 4000) + 1 = 16 + 1 = 17.
+      expect(screen.getByText('Первое второе тре')).toBeInTheDocument();
       // Отсчёт — по question-таймеру, который в question-reveal ещё не идёт
       // (design.md, 2026-08-19-gradual-text-reveal-design.md).
       expect(document.querySelector('.board-timer')).not.toBeInTheDocument();

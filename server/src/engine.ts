@@ -8,7 +8,7 @@ export type Phase =
   // жать «Ответ» нельзя. Только для вопросов с video (design.md,
   // 2026-08-18-video-questions-design.md, «Фаза проигрывания медиа»).
   | 'question-media'
-  // Вопрос открыт, текст показывается по словам (design.md,
+  // Вопрос открыт, текст показывается по буквам (design.md,
   // 2026-08-19-gradual-text-reveal-design.md, «Фаза question-reveal»).
   // Кнопка «Ответ» отклоняется той же проверкой phase !== 'question-open',
   // что уже отсекает её в question-media — новой ветки в handleBuzz не
