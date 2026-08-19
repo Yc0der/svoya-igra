@@ -2515,7 +2515,13 @@ describe('question-reveal phase', () => {
 
     // selectFirst для видео проходит только question-media: проверка
     // opened.state.phase !== 'question-reveal' (Step 5) для видео истинна,
-    // а timer-expired/text-reveal на фазе question-media — no-op.
+    // поэтому selectFirst возвращает результат сразу после select-question и
+    // вовсе не шлёт timer-expired/text-reveal в этой ветке — фаза остаётся
+    // question-media. (Если бы timer-expired/text-reveal всё же пришёл на
+    // question-media, handleTimerExpired обработал бы его тем же
+    // непроверяющим фазу case'ом, что и case 'question'/case 'media' в этом
+    // же switch, и перевёл бы состояние в question-open — этот case
+    // намеренно не проверяет текущую фазу, см. handleTimerExpired.)
     expect(next.phase).toBe('question-media');
   });
 });

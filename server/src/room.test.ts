@@ -2513,6 +2513,14 @@ describe('question-reveal / text reveal speed', () => {
     try {
       const restored = new Room(snapshot, REVEAL_PACK);
       expect(restored.toGameStateView()?.phase).toBe('question-reveal');
+      // Не просто «не зависло»: конструктор обязан не только перезавести
+      // реальный таймер через PHASE_TIMER, но и заново посчитать/записать
+      // currentTextRevealMs — иначе табло получит revealMs: null при живой
+      // question-reveal, и кнопка «Ответ» на телефонах останется скрытой
+      // молча (findings, «Snapshot-restore test doesn't assert revealMs»).
+      expect(
+        restored.toGameStateView()?.currentQuestion?.revealMs,
+      ).not.toBeNull();
 
       vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       expect(restored.toGameStateView()?.phase).toBe('question-open');

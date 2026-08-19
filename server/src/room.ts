@@ -655,10 +655,12 @@ export class Room {
     };
   }
 
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
   getTextRevealWordsPerSecond(): number {
     return this.textRevealWordsPerSecond;
   }
 
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
   // Без проверки отправителя, как и остальные admin-* настройки этого
   // класса — админ-панель не проверяет личность (server.ts).
   setTextRevealWordsPerSecond(wordsPerSecond: number): void {
@@ -921,6 +923,7 @@ export class Room {
     return () => this.packListeners.delete(listener);
   }
 
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
   onTextRevealRateChange(
     listener: (wordsPerSecond: number) => void,
   ): () => void {

@@ -389,13 +389,17 @@ describe('Board', () => {
         }),
       );
       render(<Board />);
-      expect(screen.queryByText(/Первое/)).not.toBeInTheDocument();
+      // count = floor(4 * 0 / 4000) + 1 = 1 — первое слово видно сразу
+      // (useWordReveal.ts), остальные — ещё нет.
+      expect(screen.getByText('Первое')).toBeInTheDocument();
+      expect(screen.queryByText(/второе/)).not.toBeInTheDocument();
 
       act(() => {
         vi.setSystemTime(now + 2000);
         vi.advanceTimersByTime(250);
       });
-      expect(screen.getByText('Первое второе')).toBeInTheDocument();
+      // count = floor(4 * 2000 / 4000) + 1 = 2 + 1 = 3.
+      expect(screen.getByText('Первое второе третье')).toBeInTheDocument();
       // Отсчёт — по question-таймеру, который в question-reveal ещё не идёт
       // (design.md, 2026-08-19-gradual-text-reveal-design.md).
       expect(document.querySelector('.board-timer')).not.toBeInTheDocument();

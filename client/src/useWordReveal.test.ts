@@ -21,14 +21,16 @@ describe('useWordReveal', () => {
           useWordReveal(d, r, 'Первое второе третье четвёртое'),
         { initialProps: { d: deadline, r: 4000 } },
       );
-      expect(result.current).toBe('');
+      // count = floor(4 * 0 / 4000) + 1 = 1 — первое слово видно сразу.
+      expect(result.current).toBe('Первое');
 
       act(() => {
         vi.setSystemTime(now + 2000);
         vi.advanceTimersByTime(250);
       });
       rerender({ d: deadline, r: 4000 });
-      expect(result.current).toBe('Первое второе');
+      // count = floor(4 * 2000 / 4000) + 1 = 2 + 1 = 3.
+      expect(result.current).toBe('Первое второе третье');
 
       act(() => {
         vi.setSystemTime(now + 4000);

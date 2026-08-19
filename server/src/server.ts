@@ -127,6 +127,7 @@ export function createServer(options: CreateServerOptions): GameServer {
       lanCandidates: lan.candidates,
       availablePacks: packInfo.available,
       activePackFilename: packInfo.activeFilename,
+      // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
       textRevealWordsPerSecond: room.getTextRevealWordsPerSecond(),
     };
   };
@@ -161,6 +162,7 @@ export function createServer(options: CreateServerOptions): GameServer {
   room.onChange(broadcastState);
   room.onLanChange(broadcastState);
   room.onPackChange(broadcastState);
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
   room.onTextRevealRateChange(broadcastState);
 
   // `ws`, будучи прицепленным к готовому httpServer, переподписывает его

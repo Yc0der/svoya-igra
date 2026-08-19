@@ -22,9 +22,15 @@ export function useWordReveal(
   if (deadline === null || revealMs === null || revealMs <= 0) return text;
   const words = text.trim().split(/\s+/).filter(Boolean);
   const elapsed = revealMs - (deadline - now);
+  // +1: первое слово должно быть видно сразу (elapsed=0 → count=1), иначе
+  // короткий вопрос (или первый словослот любого вопроса) стоит пустым весь
+  // TEXT_REVEAL_MIN_MS — именно та «вспышка», от которой минимальная
+  // длительность должна была защищать (найдено финальным ревью ветки).
+  // Обратная сторона: полный текст открывается на один словослот раньше
+  // дедлайна — приемлемый компромисс («дочитал — можно жать»).
   const count = Math.max(
     0,
-    Math.min(words.length, Math.floor((words.length * elapsed) / revealMs)),
+    Math.min(words.length, Math.floor((words.length * elapsed) / revealMs) + 1),
   );
   return words.slice(0, count).join(' ');
 }
