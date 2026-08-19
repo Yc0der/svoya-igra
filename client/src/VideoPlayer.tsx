@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import soundWave from './assets/sound-wave.gif';
 // ВРЕМЕННО — заглушка на время предзапуска обычного (не audioOnly)
-// видео-вопроса. Положена вручную, как и sound-wave.gif выше.
+// видео-вопроса. Ahm masum, «Loading icon.gif», Wikimedia Commons,
+// CC BY-SA 4.0: https://commons.wikimedia.org/wiki/File:Loading_icon.gif
 import videoLoading from './assets/video-loading.gif';
 
 interface YouTubePlayerInstance {
