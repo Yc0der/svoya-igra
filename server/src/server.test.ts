@@ -530,6 +530,29 @@ const TEST_PACK: Pack = {
   ],
 };
 
+const TEST_PACK_WITH_VIDEO: Pack = {
+  ...TEST_PACK,
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'q1',
+              price: 100,
+              text: 'Вопрос?',
+              answer: 'Ответ',
+              type: 'обычный',
+              video: { youtubeId: 'abc', startSeconds: 0, durationSeconds: 8 },
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 async function joinPlayer(baseUrl: string, name: string) {
   const ws = new WebSocket(baseUrl);
   const nextMessage = collectMessages(ws);
@@ -566,6 +589,65 @@ async function settle(
   const [aMsg, bMsg] = await Promise.all([a.nextMessage(), b.nextMessage()]);
   return interested === a ? aMsg : bMsg;
 }
+
+describe('createServer media-finished', () => {
+  // Табло — не участник партии: оно никогда не шлёт 'join', поэтому сигнал об
+  // окончании клипа проходит тем же путём, что админские сообщения, без
+  // поиска отправителя в connections. Здесь проверяется именно проводка
+  // сообщения насквозь; правило «та ли фаза, тот ли вопрос» живёт в движке и
+  // покрыто отдельно (engine.test.ts, room.test.ts).
+  it('lets a board socket that never joined open the question once the clip ends', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-media-'));
+    const room = new Room(undefined, TEST_PACK_WITH_VIDEO);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } =
+      server.httpServer.address() as import('node:net').AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage();
+    const board = await connectAdmin(url);
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const started = (await settle(a, b, a)) as {
+      game: { phase: string; turnParticipantId: string };
+    };
+    await board.nextMessage();
+
+    const picker = started.game.turnParticipantId === a.participantId ? a : b;
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'q1',
+      }),
+    );
+    const onClip = (await settle(a, b, picker)) as { game: { phase: string } };
+    await board.nextMessage();
+    expect(onClip.game.phase).toBe('question-media');
+
+    board.ws.send(JSON.stringify({ type: 'media-finished', questionId: 'q1' }));
+    const afterClip = (await settle(a, b, picker)) as {
+      game: { phase: string };
+    };
+    expect(afterClip.game.phase).toBe('question-open');
+
+    a.ws.close();
+    b.ws.close();
+    board.ws.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
+    await rm(dir, { recursive: true, force: true });
+  });
+});
 
 describe('createServer game flow', () => {
   it('plays a question from start-game through a correct answer', async () => {
@@ -889,10 +971,12 @@ describe('createServer cat-in-the-bag', () => {
     };
     expect(afterSelect.game.phase).toBe('cat-handoff');
     expect(afterSelect.game.currentQuestion).toEqual({
+      id: 'cat1',
       text: null,
       price: 100,
       themeName: 'Тема',
       image: null,
+      video: null,
     });
 
     picker.ws.send(
@@ -910,10 +994,12 @@ describe('createServer cat-in-the-bag', () => {
     };
     expect(afterAssign.game.phase).toBe('question-open');
     expect(afterAssign.game.currentQuestion).toEqual({
+      id: 'cat1',
       text: 'Вопрос-кот?',
       price: 100,
       themeName: 'Тема',
       image: null,
+      video: null,
     });
     expect(afterAssign.game.exclusiveAnswererParticipantId).toBe(
       other.participantId,

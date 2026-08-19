@@ -24,6 +24,10 @@ export interface GameStateView {
   // и тема не секрет (видны на сетке ещё до выбора вопроса), скрывается
   // только текст, пока получатель не назначен.
   currentQuestion: {
+    // Стабильный id вопроса из пакета (инвариант 3). Табло возвращает его в
+    // media-finished — так опоздавший сигнал по прошлому вопросу не оборвёт
+    // клип следующего.
+    id: string;
     text: string | null;
     price: number;
     themeName: string;
@@ -32,6 +36,18 @@ export interface GameStateView {
     // время cat-handoff/торгов, пока получатель/победитель ещё не
     // определён (design.md, 2026-08-16, «Сервер и клиент»).
     image: string | null;
+    // Тот же принцип видимости, что у image/text — null во время
+    // cat-handoff/торгов аукциона, иначе объект с youtubeId/таймкодом или
+    // null, если у вопроса нет video (design.md,
+    // 2026-08-18-video-questions-design.md, «Сервер и клиент»). audioOnly
+    // здесь уже разрешён (false, если в паке отсутствовал) — клиенту не
+    // нужно самому обрабатывать undefined.
+    video: {
+      youtubeId: string;
+      startSeconds: number;
+      durationSeconds: number;
+      audioOnly: boolean;
+    } | null;
   } | null;
   buzzedParticipantId: string | null;
   // Не null только пока фаза — question-open/buzzed/judging для вопроса,
@@ -88,6 +104,12 @@ export type ClientMessage =
   | { type: 'pass-bid' }
   | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
+  // Шлёт табло, доигравшее клип видео-вопроса. Как и admin-*, не привязано к
+  // личности отправителя: табло не участник и никогда не шлёт 'join'.
+  // questionId — защита от опоздавшего сигнала по предыдущему вопросу
+  // (design.md, 2026-08-18-video-questions-design.md, «Фаза проигрывания
+  // медиа»).
+  | { type: 'media-finished'; questionId: string }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
   // Панель ведущего — сервер сам проверяет, что отправитель и есть hostId,

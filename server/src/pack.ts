@@ -13,11 +13,25 @@ export interface Question {
   // `/media/<пак>/<image>`. Только основной раунд — финал
   // (FinalTheme.question) картинок не получает в этой вехе.
   image?: string;
+  // docs/superpowers/specs/2026-08-18-video-questions-design.md, «Формат пакета» —
+  // ничего не скачивается, только ссылка на публичный YouTube-ролик и таймкод.
+  // audioOnly — не показывать сам ролик на табло, только звук (Board.tsx/VideoPlayer.tsx).
+  video?: {
+    youtubeId: string;
+    startSeconds: number;
+    durationSeconds: number;
+    audioOnly?: boolean;
+  };
 }
 
 export interface MissingMedia {
   questionId: string;
   image: string;
+}
+
+export interface UnreachableVideo {
+  questionId: string;
+  youtubeId: string;
 }
 
 export interface Theme {
@@ -98,6 +112,48 @@ function validateQuestion(data: unknown, where: string): Question {
       throw new Error(`${where}.image: должно быть именем файла без пути`);
     }
   }
+  let video: Question['video'];
+  if (question.video !== undefined) {
+    const videoData = requireRecord(question.video, `${where}.video`);
+    const youtubeId = requireNonEmptyString(
+      videoData.youtubeId,
+      `${where}.video.youtubeId`,
+    );
+    const startSeconds = videoData.startSeconds;
+    if (
+      typeof startSeconds !== 'number' ||
+      !Number.isInteger(startSeconds) ||
+      startSeconds < 0
+    ) {
+      throw new Error(
+        `${where}.video.startSeconds: должно быть неотрицательным целым числом`,
+      );
+    }
+    const durationSeconds = videoData.durationSeconds;
+    if (
+      typeof durationSeconds !== 'number' ||
+      !Number.isInteger(durationSeconds) ||
+      durationSeconds <= 0
+    ) {
+      throw new Error(
+        `${where}.video.durationSeconds: должно быть положительным целым числом`,
+      );
+    }
+    if (
+      videoData.audioOnly !== undefined &&
+      typeof videoData.audioOnly !== 'boolean'
+    ) {
+      throw new Error(
+        `${where}.video.audioOnly: если есть, должно быть булевым`,
+      );
+    }
+    video = {
+      youtubeId,
+      startSeconds,
+      durationSeconds,
+      audioOnly: videoData.audioOnly as boolean | undefined,
+    };
+  }
   const type = question.type;
   if (typeof type !== 'string' || !QUESTION_TYPES.has(type)) {
     throw new Error(
@@ -111,6 +167,7 @@ function validateQuestion(data: unknown, where: string): Question {
     answer,
     comment: question.comment as string | undefined,
     image,
+    video,
     type: type as Question['type'],
   };
 }
@@ -266,4 +323,44 @@ export async function findMissingMedia(
     }
   }
   return missing;
+}
+
+/**
+ * Для каждого вопроса с `video` — доступен ли ролик через официальный
+ * YouTube oEmbed (design.md 2026-08-18-video-questions-design.md, «Валидация
+ * при генерации»). Возвращает список вопросов, чей ролик недоступен
+ * (удалён, стал приватным, не встраивается). Не используется живым игровым
+ * сервером — только генератором (`scripts/validate-pack.ts`): сетевой
+ * запрос на каждый вопрос при каждой загрузке пака живым сервером
+ * недопустим, тот же принцип, что и у findMissingMedia выше.
+ */
+export async function findUnreachableVideos(
+  pack: Pack,
+): Promise<UnreachableVideo[]> {
+  const unreachable: UnreachableVideo[] = [];
+  for (const round of pack.rounds) {
+    for (const theme of round.themes) {
+      for (const question of theme.questions) {
+        if (!question.video) continue;
+        const url = `https://www.youtube.com/oembed?url=${encodeURIComponent(
+          `https://www.youtube.com/watch?v=${question.video.youtubeId}`,
+        )}&format=json`;
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            unreachable.push({
+              questionId: question.id,
+              youtubeId: question.video.youtubeId,
+            });
+          }
+        } catch {
+          unreachable.push({
+            questionId: question.id,
+            youtubeId: question.video.youtubeId,
+          });
+        }
+      }
+    }
+  }
+  return unreachable;
 }

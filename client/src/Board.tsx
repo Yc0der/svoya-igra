@@ -2,9 +2,10 @@ import { Fragment, type CSSProperties } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoomConnection } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
+import { VideoPlayer } from './VideoPlayer';
 
 export function Board() {
-  const { participants, lanUrl, game } = useRoomConnection();
+  const { participants, lanUrl, game, mediaFinished } = useRoomConnection();
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
 
   function nameOf(participantId: string): string {
@@ -185,11 +186,25 @@ export function Board() {
               {game.currentQuestion.themeName} за {game.currentQuestion.price}
             </p>
           )}
-          {game.currentQuestion.image && (
+          {game.currentQuestion.image && !game.currentQuestion.video && (
             <img
               className="board-question-image"
               src={game.currentQuestion.image}
               alt="Картинка к вопросу"
+            />
+          )}
+          {game.currentQuestion.video && (
+            <VideoPlayer
+              // Ключ по вопросу, а не по фазе: переход question-media →
+              // question-open не должен пересоздавать плеер и запускать
+              // клип по второму разу.
+              key={game.currentQuestion.id}
+              video={game.currentQuestion.video}
+              onFinished={() => {
+                if (game.currentQuestion?.id) {
+                  mediaFinished(game.currentQuestion.id);
+                }
+              }}
             />
           )}
           {(game.phase === 'question-open' || game.phase === 'cat-handoff') &&

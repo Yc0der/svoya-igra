@@ -383,6 +383,15 @@ export function createServer(options: CreateServerOptions): GameServer {
         }
       }
 
+      // Табло тоже не делает 'join', поэтому сигнал об окончании клипа, как
+      // и админские сообщения ниже, не ищет отправителя в connections.
+      if (
+        message.type === 'media-finished' &&
+        typeof message.questionId === 'string'
+      ) {
+        room.mediaFinished(message.questionId);
+      }
+
       // Админ-панель (design.md, «Админ-панель») — сокет админки никогда не
       // шлёт 'join', поэтому в отличие от всего выше эти сообщения не ищут
       // отправителя в connections: авторизация не по личности отправителя,

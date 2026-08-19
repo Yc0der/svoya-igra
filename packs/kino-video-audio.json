@@ -1,0 +1,84 @@
+{
+  "title": "Кино: видео и звук",
+  "author": "сгенерировано pack-generator",
+  "createdAt": "2026-08-18",
+  "description": "Одна тема из пяти вопросов: три фрагмента трейлеров и два саундтрека без картинки — живая проверка видео- и аудио-вопросов.",
+  "rounds": [
+    {
+      "themes": [
+        {
+          "name": "Кино",
+          "questions": [
+            {
+              "id": "r1-kino-100",
+              "price": 100,
+              "text": "Фрагмент трейлера какого фильма вы видите?",
+              "answer": "Титаник",
+              "comment": "Фильм Джеймса Кэмерона 1997 года.",
+              "type": "обычный",
+              "video": {
+                "youtubeId": "cIJ8ma0kKtY",
+                "startSeconds": 55,
+                "durationSeconds": 8
+              }
+            },
+            {
+              "id": "r1-kino-200",
+              "price": 200,
+              "text": "Фрагмент трейлера какого фильма вы видите?",
+              "answer": "Гарри Поттер и философский камень",
+              "comment": "Первый фильм франшизы, 2001 год.",
+              "type": "обычный",
+              "video": {
+                "youtubeId": "VyHV0BRtdxo",
+                "startSeconds": 55,
+                "durationSeconds": 8
+              }
+            },
+            {
+              "id": "r1-kino-300",
+              "price": 300,
+              "text": "Из какого фильма звучит эта музыка?",
+              "answer": "Пираты Карибского моря",
+              "comment": "Тема «He's a Pirate» Клауса Бадельта.",
+              "type": "обычный",
+              "video": {
+                "youtubeId": "yIMMXMl8fnI",
+                "startSeconds": 20,
+                "durationSeconds": 10,
+                "audioOnly": true
+              }
+            },
+            {
+              "id": "r1-kino-400",
+              "price": 400,
+              "text": "Из какого фильма звучит эта музыка?",
+              "answer": "Крёстный отец",
+              "comment": "Главная тема Нино Роты.",
+              "type": "обычный",
+              "video": {
+                "youtubeId": "PPskYVBqdNw",
+                "startSeconds": 2,
+                "durationSeconds": 10,
+                "audioOnly": true
+              }
+            },
+            {
+              "id": "r1-kino-500",
+              "price": 500,
+              "text": "Фрагмент трейлера какого фильма вы видите?",
+              "answer": "Криминальное чтиво",
+              "comment": "Фильм Квентина Тарантино 1994 года.",
+              "type": "обычный",
+              "video": {
+                "youtubeId": "tGpTpVyI_OQ",
+                "startSeconds": 40,
+                "durationSeconds": 8
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

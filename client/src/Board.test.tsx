@@ -60,6 +60,7 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     passBid: vi.fn(),
     assignCat: vi.fn(),
     buzz: vi.fn(),
+    mediaFinished: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
     adjustScore: vi.fn(),
@@ -257,6 +258,166 @@ describe('Board', () => {
     );
     render(<Board />);
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('renders the player straight away for a question with video, without waiting for a click', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            text: 'Что за фильм?',
+            price: 100,
+            themeName: 'Тема',
+            video: {
+              youtubeId: 'dQw4w9WgXcQ',
+              startSeconds: 30,
+              durationSeconds: 15,
+              audioOnly: false,
+            },
+          },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(document.querySelector('.board-video')).toBeInTheDocument();
+    // По умолчанию видео 4 секунды играет скрыто (см. VideoPlayer.tsx,
+    // VIDEO_PREROLL_MS) — плеер создан сразу, а не отрендерен только после
+    // клика, но видим он станет чуть позже.
+    expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /играть/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not show a video button when the question has no video', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            text: 'Столица Франции?',
+            price: 100,
+            themeName: 'Тема',
+          },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(
+      screen.queryByRole('button', { name: /играть/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows only video, not the image, when a question somehow has both', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            text: 'Что за фильм?',
+            price: 100,
+            themeName: 'Тема',
+            image: '/media/sport/flower.jpg',
+            video: {
+              youtubeId: 'dQw4w9WgXcQ',
+              startSeconds: 30,
+              durationSeconds: 15,
+              audioOnly: false,
+            },
+          },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(document.querySelector('.board-video')).toBeInTheDocument();
+    // Заглушка предзапуска — не то же самое, что картинка пака (image):
+    // проверяем именно отсутствие последней по её собственному alt.
+    expect(
+      screen.queryByAltText(/картинка к вопросу/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the question and the player during question-media, but no countdown yet', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-media',
+          currentQuestion: {
+            id: 'q7',
+            text: 'Что за фильм?',
+            price: 100,
+            themeName: 'Тема',
+            video: {
+              youtubeId: 'dQw4w9WgXcQ',
+              startSeconds: 30,
+              durationSeconds: 15,
+              audioOnly: false,
+            },
+          },
+          timerDeadline: Date.now() + 45000,
+        }),
+      }),
+    );
+    render(<Board />);
+
+    expect(screen.getByText('Что за фильм?')).toBeInTheDocument();
+    expect(document.querySelector('.board-video')).toBeInTheDocument();
+    // Отсчёт идёт по страховочному таймеру медиа — игрокам его показывать
+    // незачем, время на ответ ещё не началось.
+    expect(document.querySelector('.board-timer')).not.toBeInTheDocument();
+  });
+
+  it('tells the server which question finished playing', async () => {
+    vi.useFakeTimers();
+    try {
+      const mediaFinished = vi.fn();
+      const instance = {
+        playVideo: vi.fn(),
+        pauseVideo: vi.fn(),
+        // Уже за концом клипа (30 + 15).
+        getCurrentTime: vi.fn(() => 999),
+        getPlayerState: vi.fn(() => 1),
+        destroy: vi.fn(),
+      };
+      let events: { onReady?: () => void } = {};
+      window.YT = {
+        Player: vi.fn(function (_container: HTMLElement, opts: unknown) {
+          events = (opts as { events?: typeof events }).events ?? {};
+          return instance;
+        }),
+      } as unknown as Window['YT'];
+
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          mediaFinished,
+          game: baseGame({
+            phase: 'question-media',
+            currentQuestion: {
+              id: 'q7',
+              text: 'Что за фильм?',
+              price: 100,
+              themeName: 'Тема',
+              video: {
+                youtubeId: 'dQw4w9WgXcQ',
+                startSeconds: 30,
+                durationSeconds: 15,
+                audioOnly: false,
+              },
+            },
+          }),
+        }),
+      );
+      render(<Board />);
+      await vi.advanceTimersByTimeAsync(0);
+      events.onReady!();
+      await vi.advanceTimersByTimeAsync(300);
+
+      expect(mediaFinished).toHaveBeenCalledWith('q7');
+    } finally {
+      vi.useRealTimers();
+      delete (window as { YT?: unknown }).YT;
+    }
   });
 
   it('shows a countdown while the question is open', () => {

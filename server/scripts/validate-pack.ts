@@ -6,7 +6,11 @@
 // перевод результата/ошибки в код возврата и сообщение, без новой логики.
 import { readFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { findMissingMedia, validatePack } from '../src/pack.js';
+import {
+  findMissingMedia,
+  findUnreachableVideos,
+  validatePack,
+} from '../src/pack.js';
 
 const path = process.argv[2];
 if (!path) {
@@ -55,6 +59,13 @@ try {
     console.warn(
       `⚠ ${path}: вопрос "${m.questionId}" ссылается на картинку "${m.image}", ` +
         `но файла ${join(mediaDir, m.image)} нет на диске`,
+    );
+  }
+  const unreachableVideos = await findUnreachableVideos(pack);
+  for (const v of unreachableVideos) {
+    console.warn(
+      `⚠ ${path}: вопрос "${v.questionId}" ссылается на видео "${v.youtubeId}", ` +
+        `но оно недоступно (проверка через YouTube oEmbed)`,
     );
   }
 } catch (err) {

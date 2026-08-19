@@ -203,6 +203,58 @@ code {
   border-radius: 8px;
 }
 
+.board-video,
+.board-video-audio-only {
+  display: flex;
+  justify-content: center;
+}
+
+/* Заглушка-обёртка (.board-video-hidden) позиционируется относительно этой
+   обёртки — position:absolute на ней нужен относительно родителя. */
+.board-video {
+  position: relative;
+}
+
+.board-video iframe {
+  max-width: min(95vw, 960px);
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  border: none;
+  /* Ни контролов, ни клика, уводящего на YouTube — pointer-events:none. Плата
+     — пауза и перемотка руками недоступны, но клип короткий и играет один
+     раз (design.md, «Сервер и клиент»). Полоса, закрывавшая верхнюю зону от
+     названия ролика (board-video-titleguard), убрана: живая проверка
+     (2026-08-18) подтвердила, что 4 секунды скрытого предзапуска надёжно
+     дожидаются, пока название само пропадёт — см. VideoPlayer.tsx,
+     prerollMs. */
+  pointer-events: none;
+}
+
+.board-video-audio-placeholder {
+  max-width: min(95vw, 500px);
+  max-height: 40vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+/* Не display: none — некоторые браузеры приостанавливают медиа в полностью
+   исключённых из раскладки элементах. Нулевые размеры + overflow: hidden
+   держат iframe «живым», но невидимым (design.md, «Сервер и клиент»). */
+.board-video-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.board-video-error {
+  font-size: 28px;
+  color: var(--text);
+}
+
 .board-answer {
   font-size: 32px;
   color: var(--text-h);
