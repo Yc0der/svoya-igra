@@ -442,16 +442,20 @@ describe('createServer', () => {
   // рассылается отдельным listener'ом (room.onTextRevealRateChange).
   it('admin-set-text-reveal-rate changes the broadcast rate for everyone connected', async () => {
     const admin = await connectAdmin(url);
+    const board = await connectAdmin(url); // табло — тоже не 'join'-сокет
 
     admin.ws.send(
       JSON.stringify({ type: 'admin-set-text-reveal-rate', wordsPerSecond: 4 }),
     );
-    const state = (await admin.nextMessage()) as {
-      textRevealWordsPerSecond: number;
-    };
-    expect(state.textRevealWordsPerSecond).toBe(4);
+    const [adminState, boardState] = (await Promise.all([
+      admin.nextMessage(),
+      board.nextMessage(),
+    ])) as { textRevealWordsPerSecond: number }[];
+    expect(adminState.textRevealWordsPerSecond).toBe(4);
+    expect(boardState.textRevealWordsPerSecond).toBe(4);
 
     admin.ws.close();
+    board.ws.close();
   });
 });
 
