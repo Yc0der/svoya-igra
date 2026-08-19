@@ -133,7 +133,12 @@ describe('VideoPlayer', () => {
     render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
     await flush();
     events().onReady!();
-    await vi.advanceTimersByTimeAsync(2000);
+    // act() нужен по той же причине, что и у onError/опроса ниже — тик
+    // setTimeout приходит снаружи React, без обёртки состояние не успеет
+    // отрисоваться к проверке.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3200);
+    });
 
     const button = screen.getByRole('button', { name: /играть/i });
     fireEvent.click(button);
@@ -170,7 +175,9 @@ describe('VideoPlayer', () => {
     render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
     await flush();
     capturedEvents.onReady!();
-    await vi.advanceTimersByTimeAsync(2000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3200);
+    });
     expect(screen.getByRole('button', { name: /играть/i })).toBeInTheDocument();
 
     // Буферизация закончилась, ролик заиграл сам — без клика по кнопке.
@@ -194,7 +201,7 @@ describe('VideoPlayer', () => {
     render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
     await flush();
     events().onReady!();
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(3200);
 
     expect(
       screen.queryByRole('button', { name: /играть/i }),
@@ -232,6 +239,35 @@ describe('VideoPlayer', () => {
 
     expect(screen.getByAltText(/играет аудио/i)).toBeInTheDocument();
     expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
+  });
+
+  it('starts audioOnly sound immediately, unmuted, ignoring prerollMs entirely — there is no picture to protect', async () => {
+    // Живая проверка (2026-08-19): предзапуск глушил звук для ЛЮБОГО video-поля,
+    // включая audioOnly, хотя картинка там и так скрыта всегда, до и после —
+    // защищать нечем, а 4 секунды тишины перед звуковым вопросом — чистый вред.
+    vi.useFakeTimers();
+    const { Player } = mockYouTube();
+
+    render(
+      <VideoPlayer
+        video={{ ...VIDEO, audioOnly: true }}
+        onFinished={vi.fn()}
+        prerollMs={4000}
+      />,
+    );
+    await flush();
+
+    const options = Player.mock.calls[0][1] as {
+      playerVars: Record<string, unknown>;
+    };
+    expect(options.playerVars.mute).toBeUndefined();
+    expect(options.playerVars.start).toBe(VIDEO.startSeconds);
+    expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
+    // Заглушка-спиннер — только для обычного видео, не для аудио (у него
+    // своя, звуковая, показанная безусловно строкой выше).
+    expect(
+      screen.queryByAltText(/видео скоро начнётся/i),
+    ).not.toBeInTheDocument();
   });
 
   it('injects the IFrame API script on mount when YT is not loaded yet', async () => {

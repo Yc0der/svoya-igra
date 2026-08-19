@@ -72,8 +72,13 @@ function loadYouTubeApi(): Promise<void> {
 // (design.md, 2026-08-18-video-questions-design.md, «Сервер и клиент»).
 const PROGRESS_POLL_MS = 250;
 // Сколько ждём, прежде чем решить, что автозапуск заблокирован браузером и
-// без человеческого клика звук не пойдёт.
-const AUTOPLAY_GRACE_MS = 1500;
+// без человеческого клика звук не пойдёт. Живая проверка (2026-08-19):
+// 1.5с оказалось мало — точка старта теперь на prerollMs раньше задуманной
+// (см. actualStart ниже), и буферизация до неё на обычном домашнем
+// интернете иногда занимает больше 1.5с, ложно показывая кнопку. Заглушённый
+// автозапуск браузеры блокируют редко, так что более терпеливое окно почти
+// не увеличивает реальную задержку в случае истинной блокировки.
+const AUTOPLAY_GRACE_MS = 3000;
 const STATE_PLAYING = 1;
 const STATE_BUFFERING = 3;
 
@@ -100,7 +105,10 @@ export function VideoPlayer({
 }) {
   const [needsClick, setNeedsClick] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [revealed, setRevealed] = useState(prerollMs === 0);
+  // ВРЕМЕННО — audioOnly без исключения: картинка у аудио-вопроса и так
+  // скрыта всегда, до и после предзапуска (защищать нечего), поэтому у
+  // предзапуска для звука нет смысла — только лишняя тишина в начале.
+  const [revealed, setRevealed] = useState(prerollMs === 0 || video.audioOnly);
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayerInstance | null>(null);
   // Ровно один сигнал за жизнь плеера: и опрос времени, и onError ведут сюда,
@@ -125,7 +133,7 @@ export function VideoPlayer({
     // Обычная переменная замыкания, а не сам React-state revealed: интервал
     // создаётся один раз в onReady и держит его в неизменном (устаревшем)
     // виде, если проверять сам state — нужен актуальный флаг внутри тика.
-    let revealedNow = prerollMs === 0;
+    let revealedNow = prerollMs === 0 || video.audioOnly;
 
     function finishOnce() {
       if (finishedRef.current) return;
@@ -155,11 +163,12 @@ export function VideoPlayer({
       // трогаем — конец клипа остаётся тем, что задуман в паке. Math.floor,
       // не round: YouTube API документирует start как целое число секунд —
       // округление вниз гарантирует, что видимая часть не станет короче
-      // задуманной, а не наоборот.
-      const actualStart = Math.max(
-        0,
-        Math.floor(video.startSeconds - prerollMs / 1000),
-      );
+      // задуманной, а не наоборот. audioOnly сдвиг не получает — для звука
+      // предзапуска нет вовсе (см. mute ниже), сдвигать точку старта
+      // означало бы начать звук на prerollMs раньше задуманного момента.
+      const actualStart = video.audioOnly
+        ? video.startSeconds
+        : Math.max(0, Math.floor(video.startSeconds - prerollMs / 1000));
       playerRef.current = new window.YT.Player(containerRef.current, {
         host: 'https://www.youtube-nocookie.com',
         width: '960',
@@ -178,8 +187,10 @@ export function VideoPlayer({
           // сверху ещё одной полосой.
           controls: 0,
           // ВРЕМЕННО — на время предзапуска (prerollMs) звука быть не
-          // должно: зритель ещё не видит кадр вообще.
-          ...(prerollMs > 0 ? { mute: 1 as const } : {}),
+          // должно: зритель ещё не видит кадр вообще. Не касается audioOnly
+          // — там кадр скрыт всегда, предзапуск ничего не защищает, а звук
+          // должен звучать сразу.
+          ...(prerollMs > 0 && !video.audioOnly ? { mute: 1 as const } : {}),
         },
         events: {
           onReady: () => {
