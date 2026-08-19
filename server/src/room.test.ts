@@ -7,6 +7,8 @@ import {
   CAT_HANDOFF_TIMER_MS,
   AUCTION_BID_TIMER_MS,
   MEDIA_TIMER_MS,
+  TEXT_REVEAL_MIN_MS,
+  VOTE_TIMER_MS,
 } from './engine.js';
 
 // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — кандидаты и
@@ -494,6 +496,48 @@ const AUCTION_PACK: Pack = {
   ],
 };
 
+// Для describe('question-reveal / text reveal speed', ...) ниже: два вопроса
+// по 4 слова (формула/смена скорости — не задета нижняя граница при дефолтной
+// и при слегка ускоренной скорости) и один в одно слово (нижняя граница
+// TEXT_REVEAL_MIN_MS даже при дефолтной скорости).
+const REVEAL_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-19',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            {
+              id: 'q4a',
+              price: 100,
+              text: 'Быстрый рыжий кот бежит',
+              answer: 'О1',
+              type: 'обычный',
+            },
+            {
+              id: 'q4b',
+              price: 200,
+              text: 'Зелёный слон летит высоко',
+              answer: 'О2',
+              type: 'обычный',
+            },
+            {
+              id: 'q1',
+              price: 300,
+              text: 'Кто?',
+              answer: 'О3',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 function joinedId(room: Room, name: string): string {
   const result = room.join(name);
   if (!('participant' in result)) throw new Error('expected join to succeed');
@@ -608,6 +652,7 @@ describe('Room.startGame', () => {
     vi.useFakeTimers();
     try {
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       const before = room.toGameStateView();
       expect(before?.phase).toBe('question-open');
       expect(before?.timerDeadline).not.toBeNull();
@@ -703,48 +748,61 @@ describe('Room.startGame', () => {
     const picker = room.toGameStateView(petya)!.turnParticipantId;
     const answerer = picker === vanya ? vanya : katya;
 
-    room.selectQuestion(picker, 0, 'q1');
-    room.buzz(answerer);
-    room.saidAnswer(answerer);
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(answerer);
+      room.saidAnswer(answerer);
 
-    expect(room.toGameStateView(petya)?.correctAnswer).not.toBeNull();
-    expect(room.toGameStateView(null)?.correctAnswer).toBeNull();
-    expect(
-      room.toGameStateView(answerer === vanya ? katya : vanya)?.correctAnswer,
-    ).toBeNull();
+      expect(room.toGameStateView(petya)?.correctAnswer).not.toBeNull();
+      expect(room.toGameStateView(null)?.correctAnswer).toBeNull();
+      expect(
+        room.toGameStateView(answerer === vanya ? katya : vanya)?.correctAnswer,
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reopens the question for others after an incorrect host verdict, and closes it after an incorrect open-mode verdict', () => {
-    // Двое, без ведущего: закрывается сразу.
-    const open = new Room(undefined, TEST_PACK);
-    const v1 = joinedId(open, 'Ваня');
-    const k1 = joinedId(open, 'Катя');
-    open.startGame('requester');
-    const picker1 = open.toGameStateView()!.turnParticipantId;
-    const other1 = picker1 === v1 ? k1 : v1;
-    open.selectQuestion(picker1, 0, 'q1');
-    open.buzz(picker1);
-    open.saidAnswer(picker1);
-    open.vote(other1, false);
-    expect(open.toGameStateView()?.phase).toBe('judging');
+    vi.useFakeTimers();
+    try {
+      // Двое, без ведущего: закрывается сразу.
+      const open = new Room(undefined, TEST_PACK);
+      const v1 = joinedId(open, 'Ваня');
+      const k1 = joinedId(open, 'Катя');
+      open.startGame('requester');
+      const picker1 = open.toGameStateView()!.turnParticipantId;
+      const other1 = picker1 === v1 ? k1 : v1;
+      open.selectQuestion(picker1, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      open.buzz(picker1);
+      open.saidAnswer(picker1);
+      open.vote(other1, false);
+      expect(open.toGameStateView()?.phase).toBe('judging');
 
-    // Трое с ведущим: переоткрывается сразу же по вердикту ведущего.
-    const hosted = new Room(undefined, TEST_PACK);
-    const v2 = joinedId(hosted, 'Ваня');
-    const k2 = joinedId(hosted, 'Катя');
-    const p2 = joinedId(hosted, 'Петя');
-    hosted.toggleHost(p2);
-    hosted.startGame(p2);
-    const picker2 = hosted.toGameStateView(p2)!.turnParticipantId;
-    const answerer2 = picker2 === v2 ? v2 : k2;
-    hosted.selectQuestion(picker2, 0, 'q1');
-    hosted.buzz(answerer2);
-    hosted.saidAnswer(answerer2);
-    hosted.vote(p2, false);
-    expect(hosted.toGameStateView(p2)?.phase).toBe('question-open');
-    expect(hosted.toGameStateView(p2)?.graceExcludedParticipantId).toBe(
-      answerer2,
-    );
+      // Трое с ведущим: переоткрывается сразу же по вердикту ведущего.
+      const hosted = new Room(undefined, TEST_PACK);
+      const v2 = joinedId(hosted, 'Ваня');
+      const k2 = joinedId(hosted, 'Катя');
+      const p2 = joinedId(hosted, 'Петя');
+      hosted.toggleHost(p2);
+      hosted.startGame(p2);
+      const picker2 = hosted.toGameStateView(p2)!.turnParticipantId;
+      const answerer2 = picker2 === v2 ? v2 : k2;
+      hosted.selectQuestion(picker2, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      hosted.buzz(answerer2);
+      hosted.saidAnswer(answerer2);
+      hosted.vote(p2, false);
+      expect(hosted.toGameStateView(p2)?.phase).toBe('question-open');
+      expect(hosted.toGameStateView(p2)?.graceExcludedParticipantId).toBe(
+        answerer2,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reopens the question immediately on a wrong verdict — no separate pause before the question timer resumes', () => {
@@ -766,6 +824,7 @@ describe('Room.startGame', () => {
       const answerer = picker === vanya ? vanya : katya;
 
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       room.buzz(answerer);
       room.saidAnswer(answerer);
       room.vote(petya, false);
@@ -796,6 +855,7 @@ describe('Room.startGame', () => {
       const other = answerer === vanya ? katya : vanya;
 
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       room.buzz(answerer);
       room.saidAnswer(answerer);
       room.vote(petya, false);
@@ -826,6 +886,7 @@ describe('Room.startGame', () => {
       const answerer = picker === vanya ? vanya : katya;
 
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       room.buzz(answerer);
       room.saidAnswer(answerer);
       room.vote(petya, false);
@@ -867,6 +928,7 @@ describe('Room.startGame', () => {
       const answerer = picker === vanya ? vanya : katya;
 
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       room.buzz(answerer);
       room.saidAnswer(answerer);
       room.vote(petya, false);
@@ -903,6 +965,7 @@ describe('Room.startGame', () => {
       const second = first === vanya ? katya : vanya;
 
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       room.buzz(first);
       room.saidAnswer(first);
       room.vote(petya, false); // excludes `first`, schedules a 5s timer for them
@@ -939,6 +1002,7 @@ describe('Room.startGame', () => {
       const answerer = picker === vanya ? vanya : katya;
 
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS); // question-reveal -> question-open
       vi.advanceTimersByTime(20_000); // 20s of the 30s question timer pass
       room.buzz(answerer); // ~10s of open-question budget left, captured here
       room.saidAnswer(answerer);
@@ -968,6 +1032,7 @@ describe('Room.startGame', () => {
     vi.useFakeTimers();
     try {
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS); // question-reveal -> question-open
       vi.advanceTimersByTime(QUESTION_TIMER_MS); // question timer -> reveal
       vi.advanceTimersByTime(4_000); // reveal timer -> game-end (only round, only question)
       expect(room.toGameStateView()?.phase).toBe('game-end');
@@ -1311,28 +1376,35 @@ describe('Room game flow', () => {
   it('walks a question from selection through a correct answer', () => {
     const { room, picker, other } = startedRoom();
 
-    room.selectQuestion(picker, 0, 'q1');
-    expect(room.toGameStateView()?.phase).toBe('question-open');
-    expect(room.toGameStateView()?.currentQuestion).toEqual({
-      id: 'q1',
-      text: 'Вопрос 1?',
-      price: 100,
-      themeName: 'Тема',
-      image: null,
-      video: null,
-    });
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+      expect(room.toGameStateView()?.currentQuestion).toEqual({
+        id: 'q1',
+        text: 'Вопрос 1?',
+        price: 100,
+        themeName: 'Тема',
+        image: null,
+        video: null,
+        revealMs: null,
+      });
 
-    expect(room.buzz(picker)).toBe('ok');
-    expect(room.toGameStateView()?.phase).toBe('buzzed');
-    expect(room.toGameStateView()?.buzzedParticipantId).toBe(picker);
+      expect(room.buzz(picker)).toBe('ok');
+      expect(room.toGameStateView()?.phase).toBe('buzzed');
+      expect(room.toGameStateView()?.buzzedParticipantId).toBe(picker);
 
-    room.saidAnswer(picker);
-    expect(room.toGameStateView()?.phase).toBe('judging');
+      room.saidAnswer(picker);
+      expect(room.toGameStateView()?.phase).toBe('judging');
 
-    room.vote(other, true);
-    // Голосование разрешается только по таймеру (Task 2) — до него фаза не
-    // меняется, даже когда все имеющие право уже проголосовали.
-    expect(room.toGameStateView()?.phase).toBe('judging');
+      room.vote(other, true);
+      // Голосование разрешается только по таймеру (Task 2) — до него фаза не
+      // меняется, даже когда все имеющие право уже проголосовали.
+      expect(room.toGameStateView()?.phase).toBe('judging');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('exposes the media URL for a question with an image, built from the active pack filename', () => {
@@ -1466,6 +1538,7 @@ describe('Room game flow', () => {
     try {
       const { room, picker } = startedRoom();
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       expect(room.toGameStateView()?.phase).toBe('question-open');
 
       vi.advanceTimersByTime(QUESTION_TIMER_MS);
@@ -1489,6 +1562,7 @@ describe('Room game flow', () => {
     try {
       const { room, picker } = startedRoom();
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS); // question-reveal -> question-open
 
       vi.advanceTimersByTime(QUESTION_TIMER_MS); // question timer expires -> reveal
       expect(room.toGameStateView()?.phase).toBe('reveal');
@@ -1512,6 +1586,7 @@ describe('Room game flow', () => {
       const picker = room.toGameStateView()!.turnParticipantId;
 
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS); // question-reveal -> question-open
       vi.advanceTimersByTime(QUESTION_TIMER_MS); // question timer expires -> reveal
       expect(room.toGameStateView()?.phase).toBe('reveal');
       expect(room.toGameStateView()?.timerDeadline).not.toBeNull();
@@ -1535,6 +1610,7 @@ describe('Room game flow', () => {
     try {
       const { room, picker, other } = startedRoom();
       room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       room.buzz(picker);
       room.saidAnswer(picker);
       expect(room.toGameStateView()?.phase).toBe('judging');
@@ -1563,12 +1639,18 @@ describe('Room game flow', () => {
     const katya = joinedId(first, 'Катя');
     first.startGame('requester');
     const picker = first.toGameStateView()!.turnParticipantId;
-    first.selectQuestion(picker, 0, 'q1');
-    expect(first.toGameStateView()?.phase).toBe('question-open');
-    const snapshot = first.getState();
 
     vi.useFakeTimers();
     try {
+      // selectQuestion сразу переводит партию в question-reveal (Task 2), а
+      // не в question-open — нужно реально досмотреть показ текста фейковыми
+      // часами ДО снятия снапшота, иначе снапшот зафиксирует не ту фазу,
+      // которую этот тест проверяет.
+      first.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      expect(first.toGameStateView()?.phase).toBe('question-open');
+      const snapshot = first.getState();
+
       // Снапшот-цикл без реального файла: тот же RoomState, что и после
       // serializeSnapshot/deserializeSnapshot (Task 10 уже покрывает сам
       // JSON round-trip в snapshot.test.ts), передан как initial новой Room
@@ -1741,6 +1823,7 @@ describe('Room final round', () => {
     const picker = room.getState().game?.turnCounterId === a ? a : b;
     const other = picker === a ? b : a;
     room.selectQuestion(picker, 0, 'q1');
+    vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
     room.buzz(picker);
     room.saidAnswer(picker);
     room.vote(host, true); // судейство с ведущим — решает сразу
@@ -1934,6 +2017,7 @@ describe('Room final round', () => {
     const picker = room.getState().game?.turnCounterId === a ? a : b;
     const other = picker === a ? b : a;
     room.selectQuestion(picker, 0, 'q1');
+    vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
     room.buzz(picker);
     room.saidAnswer(picker);
     room.vote(host, true);
@@ -2009,10 +2093,18 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
     const other = picker === vanya ? katya : vanya;
     room.selectQuestion(picker, 0, 'cat1');
 
-    room.assignCat(picker, other);
+    vi.useFakeTimers();
+    try {
+      room.assignCat(picker, other);
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
 
-    expect(room.toGameStateView()?.phase).toBe('question-open');
-    expect(room.toGameStateView()?.exclusiveAnswererParticipantId).toBe(other);
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+      expect(room.toGameStateView()?.exclusiveAnswererParticipantId).toBe(
+        other,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('hides the question text but shows the price while cat-handoff is in progress, and reveals the text once assigned', () => {
@@ -2032,18 +2124,30 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       themeName: 'Тема',
       image: null,
       video: null,
+      revealMs: null,
     });
 
-    room.assignCat(picker, other);
+    vi.useFakeTimers();
+    try {
+      room.assignCat(picker, other);
+      // assignCat тоже ведёт в question-reveal (design.md, «Фаза
+      // question-reveal», «победа в торгах»/«назначение кота») — досматриваем
+      // показ до конца, чтобы этот тест остался про видимость текста, а не
+      // про темп его появления.
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
 
-    expect(room.toGameStateView()?.currentQuestion).toEqual({
-      id: 'cat1',
-      text: 'Вопрос-кот?',
-      price: 100,
-      themeName: 'Тема',
-      image: null,
-      video: null,
-    });
+      expect(room.toGameStateView()?.currentQuestion).toEqual({
+        id: 'cat1',
+        text: 'Вопрос-кот?',
+        price: 100,
+        themeName: 'Тема',
+        image: null,
+        video: null,
+        revealMs: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('re-arms the cat-handoff timer after restoring from a snapshot mid-handoff', () => {
@@ -2061,6 +2165,10 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       const restored = new Room(snapshot, CAT_PACK);
 
       vi.advanceTimersByTime(CAT_HANDOFF_TIMER_MS);
+      // Тайм-аут cat-handoff сам назначает получателя и ведёт в
+      // question-reveal (Task 2), не сразу в question-open — досматриваем
+      // показ, прежде чем проверять итоговую фазу.
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       expect(restored.toGameStateView()?.phase).toBe('question-open');
     } finally {
       vi.useRealTimers();
@@ -2148,9 +2256,17 @@ describe('Room — вопрос-аукцион', () => {
     );
     expect(room.toGameStateView()?.auctionTurnParticipantId).toBe(other);
 
-    room.passBid(other);
-    expect(room.toGameStateView()?.phase).toBe('question-open');
-    expect(room.toGameStateView()?.exclusiveAnswererParticipantId).toBe(picker);
+    vi.useFakeTimers();
+    try {
+      room.passBid(other);
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+      expect(room.toGameStateView()?.exclusiveAnswererParticipantId).toBe(
+        picker,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // Регрессия (финальное ревью, 2026-08-14): auctionOrder обнуляется в тот
@@ -2169,12 +2285,19 @@ describe('Room — вопрос-аукцион', () => {
 
     room.selectQuestion(picker, 0, 'auc1');
     room.placeBid(picker, 350);
-    room.passBid(other);
 
-    const view = room.toGameStateView()!;
-    expect(view.phase).toBe('question-open');
-    expect(view.auctionHighestBid).toBe(350);
-    expect(view.auctionHighestBidderParticipantId).toBe(picker);
+    vi.useFakeTimers();
+    try {
+      room.passBid(other);
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+
+      const view = room.toGameStateView()!;
+      expect(view.phase).toBe('question-open');
+      expect(view.auctionHighestBid).toBe(350);
+      expect(view.auctionHighestBidderParticipantId).toBe(picker);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('hides the question text while bidding is in progress and reveals it once the auction resolves', () => {
@@ -2198,15 +2321,23 @@ describe('Room — вопрос-аукцион', () => {
       themeName: 'Тема',
       image: null,
       video: null,
+      revealMs: null,
     });
 
     room.placeBid(picker, 150);
-    room.passBid(other);
 
-    expect(room.toGameStateView()?.phase).toBe('question-open');
-    expect(room.toGameStateView()!.currentQuestion!.text).toBe(
-      'Вопрос-аукцион?',
-    );
+    vi.useFakeTimers();
+    try {
+      room.passBid(other);
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+      expect(room.toGameStateView()!.currentQuestion!.text).toBe(
+        'Вопрос-аукцион?',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('re-arms the auction-bid timer after restoring from a snapshot mid-auction', () => {
@@ -2228,6 +2359,163 @@ describe('Room — вопрос-аукцион', () => {
       // после одного паса без ставки остаётся один активный, но ставок
       // ещё не было — см. design.md, «Общий переход хода торгов»).
       expect(restored.toGameStateView()?.phase).toBe('auction-bidding');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('question-reveal / text reveal speed', () => {
+  it('computes revealMs from the question word count and the current words-per-second rate, holding question-reveal until it elapses', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, REVEAL_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = room.toGameStateView()!.turnParticipantId;
+
+      room.selectQuestion(picker, 0, 'q4a'); // 4 слова, дефолтные 2.5 слова/сек
+      expect(room.toGameStateView()?.phase).toBe('question-reveal');
+      // Math.round(4 / 2.5 * 1000) = 1600 — выше TEXT_REVEAL_MIN_MS (1200),
+      // так что это проверка именно формулы, а не клампинга.
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).toBe(1600);
+
+      vi.advanceTimersByTime(1599);
+      expect(room.toGameStateView()?.phase).toBe('question-reveal');
+
+      vi.advanceTimersByTime(1);
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clamps to TEXT_REVEAL_MIN_MS for a one-word question, where the formula alone would give less', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, REVEAL_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = room.toGameStateView()!.turnParticipantId;
+
+      // 'Кто?' — 1 слово: 1 / 2.5 * 1000 = 400мс без клампинга, меньше
+      // TEXT_REVEAL_MIN_MS.
+      room.selectQuestion(picker, 0, 'q1');
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).toBe(
+        TEXT_REVEAL_MIN_MS,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('revealMs is null before a question is selected and again once question-reveal ends', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, REVEAL_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = room.toGameStateView()!.turnParticipantId;
+
+      expect(room.toGameStateView()?.phase).toBe('selecting');
+      expect(room.toGameStateView()?.currentQuestion).toBeNull();
+
+      room.selectQuestion(picker, 0, 'q1');
+      expect(room.toGameStateView()?.phase).toBe('question-reveal');
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).not.toBeNull();
+
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a rate change via setTextRevealWordsPerSecond applies to the next question, not the one already showing', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, REVEAL_PACK);
+      const vanya = joinedId(room, 'Ваня');
+      const katya = joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = room.toGameStateView()!.turnParticipantId;
+      const other = picker === vanya ? katya : vanya;
+
+      room.selectQuestion(picker, 0, 'q4a'); // 4 слова, дефолтные 2.5 слова/сек
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).toBe(1600);
+
+      room.setTextRevealWordsPerSecond(3); // быстрее дефолта
+      // Уже идущий показ вычислен один раз при входе в фазу — смена скорости
+      // прямо посреди него не пересчитывает текущий revealMs на лету.
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).toBe(1600);
+
+      vi.advanceTimersByTime(1600); // question-reveal -> question-open
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      room.vote(other, true);
+      vi.advanceTimersByTime(VOTE_TIMER_MS); // judging -> reveal
+      vi.advanceTimersByTime(REVEAL_TIMER_MS); // reveal -> selecting (в раунде есть ещё вопросы)
+      expect(room.toGameStateView()?.phase).toBe('selecting');
+
+      // Тот же счёт слов (4), но уже по новой скорости (3 слова/сек):
+      // Math.round(4 / 3 * 1000) = 1333 — заметно меньше прежних 1600 и
+      // по-прежнему выше TEXT_REVEAL_MIN_MS, то есть не клампинг маскирует
+      // разницу.
+      room.selectQuestion(picker, 0, 'q4b');
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).toBe(1333);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('getTextRevealWordsPerSecond/setTextRevealWordsPerSecond/onTextRevealRateChange: default 2.5, valid changes notify listeners, invalid values are a no-op', () => {
+    const room = new Room();
+    expect(room.getTextRevealWordsPerSecond()).toBe(2.5);
+
+    const seen: number[] = [];
+    room.onTextRevealRateChange((wordsPerSecond) => seen.push(wordsPerSecond));
+
+    room.setTextRevealWordsPerSecond(4);
+    expect(room.getTextRevealWordsPerSecond()).toBe(4);
+    expect(seen).toEqual([4]);
+
+    // Тот же паттерн валидации, что уже был у setVideoPrerollMs —
+    // Number.isFinite && > 0.
+    room.setTextRevealWordsPerSecond(0);
+    room.setTextRevealWordsPerSecond(-1);
+    room.setTextRevealWordsPerSecond(NaN);
+    expect(room.getTextRevealWordsPerSecond()).toBe(4);
+    expect(seen).toEqual([4]);
+  });
+
+  // Та же защита от зависания, что уже покрыта для question-media
+  // ('restarts the media safety timer for a game restored mid-clip from a
+  // snapshot' выше) — восстановленная партия обязана взвести новый
+  // text-reveal таймер сама, старый setTimeout погиб вместе с процессом.
+  it('restarts the text-reveal timer for a game restored mid-reveal from a snapshot, instead of hanging in question-reveal forever', () => {
+    const first = new Room(undefined, REVEAL_PACK);
+    joinedId(first, 'Ваня');
+    joinedId(first, 'Катя');
+    first.startGame('requester');
+    const picker = first.toGameStateView()!.turnParticipantId;
+    // Однословный вопрос — заведомо на нижней границе, TEXT_REVEAL_MIN_MS
+    // хватает независимо от того, какая скорость окажется у восстановленной
+    // Room (снапшот не хранит textRevealWordsPerSecond — см. room.ts).
+    first.selectQuestion(picker, 0, 'q1');
+    expect(first.toGameStateView()?.phase).toBe('question-reveal');
+    const snapshot = first.getState();
+
+    vi.useFakeTimers();
+    try {
+      const restored = new Room(snapshot, REVEAL_PACK);
+      expect(restored.toGameStateView()?.phase).toBe('question-reveal');
+
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      expect(restored.toGameStateView()?.phase).toBe('question-open');
     } finally {
       vi.useRealTimers();
     }
