@@ -101,6 +101,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     ws.close();
@@ -139,6 +140,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     board.close();
@@ -196,6 +198,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     const reconnected = new WebSocket(url);
@@ -226,6 +229,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     board.close();
@@ -342,6 +346,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     other.close();
@@ -394,6 +399,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -430,6 +436,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     board.close();
@@ -453,6 +460,26 @@ describe('createServer', () => {
     ])) as { textRevealWordsPerSecond: number }[];
     expect(adminState.textRevealWordsPerSecond).toBe(4);
     expect(boardState.textRevealWordsPerSecond).toBe(4);
+
+    admin.ws.close();
+    board.ws.close();
+  });
+
+  // ВРЕМЕННО — см. Room.textRevealEnabled. Тот же паттерн, что и тест выше
+  // для textRevealWordsPerSecond.
+  it('admin-set-text-reveal-enabled changes the broadcast flag for everyone connected', async () => {
+    const admin = await connectAdmin(url);
+    const board = await connectAdmin(url);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-text-reveal-enabled', enabled: false }),
+    );
+    const [adminState, boardState] = (await Promise.all([
+      admin.nextMessage(),
+      board.nextMessage(),
+    ])) as { textRevealEnabled: boolean }[];
+    expect(adminState.textRevealEnabled).toBe(false);
+    expect(boardState.textRevealEnabled).toBe(false);
 
     admin.ws.close();
     board.ws.close();
@@ -531,6 +558,7 @@ describe('createServer heartbeat', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     board.close();

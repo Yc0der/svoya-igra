@@ -2492,6 +2492,45 @@ describe('question-reveal / text reveal speed', () => {
     expect(seen).toEqual([4]);
   });
 
+  it('getTextRevealEnabled/setTextRevealEnabled/onTextRevealEnabledChange: default true, changes notify listeners', () => {
+    const room = new Room();
+    expect(room.getTextRevealEnabled()).toBe(true);
+
+    const seen: boolean[] = [];
+    room.onTextRevealEnabledChange((enabled) => seen.push(enabled));
+
+    room.setTextRevealEnabled(false);
+    expect(room.getTextRevealEnabled()).toBe(false);
+    expect(seen).toEqual([false]);
+
+    room.setTextRevealEnabled(true);
+    expect(room.getTextRevealEnabled()).toBe(true);
+    expect(seen).toEqual([false, true]);
+  });
+
+  it('textRevealEnabled: false makes the question open immediately, revealMs 0, ignoring TEXT_REVEAL_MIN_MS', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, REVEAL_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = room.toGameStateView()!.turnParticipantId;
+
+      room.setTextRevealEnabled(false);
+      room.selectQuestion(picker, 0, 'q1');
+
+      // 0, не TEXT_REVEAL_MIN_MS — выключенный показ не подчиняется нижней
+      // границе, вопрос должен открыться сразу.
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).toBe(0);
+
+      vi.advanceTimersByTime(0);
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // Та же защита от зависания, что уже покрыта для question-media
   // ('restarts the media safety timer for a game restored mid-clip from a
   // snapshot' выше) — восстановленная партия обязана взвести новый

@@ -133,6 +133,16 @@ floor(text.length * прошло / revealMs)`, отрисовать `text.slice(
   «(временно)» — под снос вместе с остальным механизмом, как только темп подобран на живых
   партиях (то же обещание, что было дано и сдержано для видео).
 
+**Отдельный временный переключатель вкл/выкл (добавлен по итогам живой проверки 2026-08-19).**
+Тот же принцип, второе ephemeral-поле Комнаты: `Room.getTextRevealEnabled()` /
+`setTextRevealEnabled(enabled: boolean)` / `onTextRevealEnabledChange(listener)`, дефолт
+`true`, новое `ClientMessage`: `{ type: 'admin-set-text-reveal-enabled'; enabled: boolean }`,
+`StateMessage.textRevealEnabled: boolean`. Выключено — `computeTextRevealMs()` возвращает `0`
+**без** нижней границы `TEXT_REVEAL_MIN_MS` (вопрос должен открыться сразу, а не хотя бы на
+секунду с небольшим); `useTextReveal.ts` на клиенте уже трактует `revealMs <= 0` как «показать
+текст целиком» — отдельного случая на клиенте не нужно. Даёт возможность на живой партии
+мгновенно сравнить «с показом»/«без показа», не выключая механизм полностью в коде.
+
 ## Тестирование
 
 **Движок (`engine.test.ts`)** — тем же способом, что и `question-media`: вопрос без `video`

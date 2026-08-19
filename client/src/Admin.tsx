@@ -35,6 +35,8 @@ export function Admin() {
     setLanAddress,
     textRevealWordsPerSecond,
     setTextRevealWordsPerSecond,
+    textRevealEnabled,
+    setTextRevealEnabled,
     availablePacks,
     activePackFilename,
     selectPackError,
@@ -316,9 +318,20 @@ export function Admin() {
       <section className="admin-section">
         <h2>Скорость показа текста (временно)</h2>
         <p>
-          Сейчас: {textRevealWordsPerSecond.toFixed(1)} слов/сек. Обычный
-          текстовый вопрос показывается на табло по буквам в темпе этой скорости
-          чтения, прежде чем открывается кнопка «Ответ».
+          <label>
+            <input
+              type="checkbox"
+              checked={textRevealEnabled}
+              onChange={(e) => setTextRevealEnabled(e.target.checked)}
+            />{' '}
+            Постепенный показ включён
+          </label>
+        </p>
+        <p>
+          Сейчас: {textRevealWordsPerSecond.toFixed(1)} слов/сек. Пока включено,
+          обычный текстовый вопрос показывается на табло по буквам в темпе этой
+          скорости чтения, прежде чем открывается кнопка «Ответ». Выключено —
+          вопрос открывается сразу целиком, как раньше.
         </p>
         <input
           type="number"

@@ -22,12 +22,19 @@ export function useTextReveal(
 
   useEffect(() => {
     if (deadline === null || revealMs === null) return;
-    // 40мс (25 обновлений/сек), не 250 — при более редком тике за один шаг
-    // успевает набежать сразу несколько букв, и появление выглядит рывками,
-    // а не плавной печатью (живая проверка 2026-08-19). Дешёво: строковый
-    // slice и одно текстовое поле, не стоит экономить на частоте ради этого.
-    const id = setInterval(() => setNow(Date.now()), 40);
-    return () => clearInterval(id);
+    // requestAnimationFrame, не setInterval — синхронизировано с настоящей
+    // частотой отрисовки экрана (обычно 60Гц и выше), а не с произвольным
+    // числом миллисекунд. Предел плавности, который вообще даёт браузер;
+    // setInterval(40) (первая попытка после живой проверки 2026-08-19)
+    // всё ещё оставлял видимые рывки. Дёшево: строковый slice и одно
+    // текстовое поле, не стоит экономить кадры ради этого.
+    let frame: number;
+    function tick(): void {
+      setNow(Date.now());
+      frame = requestAnimationFrame(tick);
+    }
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [deadline, revealMs]);
 
   if (deadline === null || revealMs === null || revealMs <= 0) return text;

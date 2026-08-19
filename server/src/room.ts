@@ -169,6 +169,13 @@ export class Room {
   // UI в админке, как только число зафиксируется в спеке.
   private textRevealWordsPerSecond = 2.5;
   private textRevealRateListeners = new Set<(wordsPerSecond: number) => void>();
+  // Живое вкл/выкл постепенного показа — тот же ВРЕМЕННЫЙ статус и тот же
+  // принцип, что у textRevealWordsPerSecond выше: транспортная настройка
+  // табло для подбора на живых партиях, не часть игровых правил. true —
+  // текст появляется по буквам (обычное поведение); false — computeTextRevealMs
+  // ниже возвращает 0, вопрос открывается сразу.
+  private textRevealEnabled = true;
+  private textRevealEnabledListeners = new Set<(enabled: boolean) => void>();
   // Настоящая длительность показа текущего вопроса — то самое число, которое
   // applyEffects только что подставило в таймер (Step 3 ниже). Не null,
   // только пока идёт question-reveal; отдаётся в toGameStateView, чтобы
@@ -671,6 +678,20 @@ export class Room {
     }
   }
 
+  // ВРЕМЕННО — см. Room.textRevealEnabled.
+  getTextRevealEnabled(): boolean {
+    return this.textRevealEnabled;
+  }
+
+  // ВРЕМЕННО — см. Room.textRevealEnabled. Без проверки отправителя, тем же
+  // паттерном, что setTextRevealWordsPerSecond выше.
+  setTextRevealEnabled(enabled: boolean): void {
+    this.textRevealEnabled = enabled;
+    for (const listener of this.textRevealEnabledListeners) {
+      listener(this.textRevealEnabled);
+    }
+  }
+
   private isHostOrAdmin(requesterId: string | null): boolean {
     return requesterId === null || requesterId === this.hostParticipantId;
   }
@@ -931,6 +952,12 @@ export class Room {
     return () => this.textRevealRateListeners.delete(listener);
   }
 
+  // ВРЕМЕННО — см. Room.textRevealEnabled.
+  onTextRevealEnabledChange(listener: (enabled: boolean) => void): () => void {
+    this.textRevealEnabledListeners.add(listener);
+    return () => this.textRevealEnabledListeners.delete(listener);
+  }
+
   private stillGraceExcluded(): boolean {
     return (
       this.graceExcludedUntil !== null && Date.now() < this.graceExcludedUntil
@@ -1056,6 +1083,12 @@ export class Room {
   // (инвариант 1, и скорость показа — настройка Комнаты, не игровое
   // правило).
   private computeTextRevealMs(): number {
+    // Выключено админкой (Room.textRevealEnabled, ВРЕМЕННО) — 0 без учёта
+    // TEXT_REVEAL_MIN_MS: вопрос должен открыться сразу, а не хотя бы на
+    // минимальный порог. useTextReveal.ts на клиенте уже трактует
+    // revealMs <= 0 как «показать текст целиком», отдельного случая на
+    // клиенте не требуется.
+    if (!this.textRevealEnabled) return 0;
     const question = findQuestion(
       this.game!.pack,
       this.game!.roundIndex,
