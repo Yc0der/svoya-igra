@@ -127,6 +127,7 @@ export function createServer(options: CreateServerOptions): GameServer {
       lanCandidates: lan.candidates,
       availablePacks: packInfo.available,
       activePackFilename: packInfo.activeFilename,
+      textRevealWordsPerSecond: room.getTextRevealWordsPerSecond(),
     };
   };
 
@@ -160,6 +161,7 @@ export function createServer(options: CreateServerOptions): GameServer {
   room.onChange(broadcastState);
   room.onLanChange(broadcastState);
   room.onPackChange(broadcastState);
+  room.onTextRevealRateChange(broadcastState);
 
   // `ws`, будучи прицепленным к готовому httpServer, переподписывает его
   // 'error' на себя. Без слушателя здесь EventEmitter на 'error' бросает
@@ -444,6 +446,14 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.address === 'string'
       ) {
         room.setLanAddress(message.address);
+      }
+
+      // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
+      if (
+        message.type === 'admin-set-text-reveal-rate' &&
+        typeof message.wordsPerSecond === 'number'
+      ) {
+        room.setTextRevealWordsPerSecond(message.wordsPerSecond);
       }
 
       if (message.type === 'refresh-packs') {

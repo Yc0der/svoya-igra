@@ -48,6 +48,12 @@ export interface GameStateView {
       durationSeconds: number;
       audioOnly: boolean;
     } | null;
+    // Сколько всего мс займёт постепенный показ текущего вопроса — не null
+    // только в фазе question-reveal (design.md,
+    // 2026-08-19-gradual-text-reveal-design.md, «Сервер и клиент»). Табло
+    // считает по нему и timerDeadline, сколько слов уже показывать, без
+    // своего независимого отсчёта.
+    revealMs: number | null;
   } | null;
   buzzedParticipantId: string | null;
   // Не null только пока фаза — question-open/buzzed/judging для вопроса,
@@ -136,6 +142,12 @@ export type ClientMessage =
   // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — человек
   // выбирает из реально найденных кандидатов вместо угадывания сервером.
   | { type: 'admin-set-lan-address'; address: string }
+  // ВРЕМЕННЫЙ параметр — скорость показа текста вопроса, слов/сек (design.md,
+  // 2026-08-19-gradual-text-reveal-design.md, «Временная скорость показа»).
+  // Без авторизации, тот же паттерн, что и admin-set-lan-address — доступно
+  // только через /admin. Убрать вместе с полем и UI в админке, как только
+  // число зафиксируется в спеке.
+  | { type: 'admin-set-text-reveal-rate'; wordsPerSecond: number }
   // Выбор пакета — от участника (сервер сверяет отправителя с
   // hostParticipantId) и с админ-панели (без проверки личности), тем же
   // способом, каким уже разделены skip-to-final/admin-skip-to-final.
@@ -203,6 +215,10 @@ export type ServerMessage =
       // админка.
       availablePacks: PackSummary[];
       activePackFilename: string | null;
+      // ВРЕМЕННЫЙ, как lanUrl — текущая скорость показа текста вопроса,
+      // слов/сек, меняется через admin-set-text-reveal-rate без реконнекта
+      // (design.md, 2026-08-19-gradual-text-reveal-design.md).
+      textRevealWordsPerSecond: number;
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
