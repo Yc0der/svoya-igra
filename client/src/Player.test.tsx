@@ -48,7 +48,6 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     selfId: null,
     lanUrl: null,
     game: null,
-    videoPrerollMs: 0,
     falsestart: false,
     selectQuestionBlocked: false,
     hostParticipantId: null,

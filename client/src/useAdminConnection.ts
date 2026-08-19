@@ -63,8 +63,6 @@ type ServerMessage =
       lanCandidates: LanCandidate[];
       availablePacks: PackSummary[];
       activePackFilename: string | null;
-      // ВРЕМЕННО — см. server/src/protocol.ts, StateMessage.videoPrerollMs.
-      videoPrerollMs: number;
     }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   | { type: 'select-pack-error'; reason: 'unknown-file' }
@@ -87,8 +85,6 @@ type ClientMessage =
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   | { type: 'admin-skip-to-final' }
   | { type: 'admin-set-lan-address'; address: string }
-  // ВРЕМЕННО — см. server/src/protocol.ts.
-  | { type: 'admin-set-video-preroll'; ms: number }
   | { type: 'admin-refresh-packs' }
   | { type: 'admin-select-pack'; filename: string }
   | { type: 'admin-get-pack'; filename: string }
@@ -129,9 +125,6 @@ export interface AdminConnection {
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   skipToFinal(): void;
   setLanAddress(address: string): void;
-  // ВРЕМЕННО — см. server/src/protocol.ts.
-  videoPrerollMs: number;
-  setVideoPrerollMs(ms: number): void;
   availablePacks: PackSummary[];
   activePackFilename: string | null;
   selectPackError: 'unknown-file' | null;
@@ -188,8 +181,6 @@ export function useAdminConnection(
   const [activePackFilename, setActivePackFilename] = useState<string | null>(
     null,
   );
-  // ВРЕМЕННО — см. server/src/protocol.ts.
-  const [videoPrerollMs, setVideoPrerollMsState] = useState(0);
   const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(
     null,
   );
@@ -236,7 +227,6 @@ export function useAdminConnection(
           setLanCandidates(message.lanCandidates);
           setAvailablePacks(message.availablePacks);
           setActivePackFilename(message.activePackFilename);
-          setVideoPrerollMsState(message.videoPrerollMs);
           setSelectPackError(null);
           setStartGameError(null);
         }
@@ -304,8 +294,6 @@ export function useAdminConnection(
     skipToFinal: () => send({ type: 'admin-skip-to-final' }),
     setLanAddress: (address) =>
       send({ type: 'admin-set-lan-address', address }),
-    videoPrerollMs,
-    setVideoPrerollMs: (ms) => send({ type: 'admin-set-video-preroll', ms }),
     availablePacks,
     activePackFilename,
     selectPackError,

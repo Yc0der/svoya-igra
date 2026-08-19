@@ -33,8 +33,6 @@ export function Admin() {
     setHost,
     skipToFinal,
     setLanAddress,
-    videoPrerollMs,
-    setVideoPrerollMs,
     availablePacks,
     activePackFilename,
     selectPackError,
@@ -61,10 +59,6 @@ export function Admin() {
   // (design.md), лишняя защита на каждой кнопке не соответствовала бы этому
   // выбору.
   const [confirmingWipe, setConfirmingWipe] = useState(false);
-  // ВРЕМЕННО (2026-08-18) — подбор числа секунд предзапуска видео вживую,
-  // см. server/src/protocol.ts, StateMessage.videoPrerollMs. Убрать вместе с
-  // полем, как только число зафиксируется в спеке.
-  const [prerollInput, setPrerollInput] = useState('4');
   // Режим редактора: какой файл сейчас открыт (null — обычный список
   // пакетов), какой вопрос открыт формой, и текущие значения формы —
   // отдельные строковые поля, а не готовые number/enum: значение в инпуте
@@ -308,36 +302,6 @@ export function Admin() {
             })}
           </ul>
         )}
-      </section>
-
-      {/* ВРЕМЕННО (2026-08-18) — подбор числа секунд предзапуска видео
-          вживую, см. server/src/protocol.ts, StateMessage.videoPrerollMs.
-          Убрать секцию целиком, как только число зафиксируется в спеке. */}
-      <section className="admin-section">
-        <h2>Предзапуск видео (временно)</h2>
-        <p>
-          Сейчас: {(videoPrerollMs / 1000).toFixed(1)}с. Видео-вопрос играет
-          скрыто и без звука это время перед показом — за него должна успеть
-          пропасть плашка YouTube с названием.
-        </p>
-        <input
-          type="number"
-          min={0}
-          step={0.1}
-          value={prerollInput}
-          onChange={(e) => setPrerollInput(e.target.value)}
-        />
-        <button
-          className="button"
-          onClick={() => {
-            const seconds = Number(prerollInput);
-            if (Number.isFinite(seconds) && seconds >= 0) {
-              setVideoPrerollMs(Math.round(seconds * 1000));
-            }
-          }}
-        >
-          Применить
-        </button>
       </section>
 
       <section className="admin-section">

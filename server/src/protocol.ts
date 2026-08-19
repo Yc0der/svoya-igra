@@ -136,10 +136,6 @@ export type ClientMessage =
   // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — человек
   // выбирает из реально найденных кандидатов вместо угадывания сервером.
   | { type: 'admin-set-lan-address'; address: string }
-  // ВРЕМЕННО, для подбора числа вживую (2026-08-18) — см. StateMessage.
-  // videoPrerollMs. Убрать вместе с полем и UI в админке, как только число
-  // зафиксируется в спеке.
-  | { type: 'admin-set-video-preroll'; ms: number }
   // Выбор пакета — от участника (сервер сверяет отправителя с
   // hostParticipantId) и с админ-панели (без проверки личности), тем же
   // способом, каким уже разделены skip-to-final/admin-skip-to-final.
@@ -207,14 +203,6 @@ export type ServerMessage =
       // админка.
       availablePacks: PackSummary[];
       activePackFilename: string | null;
-      // ВРЕМЕННО (2026-08-18) — сколько миллисекунд табло держит видео-вопрос
-      // скрытым и без звука перед официальным показом, чтобы за это время
-      // самостоятельно пропала стартовая плашка YouTube с названием/каналом
-      // (не документированное поведение плеера, число подбирается вживую
-      // через админку, не жёстко зашито). 0 — текущее поведение без
-      // предзапуска. Живое, как lanUrl — меняется через
-      // admin-set-video-preroll, без реконнекта.
-      videoPrerollMs: number;
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }

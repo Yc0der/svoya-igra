@@ -114,8 +114,6 @@ type ServerMessage =
       lanUrl: string;
       availablePacks: PackSummary[];
       activePackFilename: string | null;
-      // ВРЕМЕННО — см. server/src/protocol.ts, StateMessage.videoPrerollMs.
-      videoPrerollMs: number;
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
@@ -154,8 +152,6 @@ export interface RoomConnection {
   selfId: string | null;
   lanUrl: string | null;
   game: GameStateView | null;
-  // ВРЕМЕННО — см. server/src/protocol.ts, StateMessage.videoPrerollMs.
-  videoPrerollMs: number;
   falsestart: boolean;
   // Самоочищающийся сигнал (как falsestart) — сервер молча отклонил
   // select-question (сейчас единственная причина — «кота» некому передать),
@@ -208,8 +204,6 @@ export function useRoomConnection(
   const [participants, setParticipants] = useState<ParticipantView[]>([]);
   const [selfId, setSelfId] = useState<string | null>(null);
   const [lanUrl, setLanUrl] = useState<string | null>(null);
-  // ВРЕМЕННО — см. server/src/protocol.ts.
-  const [videoPrerollMs, setVideoPrerollMs] = useState(0);
   const [availablePacks, setAvailablePacks] = useState<PackSummary[]>([]);
   const [activePackFilename, setActivePackFilename] = useState<string | null>(
     null,
@@ -285,7 +279,6 @@ export function useRoomConnection(
           setHostParticipantId(message.hostParticipantId);
           setGame(message.game);
           setLanUrl(message.lanUrl);
-          setVideoPrerollMs(message.videoPrerollMs);
           setAvailablePacks(message.availablePacks);
           setActivePackFilename(message.activePackFilename);
           setSelectPackError(null);
@@ -359,7 +352,6 @@ export function useRoomConnection(
     selfId,
     lanUrl,
     game,
-    videoPrerollMs,
     falsestart,
     selectQuestionBlocked,
     hostParticipantId,

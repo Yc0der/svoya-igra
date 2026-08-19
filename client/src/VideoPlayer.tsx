@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import soundWave from './assets/sound-wave.gif';
-// ВРЕМЕННО — заглушка на время предзапуска обычного (не audioOnly)
-// видео-вопроса. Ahm masum, «Loading icon.gif», Wikimedia Commons,
-// CC BY-SA 4.0: https://commons.wikimedia.org/wiki/File:Loading_icon.gif
+// Заглушка на время предзапуска обычного (не audioOnly) видео-вопроса.
+// Ahm masum, «Loading icon.gif», Wikimedia Commons, CC BY-SA 4.0:
+// https://commons.wikimedia.org/wiki/File:Loading_icon.gif
 import videoLoading from './assets/video-loading.gif';
 
 interface YouTubePlayerInstance {
@@ -14,7 +14,7 @@ interface YouTubePlayerInstance {
   pauseVideo?(): void;
   getCurrentTime?(): number;
   getPlayerState?(): number;
-  // ВРЕМЕННО — только для prerollMs, см. StateMessage.videoPrerollMs.
+  // Только для предзапуска (prerollMs) — снимает мьют после раскрытия.
   unMute?(): void;
 }
 
@@ -29,7 +29,7 @@ interface YouTubePlayerOptions {
     modestbranding: 1;
     autoplay: 1;
     controls: 0;
-    // ВРЕМЕННО — см. поле prerollMs у VideoPlayer ниже.
+    // См. проп prerollMs у VideoPlayer ниже.
     mute?: 1;
   };
   events?: {
@@ -82,10 +82,16 @@ const AUTOPLAY_GRACE_MS = 3000;
 const STATE_PLAYING = 1;
 const STATE_BUFFERING = 3;
 
+// Сколько миллисекунд обычный (не audioOnly) видео-вопрос играет скрыто и
+// без звука перед официальным показом, чтобы за это время самостоятельно
+// пропала стартовая плашка YouTube с названием/каналом (не документированное
+// поведение плеера) — подобрано вживую 2026-08-19.
+export const VIDEO_PREROLL_MS = 4000;
+
 export function VideoPlayer({
   video,
   onFinished,
-  prerollMs = 0,
+  prerollMs = VIDEO_PREROLL_MS,
 }: {
   video: {
     youtubeId: string;
@@ -94,20 +100,16 @@ export function VideoPlayer({
     audioOnly: boolean;
   };
   onFinished: () => void;
-  // ВРЕМЕННО (2026-08-18) — см. server/src/protocol.ts,
-  // StateMessage.videoPrerollMs: сколько миллисекунд играть скрыто и без
-  // звука перед официальным показом, чтобы за это время самостоятельно
-  // пропала стартовая плашка YouTube с названием/каналом. Плата — зрители
-  // теряют ровно эти же первые миллисекунды самого клипа (конец клипа
-  // по-прежнему считается от startSeconds, не сдвигается). 0 — текущее
-  // поведение без предзапуска.
+  // Плата за предзапуск — зрители теряют ровно эти же первые миллисекунды
+  // самого клипа (конец клипа по-прежнему считается от startSeconds, не
+  // сдвигается). 0 отключает предзапуск целиком.
   prerollMs?: number;
 }) {
   const [needsClick, setNeedsClick] = useState(false);
   const [failed, setFailed] = useState(false);
-  // ВРЕМЕННО — audioOnly без исключения: картинка у аудио-вопроса и так
-  // скрыта всегда, до и после предзапуска (защищать нечего), поэтому у
-  // предзапуска для звука нет смысла — только лишняя тишина в начале.
+  // audioOnly без исключения: картинка у аудио-вопроса и так скрыта всегда,
+  // до и после предзапуска (защищать нечего), поэтому у предзапуска для
+  // звука нет смысла — только лишняя тишина в начале.
   const [revealed, setRevealed] = useState(prerollMs === 0 || video.audioOnly);
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YouTubePlayerInstance | null>(null);
@@ -125,7 +127,7 @@ export function VideoPlayer({
     let cancelled = false;
     let pollHandle: ReturnType<typeof setInterval> | null = null;
     let autoplayHandle: ReturnType<typeof setTimeout> | null = null;
-    // ВРЕМЕННО (2026-08-18) — момент (Date.now()), когда опрос впервые
+    // Момент (Date.now()), когда опрос впервые
     // увидел STATE_PLAYING; null, пока видео ещё не заиграло по-настоящему
     // (буферизация не в счёт). Обычная переменная замыкания, а не React
     // state: читается на каждом тике того же интервала, а не по рендерам.
@@ -141,7 +143,7 @@ export function VideoPlayer({
       onFinishedRef.current();
     }
 
-    // ВРЕМЕННО — общая для обоих путей раскрытия (по истечении prerollMs и
+    // Общая для обоих путей раскрытия (по истечении prerollMs и
     // по «клип физически закончился раньше») — иначе видео, чей клип короче
     // предзапуска (буферизация съела больше времени, чем сам preroll),
     // осталось бы скрытым навсегда: свой независимый таймер раскрытия успел
@@ -156,7 +158,7 @@ export function VideoPlayer({
     loadYouTubeApi().then(() => {
       if (cancelled || !containerRef.current || !window.YT) return;
       const endsAt = video.startSeconds + video.durationSeconds;
-      // ВРЕМЕННО — стартуем на prerollMs раньше задуманной в паке секунды
+      // Стартуем на prerollMs раньше задуманной в паке секунды
       // (не раньше нуля), чтобы после раскрытия зритель увидел ровно тот же
       // отрезок, что задуман: иначе первые prerollMs секунд самого клипа
       // просто терялись бы вместе с предзапуском. endsAt намеренно не
@@ -186,7 +188,7 @@ export function VideoPlayer({
           // клики. controls:0 убирает её целиком, а не пытается закрывать
           // сверху ещё одной полосой.
           controls: 0,
-          // ВРЕМЕННО — на время предзапуска (prerollMs) звука быть не
+          // На время предзапуска (prerollMs) звука быть не
           // должно: зритель ещё не видит кадр вообще. Не касается audioOnly
           // — там кадр скрыт всегда, предзапуск ничего не защищает, а звук
           // должен звучать сразу.
@@ -208,7 +210,7 @@ export function VideoPlayer({
               // стало true.
               if (state === STATE_PLAYING) {
                 setNeedsClick(false);
-                // ВРЕМЕННО — засекает предзапуск от МОМЕНТА, когда видео
+                // Засекает предзапуск от МОМЕНТА, когда видео
                 // реально начало играть, а не от onReady: живая проверка
                 // (2026-08-18) поймала, что буферизация/seek сама по себе
                 // съедала секунды между onReady и первым STATE_PLAYING.
@@ -223,7 +225,7 @@ export function VideoPlayer({
               }
               const at = player.getCurrentTime?.();
               if (typeof at !== 'number' || at < endsAt) return;
-              // ВРЕМЕННО — клип физически закончился (буферизация уже съела
+              // Клип физически закончился (буферизация уже съела
               // больше времени, чем сам предзапуск, и видимая часть клипа
               // сжалась до нуля): дальше ждать нечего, а без этого видео
               // осталось бы скрытым навсегда — свой independent таймер
@@ -263,9 +265,7 @@ export function VideoPlayer({
     // Зависимости — конкретные поля video, не сам объект: он пересоздаётся
     // на каждой рассылке состояния, а зависимость от ссылки на весь объект
     // пересоздавала бы плеер и прерывала воспроизведение на каждой такой
-    // рассылке. prerollMs — та же логика: меняется только через админку, не
-    // на каждой рассылке, но если вдруг изменится посреди уже идущего клипа,
-    // пересоздавать плеер ради diagnostic-настройки не нужно.
+    // рассылке. prerollMs сюда намеренно не входит — та же причина.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [video.youtubeId, video.startSeconds, video.durationSeconds]);
 
@@ -273,7 +273,7 @@ export function VideoPlayer({
     return <p className="board-video-error">Видео недоступно</p>;
   }
 
-  // ВРЕМЕННО — !revealed по той же логике, что и audioOnly: пока идёт
+  // !revealed по той же логике, что и audioOnly: пока идёт
   // предзапуск, зритель не должен увидеть кадр вообще, только позже — тем же
   // приёмом (нулевые размеры контейнера), которым уже прячется audioOnly.
   const visuallyHidden = video.audioOnly || !revealed;
@@ -287,7 +287,7 @@ export function VideoPlayer({
           alt="Играет аудио"
         />
       )}
-      {/* ВРЕМЕННО — заглушка на время предзапуска обычного видео-вопроса:
+      {/* Заглушка на время предзапуска обычного видео-вопроса:
           пустой экран несколько секунд ощущался как зависание, а не
           ожидание. Живая проверка (2026-08-18) подтвердила 4 секунды как
           рабочее число — плашка YouTube с названием надёжно пропадает за

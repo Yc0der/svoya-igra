@@ -46,8 +46,6 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
   return {
     connected: true,
     lanUrl: null,
-    videoPrerollMs: 0,
-    setVideoPrerollMs: vi.fn(),
     lanCandidates: [],
     participants: [],
     hostParticipantId: null,

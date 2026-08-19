@@ -47,7 +47,6 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     selfId: null,
     lanUrl: null,
     game: null,
-    videoPrerollMs: 0,
     falsestart: false,
     selectQuestionBlocked: false,
     hostParticipantId: null,
@@ -282,9 +281,10 @@ describe('Board', () => {
     );
     render(<Board />);
     expect(document.querySelector('.board-video')).toBeInTheDocument();
-    expect(
-      document.querySelector('.board-video-hidden'),
-    ).not.toBeInTheDocument();
+    // По умолчанию видео 4 секунды играет скрыто (см. VideoPlayer.tsx,
+    // VIDEO_PREROLL_MS) — плеер создан сразу, а не отрендерен только после
+    // клика, но видим он станет чуть позже.
+    expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /играть/i }),
     ).not.toBeInTheDocument();
@@ -331,10 +331,11 @@ describe('Board', () => {
     );
     render(<Board />);
     expect(document.querySelector('.board-video')).toBeInTheDocument();
+    // Заглушка предзапуска — не то же самое, что картинка пака (image):
+    // проверяем именно отсутствие последней по её собственному alt.
     expect(
-      document.querySelector('.board-video-hidden'),
+      screen.queryByAltText(/картинка к вопросу/i),
     ).not.toBeInTheDocument();
-    expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
   it('shows the question and the player during question-media, but no countdown yet', () => {
@@ -362,9 +363,6 @@ describe('Board', () => {
 
     expect(screen.getByText('Что за фильм?')).toBeInTheDocument();
     expect(document.querySelector('.board-video')).toBeInTheDocument();
-    expect(
-      document.querySelector('.board-video-hidden'),
-    ).not.toBeInTheDocument();
     // Отсчёт идёт по страховочному таймеру медиа — игрокам его показывать
     // незачем, время на ответ ещё не началось.
     expect(document.querySelector('.board-timer')).not.toBeInTheDocument();

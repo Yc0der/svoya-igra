@@ -158,14 +158,6 @@ export class Room {
   private availablePacks: PackSummary[] = [];
   private activePackFilename: string | null;
   private packListeners = new Set<(info: PackInfo) => void>();
-  // ВРЕМЕННО (2026-08-18, StateMessage.videoPrerollMs) — не часть RoomState
-  // по тому же принципу, что lanAddress/availablePacks: чисто транспортная
-  // настройка табло, не игровое состояние, сбрасывается при перезапуске
-  // сервера (не нужен снапшот ради diagnostic-инструмента). 4 секунды —
-  // подобранное вживую (2026-08-18) время, за которое у проверенных роликов
-  // надёжно пропадает стартовая плашка YouTube с названием/каналом.
-  private videoPrerollMs = 4000;
-  private videoPrerollListeners = new Set<(ms: number) => void>();
 
   constructor(
     initial?: RoomState,
@@ -638,21 +630,6 @@ export class Room {
     }
   }
 
-  // ВРЕМЕННО — см. поле videoPrerollMs выше. Без проверки отправителя, как
-  // и остальные admin-* настройки этого класса — админ-панель не проверяет
-  // личность (server.ts).
-  getVideoPrerollMs(): number {
-    return this.videoPrerollMs;
-  }
-
-  setVideoPrerollMs(ms: number): void {
-    if (!Number.isFinite(ms) || ms < 0) return;
-    this.videoPrerollMs = ms;
-    for (const listener of this.videoPrerollListeners) {
-      listener(this.videoPrerollMs);
-    }
-  }
-
   getPackInfo(): PackInfo {
     return {
       available: [...this.availablePacks],
@@ -905,12 +882,6 @@ export class Room {
   onPackChange(listener: (info: PackInfo) => void): () => void {
     this.packListeners.add(listener);
     return () => this.packListeners.delete(listener);
-  }
-
-  // ВРЕМЕННО — см. поле videoPrerollMs выше.
-  onVideoPrerollChange(listener: (ms: number) => void): () => void {
-    this.videoPrerollListeners.add(listener);
-    return () => this.videoPrerollListeners.delete(listener);
   }
 
   private stillGraceExcluded(): boolean {

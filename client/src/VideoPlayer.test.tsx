@@ -69,11 +69,11 @@ describe('VideoPlayer', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('asks the player to start at the right second and does not rely on playerVars.end', async () => {
+  it('asks the player to start at startSeconds when prerollMs is 0, and does not rely on playerVars.end', async () => {
     vi.useFakeTimers();
     const { Player } = mockYouTube();
 
-    render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
+    render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} prerollMs={0} />);
     await flush();
 
     const options = Player.mock.calls[0][1] as {
@@ -290,9 +290,7 @@ describe('VideoPlayer', () => {
     expect(Player).toHaveBeenCalled();
   });
 
-  // ВРЕМЕННО (2026-08-18) — см. server/src/protocol.ts,
-  // StateMessage.videoPrerollMs.
-  describe('prerollMs (временно)', () => {
+  describe('prerollMs', () => {
     it('starts muted and hidden, then unmutes and reveals once prerollMs elapses', async () => {
       vi.useFakeTimers();
       const { instance, Player, events } = mockYouTube();
@@ -454,11 +452,11 @@ describe('VideoPlayer', () => {
       expect(screen.getByAltText(/видео скоро начнётся/i)).toBeInTheDocument();
     });
 
-    it('does not mute or hide anything when prerollMs is 0 (default)', async () => {
+    it('does not mute or hide anything when prerollMs is explicitly 0', async () => {
       vi.useFakeTimers();
       const { Player } = mockYouTube();
 
-      render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
+      render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} prerollMs={0} />);
       await flush();
 
       const options = Player.mock.calls[0][1] as {
@@ -468,6 +466,20 @@ describe('VideoPlayer', () => {
       expect(
         document.querySelector('.board-video-hidden'),
       ).not.toBeInTheDocument();
+    });
+
+    it('defaults prerollMs to 4000 when the prop is not passed at all', async () => {
+      vi.useFakeTimers();
+      const { Player } = mockYouTube();
+
+      render(<VideoPlayer video={VIDEO} onFinished={vi.fn()} />);
+      await flush();
+
+      const options = Player.mock.calls[0][1] as {
+        playerVars: Record<string, unknown>;
+      };
+      expect(options.playerVars.mute).toBe(1);
+      expect(document.querySelector('.board-video-hidden')).toBeInTheDocument();
     });
 
     it('still ends the clip at the same startSeconds + durationSeconds, regardless of preroll', async () => {
