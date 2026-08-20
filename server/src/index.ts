@@ -8,10 +8,22 @@ import { listLanCandidates, pickLanAddress } from './network.js';
 import { createServer } from './server.js';
 import { loadPack } from './pack.js';
 import { listAvailablePacks } from './packs.js';
+import { GameHistory } from './history.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
 const PACK_PATH = process.env.PACK_PATH ?? './packs/current.json';
+// Резолвится от import.meta.url, а не от cwd (тем же приёмом, что и
+// CLIENT_DIST_PATH ниже) — иначе дефолт молча разъезжается с тем, что
+// использует server/scripts/*.ts (те запускаются из server/, а не из
+// корня): GameHistory создаёт файл базы, если его нет, поэтому запуск не
+// из того каталога не падает с ошибкой, а тихо открывает пустую базу
+// рядом (финальное ревью ветки, п. 4). server/src/*.ts (dev через tsx),
+// server/dist/*.js (собранный) и server/scripts/*.ts лежат на одной
+// глубине относительно корня репозитория, так что путь '../../' общий.
+const HISTORY_PATH =
+  process.env.HISTORY_PATH ??
+  join(dirname(fileURLToPath(import.meta.url)), '../../game-history.db');
 const LAN_HOST_CONFIG_PATH =
   process.env.LAN_HOST_CONFIG_PATH ?? './lan-host.local.json';
 const PROFILE_PATH =
@@ -124,11 +136,25 @@ async function main(): Promise<void> {
 
   const initialAvailablePacks = await listAvailablePacks(PACKS_DIR);
 
+  // Битая или недоступная база не должна мешать серверу подняться — история
+  // побочная функция, партия важнее её всегда (design.md,
+  // 2026-08-20-game-history-design.md, «Отказы не ломают партию»).
+  let history: GameHistory | undefined;
+  try {
+    history = new GameHistory(HISTORY_PATH);
+  } catch (err) {
+    console.error(
+      `Не удалось открыть историю партий ${HISTORY_PATH}, играем без записи:`,
+      err,
+    );
+  }
+
   const room = new Room(
     initial ?? undefined,
     pack,
     { candidates, address: lanAddress },
     basename(PACK_PATH),
+    history,
   );
   room.refreshAvailablePacks(null, initialAvailablePacks);
 

@@ -38,6 +38,12 @@ Thumbs.db
 # Per-machine Claude Code permissions — not shared repo config
 .claude/settings.local.json
 
+# Конфиг запуска дев-сервера для Claude Code — на каждой машине свой (порт
+# может быть занят, путь до pnpm свой). В репозитории лежит только образец
+# .claude/launch-example.json — скопировать его в .claude/launch.json и
+# поправить под себя.
+.claude/launch.json
+
 # Local git worktrees — scratch checkouts, not repo content
 .claude/worktrees/
 

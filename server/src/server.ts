@@ -131,6 +131,8 @@ export function createServer(options: CreateServerOptions): GameServer {
       textRevealWordsPerSecond: room.getTextRevealWordsPerSecond(),
       // ВРЕМЕННО — см. Room.textRevealEnabled.
       textRevealEnabled: room.getTextRevealEnabled(),
+      historyEnabled: room.getHistoryEnabled(),
+      historyRecording: room.isHistoryRecording(),
     };
   };
 
@@ -168,6 +170,7 @@ export function createServer(options: CreateServerOptions): GameServer {
   room.onTextRevealRateChange(broadcastState);
   // ВРЕМЕННО — см. Room.textRevealEnabled.
   room.onTextRevealEnabledChange(broadcastState);
+  room.onHistoryEnabledChange(broadcastState);
 
   // `ws`, будучи прицепленным к готовому httpServer, переподписывает его
   // 'error' на себя. Без слушателя здесь EventEmitter на 'error' бросает
@@ -468,6 +471,13 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.enabled === 'boolean'
       ) {
         room.setTextRevealEnabled(message.enabled);
+      }
+
+      if (
+        message.type === 'admin-set-history-enabled' &&
+        typeof message.enabled === 'boolean'
+      ) {
+        room.setHistoryEnabled(message.enabled);
       }
 
       if (message.type === 'refresh-packs') {

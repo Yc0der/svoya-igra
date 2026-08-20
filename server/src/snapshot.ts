@@ -49,6 +49,9 @@ export function deserializeSnapshot(json: string): RoomState {
     // Тот же паттерн, что у `game` строкой выше: снапшоты, записанные до
     // появления ведущего, этого поля не содержат — по умолчанию его нет.
     hostParticipantId: parsed.hostParticipantId ?? null,
+    // История партий (2026-08-20) появилась позже — снапшоты, записанные до
+    // неё, этого поля не содержат.
+    historyGameId: parsed.historyGameId ?? null,
   };
 }
 

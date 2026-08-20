@@ -29,6 +29,7 @@ import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
+import type { HistoryRecorder, PlayedQuestionInput } from './history.js';
 
 export interface Participant {
   id: string;
@@ -46,6 +47,12 @@ export interface RoomState {
   // startGame() копируется в EngineState.hostId и на время партии больше не
   // меняется (см. toggleHost()).
   hostParticipantId: string | null;
+  // Id строки этой партии в истории (history.ts). Часть RoomState, а не
+  // эфемерное поле, именно потому, что снапшот переживает перезапуск
+  // сервера: без этого после перезапуска посреди партии в базе появилась бы
+  // ВТОРАЯ строка games для той же самой партии. null означает «эта партия
+  // не пишется» — в том числе для снапшотов, записанных до появления фичи.
+  historyGameId: number | null;
 }
 
 // Не часть RoomState/снапшота: кандидаты — это факт текущего окружения
@@ -106,6 +113,63 @@ const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   'final-judging': { timer: 'final-judging', ms: FINAL_JUDGING_TIMER_MS },
   'final-reveal': { timer: 'final-reveal', ms: FINAL_REVEAL_TIMER_MS },
 };
+
+// Единая точка отказоустойчивости для рекордера истории (design.md,
+// «Отказы не ломают партию»). Строится ОДИН раз в конструкторе Room —
+// дальше все вызовы this.history.* внутри класса прямые, без try/catch и
+// без локальных const-копий ради обхода TS-narrowing по `this`, которые
+// раньше приходилось заводить в четырёх местах отдельно (startHistoryGame,
+// safeHistoryCall и три вызова через него). Без переданного рекордера
+// (тесты без истории, ранние стадии main()) подставляется no-op — тогда
+// вызывающему коду не нужно помнить о `this.history?.`.
+function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
+  const target: HistoryRecorder = recorder ?? {
+    startGame: () => null,
+    recordQuestion: () => {},
+    finishGame: () => {},
+    discardGame: () => {},
+  };
+  return {
+    startGame(input) {
+      try {
+        return target.startGame(input);
+      } catch (err) {
+        console.error('История: рекордер бросил исключение (startGame) —', err);
+        return null;
+      }
+    },
+    recordQuestion(gameId, row) {
+      try {
+        target.recordQuestion(gameId, row);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (recordQuestion) —',
+          err,
+        );
+      }
+    },
+    finishGame(gameId, finalScores) {
+      try {
+        target.finishGame(gameId, finalScores);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (finishGame) —',
+          err,
+        );
+      }
+    },
+    discardGame(gameId) {
+      try {
+        target.discardGame(gameId);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (discardGame) —',
+          err,
+        );
+      }
+    },
+  };
+}
 
 // Сколько секунд ответивший неверно не может нажать повторно — не игровое
 // правило движка (тот вообще не знает, кто и когда переоткрыл вопрос), а
@@ -183,12 +247,25 @@ export class Room {
   // серверный таймер — иначе смена скорости админкой прямо посреди показа
   // рассинхронила бы клиент и сервер.
   private currentTextRevealMs: number | null = null;
+  // Писать ли эту партию в историю (design.md,
+  // 2026-08-20-game-history-design.md, «Тумблер»). Эфемерный, как
+  // textRevealEnabled: не часть RoomState, после перезапуска сервера
+  // возвращается во «включено». Значит «эта партия в истории?», а не «пишем
+  // ли прямо сейчас» — выключение выбрасывает уже записанное.
+  private historyEnabled = true;
+  private historyEnabledListeners = new Set<(enabled: boolean) => void>();
+  // Всегда определён (wrapHistoryRecorder подставляет no-op вместо
+  // отсутствующего аргумента конструктора) — тело класса дальше вызывает
+  // this.history.* напрямую, без `?.`.
+  private history: HistoryRecorder;
+  private historyGameId: number | null;
 
   constructor(
     initial?: RoomState,
     pack?: Pack,
     lan?: LanInfo,
     initialPackFilename?: string,
+    history?: HistoryRecorder,
   ) {
     this.participants = initial
       ? initial.participants.map((p) => ({ ...p }))
@@ -199,6 +276,8 @@ export class Room {
     this.lanCandidates = lan?.candidates ?? [];
     this.lanAddress = lan?.address ?? null;
     this.activePackFilename = initialPackFilename ?? null;
+    this.history = wrapHistoryRecorder(history);
+    this.historyGameId = initial?.historyGameId ?? null;
     if (this.game) {
       const restart = PHASE_TIMER[this.game.phase];
       if (restart) {
@@ -324,6 +403,17 @@ export class Room {
     this.clearGraceExclusion();
     const counterIds = counters.map((p) => p.id);
     this.game = createInitialState(this.pack, counterIds, hostId);
+    this.historyGameId = this.historyEnabled
+      ? this.history.startGame({
+          startedAt: new Date().toISOString(),
+          packFilename: this.activePackFilename ?? 'неизвестный-пакет',
+          packTitle: this.pack.title,
+          participants: counters.map((p) => ({
+            counterId: p.id,
+            name: p.name,
+          })),
+        })
+      : null;
     this.notify();
     return { ok: true };
   }
@@ -346,6 +436,10 @@ export class Room {
     this.clearGameTimer();
     this.clearGraceExclusion();
     this.game = null;
+    // Партия брошена, но её вопросы игроки видели — из истории они не
+    // удаляются. Обнуляем только ссылку, чтобы следующая партия завела свою
+    // строку, а не дописывалась в брошенную.
+    this.historyGameId = null;
     this.notify();
   }
 
@@ -363,6 +457,10 @@ export class Room {
     this.participants = [];
     this.hostParticipantId = null;
     this.game = null;
+    // Партия брошена, но её вопросы игроки видели — из истории они не
+    // удаляются. Обнуляем только ссылку, чтобы следующая партия завела свою
+    // строку, а не дописывалась в брошенную.
+    this.historyGameId = null;
     this.notify();
   }
 
@@ -633,6 +731,7 @@ export class Room {
       participants: this.participants.map((p) => ({ ...p })),
       game: this.game ? { ...this.game } : null,
       hostParticipantId: this.hostParticipantId,
+      historyGameId: this.historyGameId,
     };
   }
 
@@ -690,6 +789,50 @@ export class Room {
     for (const listener of this.textRevealEnabledListeners) {
       listener(this.textRevealEnabled);
     }
+  }
+
+  getHistoryEnabled(): boolean {
+    return this.historyEnabled;
+  }
+
+  // Правда о том, пишется ли ПРЯМО СЕЙЧАС конкретно идущая партия — в
+  // отличие от historyEnabled (намерение на партию, которая начнётся
+  // дальше), эти два расходятся именно после off→on посреди партии:
+  // historyEnabled снова true, а historyGameId уже null (обратной операции
+  // нет — см. комментарий у setHistoryEnabled). Админка (Admin.tsx) сверяет
+  // чекбокс с этим полем, а не только с historyEnabled, чтобы не показывать
+  // партию записываемой, когда она уже окончательно выброшена.
+  isHistoryRecording(): boolean {
+    return this.historyGameId !== null;
+  }
+
+  // Выключение не просто останавливает запись, а выбрасывает уже записанное
+  // этой партией: тумблер отвечает на вопрос «эта партия в истории?».
+  // Обратной операции нет — historyGameId обнуляется вместе с удалением, так
+  // что повторное включение в той же партии записи не возобновляет. Это
+  // намеренно (design.md, «Тумблер»), а не недосмотр.
+  setHistoryEnabled(enabled: boolean): void {
+    this.historyEnabled = enabled;
+    if (!enabled && this.historyGameId !== null) {
+      this.history.discardGame(this.historyGameId);
+      this.historyGameId = null;
+      // historyGameId — часть RoomState, а на диск снапшот пишется по
+      // onChange (index.ts), не по onHistoryEnabledChange. Без notify()
+      // здесь обнуление строкой выше не доезжает до снапшота: переживший
+      // перезапуск сервера снапшот всё ещё указывает на партию, которую
+      // history.ts уже удалила, и первая же запись следующего вопроса
+      // пойдёт по FK в несуществующую строку games и молча провалится
+      // (финальное ревью ветки, п. 1).
+      this.notify();
+    }
+    for (const listener of this.historyEnabledListeners) {
+      listener(this.historyEnabled);
+    }
+  }
+
+  onHistoryEnabledChange(listener: (enabled: boolean) => void): () => void {
+    this.historyEnabledListeners.add(listener);
+    return () => this.historyEnabledListeners.delete(listener);
   }
 
   private isHostOrAdmin(requesterId: string | null): boolean {
@@ -968,6 +1111,34 @@ export class Room {
     if (!this.game) return;
     const buzzedBefore = this.game.buzzedCounterId;
     const phaseBefore = this.game.phase;
+    const answeredCountBefore = this.game.answeredQuestionIds.length;
+    const questionBefore = this.game.currentQuestion;
+    const roundIndexBefore = this.game.roundIndex;
+    const scoresBefore = this.game.scores;
+    const hostIdBefore = this.game.hostId;
+    // Выигрышная ставка аукциона на момент ДО этого dispatch. Захватывается
+    // здесь же, рядом со scoresBefore/hostIdBefore, а не читается из state
+    // ПОСЛЕ reduce() — resolveVote()/afterBidOrPass() в движке успевают
+    // сбросить auctionHighestBid обратно в 0 в том же самом вызове reduce(),
+    // где вопрос закрывается (engine.ts, resetAuctionFields). recordPlayedQuestion
+    // ниже пишет её как настоящую цену вопроса-аукциона (design.md,
+    // 2026-08-20-game-history-design.md, «Схема»).
+    const auctionHighestBidBefore = this.game.auctionHighestBid;
+    // Голоса из состояния «до» ПЛЮС текущее событие, если это голос. При
+    // нынешней семантике движка (engine.ts::handleVote) это НИКОГДА не
+    // меняет итог: 'vote' резолвит вопрос синхронно только когда
+    // hostId !== null (голос ведущего решает сразу), а recordPlayedQuestion
+    // ниже в этом случае и так пишет contested: null, не читая votes вовсе.
+    // Без ведущего 'vote' лишь копится в state.votes и ничего не решает —
+    // резолюция приходит только по 'timer-expired', и тогда состояние «до»
+    // уже полное само по себе, без всякого мержа. Мерж оставлен как
+    // страховка на случай, если синхронная резолюция голосом когда-нибудь
+    // появится и без ведущего — тогда «до» станет неполным ровно так же,
+    // как сейчас неполно для ведущего, и этот код нужно будет прочитать.
+    const votesAtResolution =
+      event.type === 'vote'
+        ? { ...this.game.votes, [event.counterId]: event.correct }
+        : this.game.votes;
     const { state, effects } = reduce(this.game, event);
     this.game = state;
 
@@ -1009,6 +1180,28 @@ export class Room {
     }
 
     this.applyEffects(effects, event.type === 'timer-expired');
+    if (state.answeredQuestionIds.length > answeredCountBefore) {
+      this.recordPlayedQuestion(
+        state,
+        questionBefore,
+        roundIndexBefore,
+        scoresBefore,
+        hostIdBefore,
+        votesAtResolution,
+        buzzedBefore,
+        auctionHighestBidBefore,
+      );
+    }
+    if (phaseBefore !== 'final-reveal' && state.phase === 'final-reveal') {
+      this.recordFinalQuestion(state);
+    }
+    if (
+      phaseBefore !== 'game-end' &&
+      state.phase === 'game-end' &&
+      this.historyGameId !== null
+    ) {
+      this.history.finishGame(this.historyGameId, state.scores);
+    }
     this.notify();
   }
 
@@ -1100,6 +1293,109 @@ export class Room {
       TEXT_REVEAL_MIN_MS,
       Math.round((words / this.textRevealWordsPerSecond) * 1000),
     );
+  }
+
+  private recordPlayedQuestion(
+    state: EngineState,
+    questionBefore: EngineState['currentQuestion'],
+    roundIndexBefore: number,
+    scoresBefore: Record<string, number>,
+    hostIdBefore: string | null,
+    votes: Record<string, boolean>,
+    buzzedBefore: string | null,
+    auctionHighestBidBefore: number,
+  ): void {
+    if (this.historyGameId === null || !questionBefore) return;
+    const gameId = this.historyGameId;
+    const question = findQuestion(
+      state.pack,
+      roundIndexBefore,
+      questionBefore.themeIndex,
+      questionBefore.questionId,
+    );
+    if (!question) return;
+    const themeName =
+      state.pack.rounds[roundIndexBefore]?.themes[questionBefore.themeIndex]
+        ?.name ?? '';
+    // Верность выводится по знаку изменения счёта отвечавшего: верный ответ
+    // добавляет цену (у аукциона — ставку), неверный вычитает её. Ровно ноль
+    // означает, что вердикта не было вовсе — ведущий отменил вопрос.
+    const delta =
+      buzzedBefore === null
+        ? 0
+        : (state.scores[buzzedBefore] ?? 0) - (scoresBefore[buzzedBefore] ?? 0);
+    const voteValues = Object.values(votes);
+    // У аукциона номинал пакета (question.price) не был реальной ценой ни
+    // секунды: игроки торгуются, и в счёт попадает выигравшая ставка, а не
+    // номинал (docs/ideas.md, «Память и обучение генератора» — неявные
+    // сигналы читаются только в паре с ценой, и эта пара обязана быть
+    // честной). resolveVote() в движке начисляет/списывает у отвечавшего
+    // именно auctionHighestBid, а не question.price — история пишет то же
+    // число.
+    //
+    // Вырожденный случай: если аукцион закрылся без единой ставки (все
+    // счётчики спасовали по кругу, не сделав хода — engine.ts,
+    // afterBidOrPass(), active.length === 0), auctionHighestBidBefore
+    // остаётся 0 — это не цена, а просто «никто не платил». Ноль в колонке
+    // price увёл бы генератор в ложный вывод «вопрос ничего не стоил»,
+    // поэтому в этом случае пишется номинал пакета — так же, как для
+    // обычного вопроса.
+    const price =
+      question.type === 'аукцион'
+        ? auctionHighestBidBefore > 0
+          ? auctionHighestBidBefore
+          : question.price
+        : question.price;
+    const row: PlayedQuestionInput = {
+      questionId: question.id,
+      roundIndex: roundIndexBefore,
+      themeName,
+      price,
+      type: question.type,
+      text: question.text,
+      answer: question.answer,
+      answeredBy: buzzedBefore === null ? null : this.nameOf(buzzedBefore),
+      answeredByCounterId: buzzedBefore,
+      correct: buzzedBefore === null || delta === 0 ? null : delta > 0,
+      // Спорным считается несогласие голосующих между собой. При ведущем
+      // голосования нет вовсе — тогда null, а не false: «не было спора» и
+      // «не было голосования» это разные вещи, и слайс B не должен их путать.
+      contested:
+        hostIdBefore !== null || voteValues.length === 0
+          ? null
+          : voteValues.some((v) => v !== voteValues[0]),
+    };
+    this.history.recordQuestion(gameId, row);
+  }
+
+  // Финальный вопрос не проходит через answeredQuestionIds — он вообще не из
+  // сетки раундов. Отвечают его все сразу и каждый со своей ставкой, поэтому
+  // персональных полей у строки нет: для антиповтора важны текст и ответ, а
+  // разбор вердиктов по игрокам — это уже слайс B/D.
+  private recordFinalQuestion(state: EngineState): void {
+    if (this.historyGameId === null) return;
+    const gameId = this.historyGameId;
+    const themeIndex = state.finalThemeIndex;
+    if (themeIndex === null) return;
+    const theme = state.pack.final?.themes[themeIndex];
+    if (!theme) return;
+    this.history.recordQuestion(gameId, {
+      questionId: theme.question.id,
+      roundIndex: -1,
+      themeName: theme.name,
+      price: 0,
+      type: 'финал',
+      text: theme.question.text,
+      answer: theme.question.answer,
+      answeredBy: null,
+      answeredByCounterId: null,
+      correct: null,
+      contested: null,
+    });
+  }
+
+  private nameOf(participantId: string): string | null {
+    return this.participants.find((p) => p.id === participantId)?.name ?? null;
   }
 
   private notify(): void {

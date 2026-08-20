@@ -37,6 +37,9 @@ export function Admin() {
     setTextRevealWordsPerSecond,
     textRevealEnabled,
     setTextRevealEnabled,
+    historyEnabled,
+    setHistoryEnabled,
+    historyRecording,
     availablePacks,
     activePackFilename,
     selectPackError,
@@ -351,6 +354,41 @@ export function Admin() {
         >
           Применить
         </button>
+      </section>
+
+      <section className="admin-section">
+        <h2>История партий</h2>
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              // Пока партия не идёт, чекбокс отражает намерение на
+              // следующую (historyEnabled). Когда партия уже идёт — честный
+              // ответ только один: пишется ли она прямо сейчас
+              // (historyRecording), а не то, что стоит в тумблере. Они
+              // расходятся именно после «выключил → включил обратно»
+              // посреди партии — иначе галочка стояла бы, а в историю не
+              // попадало бы ничего (финальное ревью ветки, п. 2).
+              checked={game === null ? historyEnabled : historyRecording}
+              onChange={(e) => setHistoryEnabled(e.target.checked)}
+            />{' '}
+            Записывать эту партию в историю
+          </label>
+        </p>
+        <p>
+          Сыгранные вопросы попадают в историю, и генератор пакетов перестаёт их
+          повторять. Выключить стоит перед тестовым прогоном: выключение не
+          просто останавливает запись, а выбрасывает всё, что эта партия уже
+          успела записать. Обратно включить в той же партии нельзя — она уже
+          выброшена.
+        </p>
+        {game !== null && historyEnabled && !historyRecording && (
+          <p className="player-alert" role="alert">
+            Эта партия уже выброшена из истории — тумблер включён, но ничего не
+            пишется. Обратно её не вернуть; следующая партия начнёт писаться
+            заново.
+          </p>
+        )}
       </section>
 
       <section className="admin-section">

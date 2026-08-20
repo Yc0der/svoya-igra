@@ -152,6 +152,10 @@ export type ClientMessage =
   // тот же принцип, что admin-set-text-reveal-rate выше. false — вопрос
   // открывается сразу целиком, без ожидания (Room.computeTextRevealMs).
   | { type: 'admin-set-text-reveal-enabled'; enabled: boolean }
+  // Тумблер записи текущей партии в историю (room.ts, Room.historyEnabled) —
+  // тот же паттерн, что и admin-set-text-reveal-enabled выше, но постоянная
+  // функция, не временная.
+  | { type: 'admin-set-history-enabled'; enabled: boolean }
   // Выбор пакета — от участника (сервер сверяет отправителя с
   // hostParticipantId) и с админ-панели (без проверки личности), тем же
   // способом, каким уже разделены skip-to-final/admin-skip-to-final.
@@ -226,6 +230,22 @@ export type ServerMessage =
       // ВРЕМЕННЫЙ, как textRevealWordsPerSecond — вкл/выкл постепенного
       // показа целиком, меняется через admin-set-text-reveal-enabled.
       textRevealEnabled: boolean;
+      // Намерение писать историю — для партии, которая начнётся дальше
+      // (room.ts, Room.historyEnabled). Не то же самое, что «пишется ли
+      // прямо сейчас конкретно идущая партия», см. historyRecording ниже.
+      historyEnabled: boolean;
+      // Правда для чекбокса в админке (room.ts, Room.isHistoryRecording) —
+      // «historyGameId !== null» напрямую, а не намерение. true, только
+      // пока идёт партия и она реально пишется; в лобби всегда false, даже
+      // при historyEnabled: true (запись начнётся только со стартом
+      // партии). Расходится с historyEnabled именно после off→on посреди
+      // партии — тумблер снова true, но эта конкретная партия уже
+      // выброшена окончательно и заново писаться не начинает (design.md,
+      // 2026-08-20-game-history-design.md, «Тумблер»). Admin.tsx для
+      // лобби (game === null) показывает чекбокс по historyEnabled, а не
+      // по этому полю — иначе он выглядел бы выключенным ещё до старта
+      // первой партии.
+      historyRecording: boolean;
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
