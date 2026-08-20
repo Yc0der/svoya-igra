@@ -342,11 +342,15 @@ interface PackQuestion {
   id: string;
   text: string;
   answer: string;
+  // Есть ли у вопроса картинка или видео. Определяет, чем вопрос опознаётся
+  // при сверке — см. findRepeats ниже.
+  hasMedia: boolean;
 }
 
 // Все вопросы пакета одним списком — и сетка раундов, и финальные темы.
 // Финал проверяется наравне с остальными: это самый памятный вопрос вечера,
-// и повторить его было бы обиднее всего.
+// и повторить его было бы обиднее всего. У финальной темы медиа не бывает
+// вовсе (pack.ts, FinalTheme.question) — отсюда hasMedia: false.
 function eachQuestion(pack: Pack): PackQuestion[] {
   const questions: PackQuestion[] = [];
   for (const round of pack.rounds) {
@@ -356,6 +360,7 @@ function eachQuestion(pack: Pack): PackQuestion[] {
           id: question.id,
           text: question.text,
           answer: question.answer,
+          hasMedia: Boolean(question.image ?? question.video),
         });
       }
     }
@@ -365,6 +370,7 @@ function eachQuestion(pack: Pack): PackQuestion[] {
       id: theme.question.id,
       text: theme.question.text,
       answer: theme.question.answer,
+      hasMedia: false,
     });
   }
   return questions;
@@ -382,30 +388,66 @@ function eachQuestion(pack: Pack): PackQuestion[] {
  *
  * Вопрос, попавший в sameQuestion, в sameAnswer уже не повторяется: одно и то
  * же место чинится один раз, а два сообщения про него только запутали бы.
+ *
+ * **Чем опознаётся «тот же вопрос» — зависит от того, есть ли у него медиа**
+ * (живая проверка, 2026-08-21). Это не оптимизация, а про то, чем вопрос
+ * вообще является:
+ *
+ * - **есть картинка или видео** → опознаётся парой «текст + ответ». У всех
+ *   пяти вопросов фото-темы формулировка дословно одна и та же («Какое
+ *   животное изображено на фотографии?»), потому что вся суть в картинке, а не
+ *   в словах. Сравнивай их по тексту — и свежий вопрос про капибару оказался бы
+ *   «повтором» сыгранного пингвина и был бы забракован намертво, и так каждый
+ *   фото-вопрос в каждом будущем пакете. Различает их ответ;
+ * - **медиа нет** → опознаётся одним текстом. Здесь личность вопроса как раз в
+ *   формулировке, а ответ к ней записывают по-разному: «1939» и «В 1939» — это
+ *   один и тот же сыгранный вопрос, и требовать совпадения ответа значило бы
+ *   пропускать настоящие повторы из-за предлога.
+ *
+ * Переформулированный вопрос про тот же факт при этом не теряется ни в одной из
+ * веток: у него совпадёт ответ, и он придёт мягким предупреждением — ровно как
+ * задумано правилом выше.
  */
 export function findRepeats(
   pack: Pack,
   history: PlayedQuestionRow[],
 ): RepeatReport {
+  // Разделитель — \u0000, а не пробел: нормализованный текст сам состоит из
+  // слов через пробелы, поэтому на пробеле склейка ("а б" + "в") совпала бы
+  // с ("а" + "б в"). Нулевой байт нормализация не пропускает никогда — после
+  // неё остаются только буквы, цифры и пробелы, — так что ложных совпадений
+  // он не даёт.
+  const questionKey = (text: string, answer: string): string =>
+    `${normalizeForCompare(text)}\u0000${normalizeForCompare(answer)}`;
+  // Две раскладки истории, потому что медиа-вопрос и текстовый опознаются
+  // по-разному (см. комментарий к функции). История не помнит, была ли у
+  // сыгранного вопроса картинка, — и это не нужно: ветку выбирает
+  // проверяемый вопрос из нового пакета, а обе раскладки строятся по одним
+  // и тем же строкам.
+  const byTextAndAnswer = new Map<string, PlayedQuestionRow>();
   const byText = new Map<string, PlayedQuestionRow>();
   const byAnswer = new Map<string, PlayedQuestionRow>();
   for (const row of history) {
+    const key = questionKey(row.text, row.answer);
     const text = normalizeForCompare(row.text);
     const answer = normalizeForCompare(row.answer);
+    if (!byTextAndAnswer.has(key)) byTextAndAnswer.set(key, row);
     if (!byText.has(text)) byText.set(text, row);
     if (!byAnswer.has(answer)) byAnswer.set(answer, row);
   }
   const report: RepeatReport = { sameQuestion: [], sameAnswer: [] };
   for (const question of eachQuestion(pack)) {
-    const previousByText = byText.get(normalizeForCompare(question.text));
-    if (previousByText) {
+    const previousByQuestion = question.hasMedia
+      ? byTextAndAnswer.get(questionKey(question.text, question.answer))
+      : byText.get(normalizeForCompare(question.text));
+    if (previousByQuestion) {
       report.sameQuestion.push({
         questionId: question.id,
         text: question.text,
         answer: question.answer,
         previous: {
-          text: previousByText.text,
-          answer: previousByText.answer,
+          text: previousByQuestion.text,
+          answer: previousByQuestion.answer,
         },
       });
       continue;
