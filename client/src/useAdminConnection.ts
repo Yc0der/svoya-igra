@@ -68,6 +68,7 @@ type ServerMessage =
       // ВРЕМЕННО — см. server/src/protocol.ts.
       textRevealEnabled: boolean;
       historyEnabled: boolean;
+      historyRecording: boolean;
     }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   | { type: 'select-pack-error'; reason: 'unknown-file' }
@@ -143,6 +144,10 @@ export interface AdminConnection {
   setTextRevealEnabled(enabled: boolean): void;
   historyEnabled: boolean;
   setHistoryEnabled(enabled: boolean): void;
+  // Правда для чекбокса (server/src/protocol.ts, StateMessage.historyRecording)
+  // — см. комментарий там. Admin.tsx использует его вместо historyEnabled,
+  // когда партия уже идёт.
+  historyRecording: boolean;
   availablePacks: PackSummary[];
   activePackFilename: string | null;
   selectPackError: 'unknown-file' | null;
@@ -205,6 +210,7 @@ export function useAdminConnection(
   // ВРЕМЕННО — см. server/src/protocol.ts.
   const [textRevealEnabled, setTextRevealEnabledState] = useState(true);
   const [historyEnabled, setHistoryEnabledState] = useState(true);
+  const [historyRecording, setHistoryRecordingState] = useState(true);
   const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(
     null,
   );
@@ -254,6 +260,7 @@ export function useAdminConnection(
           setTextRevealWordsPerSecondState(message.textRevealWordsPerSecond);
           setTextRevealEnabledState(message.textRevealEnabled);
           setHistoryEnabledState(message.historyEnabled);
+          setHistoryRecordingState(message.historyRecording);
           setSelectPackError(null);
           setStartGameError(null);
         }
@@ -330,6 +337,7 @@ export function useAdminConnection(
     historyEnabled,
     setHistoryEnabled: (enabled) =>
       send({ type: 'admin-set-history-enabled', enabled }),
+    historyRecording,
     availablePacks,
     activePackFilename,
     selectPackError,

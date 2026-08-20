@@ -64,6 +64,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     setTextRevealEnabled: vi.fn(),
     historyEnabled: true,
     setHistoryEnabled: vi.fn(),
+    historyRecording: true,
     availablePacks: [],
     activePackFilename: null,
     selectPackError: null,
@@ -160,6 +161,36 @@ describe('Admin', () => {
     );
 
     expect(setHistoryEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('не показывает чекбокс включённым, когда партия уже выброшена из истории', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        game: baseGame(),
+        historyEnabled: true,
+        historyRecording: false,
+      }),
+    );
+    render(<Admin />);
+
+    expect(
+      screen.getByLabelText('Записывать эту партию в историю'),
+    ).not.toBeChecked();
+  });
+
+  it('показывает чекбокс включённым до старта партии по historyEnabled', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        game: null,
+        historyEnabled: true,
+        historyRecording: false,
+      }),
+    );
+    render(<Admin />);
+
+    expect(
+      screen.getByLabelText('Записывать эту партию в историю'),
+    ).toBeChecked();
   });
 
   it('shows a message instead of a pack list when none were found', () => {

@@ -12,6 +12,7 @@ import {
 } from './server.js';
 import type { ServerMessage } from './protocol.js';
 import type { Pack } from './pack.js';
+import type { HistoryRecorder } from './history.js';
 import {
   REVEAL_TIMER_MS,
   VOTE_TIMER_MS,
@@ -103,6 +104,7 @@ describe('createServer', () => {
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
       historyEnabled: true,
+      historyRecording: false,
     });
 
     ws.close();
@@ -143,6 +145,7 @@ describe('createServer', () => {
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
       historyEnabled: true,
+      historyRecording: false,
     });
 
     board.close();
@@ -202,6 +205,7 @@ describe('createServer', () => {
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
       historyEnabled: true,
+      historyRecording: false,
     });
 
     const reconnected = new WebSocket(url);
@@ -234,6 +238,7 @@ describe('createServer', () => {
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
       historyEnabled: true,
+      historyRecording: false,
     });
 
     board.close();
@@ -352,6 +357,7 @@ describe('createServer', () => {
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
       historyEnabled: true,
+      historyRecording: false,
     });
 
     other.close();
@@ -406,6 +412,7 @@ describe('createServer', () => {
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
       historyEnabled: true,
+      historyRecording: false,
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -444,6 +451,7 @@ describe('createServer', () => {
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
       historyEnabled: true,
+      historyRecording: false,
     });
 
     board.close();
@@ -508,6 +516,88 @@ describe('createServer', () => {
 
     admin.ws.close();
     board.ws.close();
+  });
+});
+
+// Отдельный describe — предыдущему нужна идущая партия (historyRecording
+// расходится с historyEnabled только пока она идёт, room.ts,
+// Room.isHistoryRecording), а комната describe('createServer', ...) выше
+// собрана без пакета вопросов и партию завести не может (финальное ревью
+// ветки, п. 2).
+describe('createServer history recording honesty', () => {
+  it('historyRecording остаётся честным false после off→on посреди партии, хотя historyEnabled снова true', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-history-honesty-'));
+    let nextId = 1;
+    const fakeHistory: HistoryRecorder = {
+      startGame: () => nextId++,
+      recordQuestion: () => {},
+      finishGame: () => {},
+      discardGame: () => {},
+    };
+    const room = new Room(
+      undefined,
+      TEST_PACK,
+      undefined,
+      'test.json',
+      fakeHistory,
+    );
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    await a.nextMessage();
+    const admin = await connectAdmin(url);
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const [startedAdminState] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+    ])) as { historyEnabled: boolean; historyRecording: boolean }[];
+    // Партия реально пишется сразу после старта — иначе тест ничего не
+    // проверил бы про расхождение off→on ниже.
+    expect(startedAdminState.historyRecording).toBe(true);
+
+    // Выключение посреди партии обнуляет historyGameId и потому шлёт ДВЕ
+    // рассылки состояния — через onChange (историю обязан пережить снапшот,
+    // финальное ревью ветки, п. 1) и через onHistoryEnabledChange (тумблер).
+    // Обе несут уже полностью применённое состояние, поэтому просто съедаем
+    // обе, не проверяя промежуточную.
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-history-enabled', enabled: false }),
+    );
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+
+    // Обратное включение не трогает historyGameId (обратной операции нет) —
+    // только одна рассылка, через onHistoryEnabledChange.
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-history-enabled', enabled: true }),
+    );
+    const [adminState] = (await Promise.all([
+      admin.nextMessage(),
+      a.nextMessage(),
+      b.nextMessage(),
+    ])) as { historyEnabled: boolean; historyRecording: boolean }[];
+
+    expect(adminState.historyEnabled).toBe(true);
+    expect(adminState.historyRecording).toBe(false);
+
+    a.ws.close();
+    b.ws.close();
+    admin.ws.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
+    await rm(dir, { recursive: true, force: true });
   });
 });
 
@@ -585,6 +675,7 @@ describe('createServer heartbeat', () => {
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
       historyEnabled: true,
+      historyRecording: false,
     });
 
     board.close();

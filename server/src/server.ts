@@ -132,6 +132,7 @@ export function createServer(options: CreateServerOptions): GameServer {
       // ВРЕМЕННО — см. Room.textRevealEnabled.
       textRevealEnabled: room.getTextRevealEnabled(),
       historyEnabled: room.getHistoryEnabled(),
+      historyRecording: room.isHistoryRecording(),
     };
   };
 
