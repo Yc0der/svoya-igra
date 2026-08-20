@@ -7,6 +7,8 @@
 // проверяет ФОРМАТ, а пакет с повтором формально валиден — и валидатор должен
 // оставаться пригодным на машине, где базы истории нет вовсе.
 import { readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { GameHistory, findRepeats } from '../src/history.js';
 import { validatePack } from '../src/pack.js';
 
@@ -28,7 +30,12 @@ try {
   process.exit(1);
 }
 
-const historyPath = process.env.HISTORY_PATH ?? '../game-history.db';
+// Резолвится от import.meta.url, а не от cwd — см. комментарий у того же
+// дефолта в history-recent.ts / server/src/index.ts (финальное ревью
+// ветки, п. 4).
+const historyPath =
+  process.env.HISTORY_PATH ??
+  join(dirname(fileURLToPath(import.meta.url)), '../../game-history.db');
 let history: GameHistory;
 try {
   history = new GameHistory(historyPath);

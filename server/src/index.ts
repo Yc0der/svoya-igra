@@ -13,7 +13,17 @@ import { GameHistory } from './history.js';
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
 const PACK_PATH = process.env.PACK_PATH ?? './packs/current.json';
-const HISTORY_PATH = process.env.HISTORY_PATH ?? './game-history.db';
+// Резолвится от import.meta.url, а не от cwd (тем же приёмом, что и
+// CLIENT_DIST_PATH ниже) — иначе дефолт молча разъезжается с тем, что
+// использует server/scripts/*.ts (те запускаются из server/, а не из
+// корня): GameHistory создаёт файл базы, если его нет, поэтому запуск не
+// из того каталога не падает с ошибкой, а тихо открывает пустую базу
+// рядом (финальное ревью ветки, п. 4). server/src/*.ts (dev через tsx),
+// server/dist/*.js (собранный) и server/scripts/*.ts лежат на одной
+// глубине относительно корня репозитория, так что путь '../../' общий.
+const HISTORY_PATH =
+  process.env.HISTORY_PATH ??
+  join(dirname(fileURLToPath(import.meta.url)), '../../game-history.db');
 const LAN_HOST_CONFIG_PATH =
   process.env.LAN_HOST_CONFIG_PATH ?? './lan-host.local.json';
 const PROFILE_PATH =
