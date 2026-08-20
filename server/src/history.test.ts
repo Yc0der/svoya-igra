@@ -138,6 +138,61 @@ describe('GameHistory', () => {
   });
 });
 
+describe('GameHistory.recentPlayed', () => {
+  // Хелпер заводит партию и сразу пишет в неё один вопрос с заданным
+  // questionId — по questionId в тестах видно, из какой по счёту партии
+  // строка, без сверки по gameId напрямую.
+  function startGameWithQuestion(
+    history: GameHistory,
+    questionId: string,
+  ): number {
+    const id = history.startGame({
+      startedAt: '2026-08-20T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [],
+    })!;
+    history.recordQuestion(id, { ...QUESTION, questionId });
+    return id;
+  }
+
+  it('партий больше лимита — возвращает вопросы только последних gameLimit партий', () => {
+    const history = makeHistory();
+    startGameWithQuestion(history, 'q1');
+    startGameWithQuestion(history, 'q2');
+    startGameWithQuestion(history, 'q3');
+
+    const rows = history.recentPlayed(2);
+
+    // Ровно две последние заведённые партии, не любые две — так тест ловит и
+    // перепутанное направление ORDER BY (ASC вместо DESC вернул бы q1, q2), и
+    // off-by-one в LIMIT.
+    expect(rows.map((r) => r.questionId).sort()).toEqual(['q2', 'q3']);
+  });
+
+  it('партий меньше лимита — возвращает вопросы всех партий', () => {
+    const history = makeHistory();
+    startGameWithQuestion(history, 'q1');
+    startGameWithQuestion(history, 'q2');
+
+    const rows = history.recentPlayed(5);
+    expect(rows.map((r) => r.questionId).sort()).toEqual(['q1', 'q2']);
+  });
+
+  it('на пустой базе возвращает пустой массив', () => {
+    const history = makeHistory();
+    expect(history.recentPlayed(5)).toEqual([]);
+  });
+
+  it('не роняет вызов, когда база недоступна', () => {
+    const history = makeHistory();
+    startGameWithQuestion(history, 'q1');
+    history.close();
+    expect(() => history.recentPlayed(5)).not.toThrow();
+    expect(history.recentPlayed(5)).toEqual([]);
+  });
+});
+
 import { formatRecentWindow, type PlayedQuestionRow } from './history.js';
 
 const row = (
