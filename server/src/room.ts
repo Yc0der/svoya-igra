@@ -1116,6 +1116,14 @@ export class Room {
     const roundIndexBefore = this.game.roundIndex;
     const scoresBefore = this.game.scores;
     const hostIdBefore = this.game.hostId;
+    // Выигрышная ставка аукциона на момент ДО этого dispatch. Захватывается
+    // здесь же, рядом со scoresBefore/hostIdBefore, а не читается из state
+    // ПОСЛЕ reduce() — resolveVote()/afterBidOrPass() в движке успевают
+    // сбросить auctionHighestBid обратно в 0 в том же самом вызове reduce(),
+    // где вопрос закрывается (engine.ts, resetAuctionFields). recordPlayedQuestion
+    // ниже пишет её как настоящую цену вопроса-аукциона (design.md,
+    // 2026-08-20-game-history-design.md, «Схема»).
+    const auctionHighestBidBefore = this.game.auctionHighestBid;
     // Голоса из состояния «до» ПЛЮС текущее событие, если это голос. При
     // нынешней семантике движка (engine.ts::handleVote) это НИКОГДА не
     // меняет итог: 'vote' резолвит вопрос синхронно только когда
@@ -1181,6 +1189,7 @@ export class Room {
         hostIdBefore,
         votesAtResolution,
         buzzedBefore,
+        auctionHighestBidBefore,
       );
     }
     if (phaseBefore !== 'final-reveal' && state.phase === 'final-reveal') {
@@ -1294,6 +1303,7 @@ export class Room {
     hostIdBefore: string | null,
     votes: Record<string, boolean>,
     buzzedBefore: string | null,
+    auctionHighestBidBefore: number,
   ): void {
     if (this.historyGameId === null || !questionBefore) return;
     const gameId = this.historyGameId;
@@ -1315,15 +1325,37 @@ export class Room {
         ? 0
         : (state.scores[buzzedBefore] ?? 0) - (scoresBefore[buzzedBefore] ?? 0);
     const voteValues = Object.values(votes);
+    // У аукциона номинал пакета (question.price) не был реальной ценой ни
+    // секунды: игроки торгуются, и в счёт попадает выигравшая ставка, а не
+    // номинал (docs/ideas.md, «Память и обучение генератора» — неявные
+    // сигналы читаются только в паре с ценой, и эта пара обязана быть
+    // честной). resolveVote() в движке начисляет/списывает у отвечавшего
+    // именно auctionHighestBid, а не question.price — история пишет то же
+    // число.
+    //
+    // Вырожденный случай: если аукцион закрылся без единой ставки (все
+    // счётчики спасовали по кругу, не сделав хода — engine.ts,
+    // afterBidOrPass(), active.length === 0), auctionHighestBidBefore
+    // остаётся 0 — это не цена, а просто «никто не платил». Ноль в колонке
+    // price увёл бы генератор в ложный вывод «вопрос ничего не стоил»,
+    // поэтому в этом случае пишется номинал пакета — так же, как для
+    // обычного вопроса.
+    const price =
+      question.type === 'аукцион'
+        ? auctionHighestBidBefore > 0
+          ? auctionHighestBidBefore
+          : question.price
+        : question.price;
     const row: PlayedQuestionInput = {
       questionId: question.id,
       roundIndex: roundIndexBefore,
       themeName,
-      price: question.price,
+      price,
       type: question.type,
       text: question.text,
       answer: question.answer,
       answeredBy: buzzedBefore === null ? null : this.nameOf(buzzedBefore),
+      answeredByCounterId: buzzedBefore,
       correct: buzzedBefore === null || delta === 0 ? null : delta > 0,
       // Спорным считается несогласие голосующих между собой. При ведущем
       // голосования нет вовсе — тогда null, а не false: «не было спора» и
@@ -1356,6 +1388,7 @@ export class Room {
       text: theme.question.text,
       answer: theme.question.answer,
       answeredBy: null,
+      answeredByCounterId: null,
       correct: null,
       contested: null,
     });

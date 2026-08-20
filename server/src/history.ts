@@ -14,18 +14,19 @@ CREATE TABLE IF NOT EXISTS games (
   final_scores  TEXT
 );
 CREATE TABLE IF NOT EXISTS played_questions (
-  id          INTEGER PRIMARY KEY,
-  game_id     INTEGER NOT NULL REFERENCES games(id),
-  question_id TEXT NOT NULL,
-  round_index INTEGER NOT NULL,
-  theme_name  TEXT NOT NULL,
-  price       INTEGER NOT NULL,
-  type        TEXT NOT NULL,
-  text        TEXT NOT NULL,
-  answer      TEXT NOT NULL,
-  answered_by TEXT,
-  correct     INTEGER,
-  contested   INTEGER
+  id                    INTEGER PRIMARY KEY,
+  game_id               INTEGER NOT NULL REFERENCES games(id),
+  question_id           TEXT NOT NULL,
+  round_index           INTEGER NOT NULL,
+  theme_name            TEXT NOT NULL,
+  price                 INTEGER NOT NULL,
+  type                  TEXT NOT NULL,
+  text                  TEXT NOT NULL,
+  answer                TEXT NOT NULL,
+  answered_by           TEXT,
+  answered_by_counter_id TEXT,
+  correct               INTEGER,
+  contested             INTEGER
 );
 `;
 
@@ -54,6 +55,12 @@ export interface PlayedQuestionInput {
   text: string;
   answer: string;
   answeredBy: string | null;
+  // Тот же отвечавший, что и answeredBy, но по counterId, а не по имени.
+  // Имя остаётся отдельным полем — оно человекочитаемо и переживает смену
+  // id, а counterId нужен, чтобы связать «кто отвечал» с games.participants
+  // и games.final_scores без сопоставления строк по имени (design.md,
+  // 2026-08-20-game-history-design.md). NULL там же, где и answeredBy.
+  answeredByCounterId: string | null;
   correct: boolean | null;
   contested: boolean | null;
 }
@@ -121,6 +128,7 @@ function mapPlayedQuestionRow(row: Record<string, unknown>): PlayedQuestionRow {
     text: row.text as string,
     answer: row.answer as string,
     answeredBy: (row.answered_by as string | null) ?? null,
+    answeredByCounterId: (row.answered_by_counter_id as string | null) ?? null,
     correct: toBool(row.correct),
     contested: toBool(row.contested),
   };
@@ -168,8 +176,9 @@ export class GameHistory implements HistoryRecorder {
         .prepare(
           `INSERT INTO played_questions
              (game_id, question_id, round_index, theme_name, price, type,
-              text, answer, answered_by, correct, contested)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              text, answer, answered_by, answered_by_counter_id, correct,
+              contested)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           gameId,
@@ -181,6 +190,7 @@ export class GameHistory implements HistoryRecorder {
           row.text,
           row.answer,
           row.answeredBy,
+          row.answeredByCounterId,
           toInt(row.correct),
           toInt(row.contested),
         );

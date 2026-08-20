@@ -30,6 +30,7 @@ const QUESTION = {
   text: 'Столица Австралии?',
   answer: 'Канберра',
   answeredBy: 'Ваня',
+  answeredByCounterId: 'p1',
   correct: true,
   contested: false,
 };
@@ -79,11 +80,13 @@ describe('GameHistory', () => {
     history.recordQuestion(id, {
       ...QUESTION,
       answeredBy: null,
+      answeredByCounterId: null,
       correct: null,
       contested: null,
     });
     const [row] = history.allPlayedQuestions();
     expect(row.answeredBy).toBeNull();
+    expect(row.answeredByCounterId).toBeNull();
     expect(row.correct).toBeNull();
     expect(row.contested).toBeNull();
   });
@@ -234,6 +237,7 @@ const row = (
   text: 'вопрос',
   answer,
   answeredBy: null,
+  answeredByCounterId: null,
   correct: null,
   contested: null,
 });

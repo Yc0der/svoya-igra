@@ -121,20 +121,33 @@ CREATE TABLE games (
 );
 
 CREATE TABLE played_questions (
-  id          INTEGER PRIMARY KEY,
-  game_id     INTEGER NOT NULL REFERENCES games(id),
-  question_id TEXT NOT NULL,        -- id внутри пакета
-  round_index INTEGER NOT NULL,
-  theme_name  TEXT NOT NULL,
-  price       INTEGER NOT NULL,
-  type        TEXT NOT NULL,        -- обычный / кот / аукцион
-  text        TEXT NOT NULL,
-  answer      TEXT NOT NULL,
-  answered_by TEXT,                 -- имя счётчика; NULL — никто не взял
-  correct     INTEGER,              -- 0/1; NULL — никто не отвечал
-  contested   INTEGER               -- 0/1; NULL — судил ведущий, голосования не было
+  id                     INTEGER PRIMARY KEY,
+  game_id                INTEGER NOT NULL REFERENCES games(id),
+  question_id            TEXT NOT NULL,        -- id внутри пакета
+  round_index            INTEGER NOT NULL,
+  theme_name             TEXT NOT NULL,
+  price                  INTEGER NOT NULL,     -- см. «Цена вопроса-аукциона» ниже
+  type                   TEXT NOT NULL,        -- обычный / кот / аукцион
+  text                   TEXT NOT NULL,
+  answer                 TEXT NOT NULL,
+  answered_by            TEXT,                 -- имя счётчика; NULL — никто не взял
+  answered_by_counter_id TEXT,                 -- его counterId; NULL там же, где и имя
+  correct                INTEGER,              -- 0/1; NULL — никто не отвечал
+  contested              INTEGER               -- 0/1; NULL — судил ведущий, голосования не было
 );
 ```
+
+**Цена вопроса-аукциона.** Для `type = 'аукцион'` в `price` пишется не номинал пакета, а
+выигравшая ставка: у вопроса-аукциона номинал теряет смысл в момент разыгрывания — в счёт
+попадает именно ставка, и знак изменения счёта (`correct`) описывает событие вокруг именно
+этого числа. Если ставок не было вовсе (весь круг торгов прошёл пасами), пишется номинал
+пакета — ноль в этой колонке был бы неотличим от «вопрос ничего не стоил» и увёл бы генератор
+в ложный вывод. Для обычного вопроса и «кота» `price` — это номинал пакета, как и раньше.
+
+**`answered_by_counter_id`** добавлен рядом с `answered_by`, а не вместо него: имя
+человекочитаемо и переживает смену id, а counterId нужен, чтобы связать «кто отвечал» с
+`games.participants` и `games.final_scores` напрямую, без сопоставления строк по имени
+(которое меняется, повторяется и вводится с опечатками).
 
 Схема создаётся при первом обращении, если её ещё нет. Отдельного шага установки нет.
 

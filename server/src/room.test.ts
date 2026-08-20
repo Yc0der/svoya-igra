@@ -2908,6 +2908,100 @@ describe('Room: история партий', () => {
   });
 });
 
+// Двое счётчиков, партия уже идёт по AUCTION_PACK, историю пишет переданный
+// рекордер — тем же приёмом обхода Room.startGame(), что и в
+// threeCounterNoHostRoom() выше (там ради состава игроков, здесь ради
+// заведомо ненулевых очков: handlePlaceBid отклоняет ставку выше
+// собственного счёта, а startGame() всегда начинает партию с нулей).
+function auctionRoomWithHistory(history?: HistoryRecorder): {
+  room: Room;
+  vanya: string;
+  katya: string;
+} {
+  const lobby = new Room(undefined, AUCTION_PACK);
+  const vanya = joinedId(lobby, 'Ваня');
+  const katya = joinedId(lobby, 'Катя');
+  const game = createInitialState(AUCTION_PACK, [vanya, katya], null);
+  game.scores = { [vanya]: 1000, [katya]: 1000 };
+  const state: RoomState = {
+    participants: lobby.getState().participants,
+    game,
+    hostParticipantId: null,
+    historyGameId: 1,
+  };
+  const room = new Room(
+    state,
+    AUCTION_PACK,
+    undefined,
+    'auction-test.json',
+    history,
+  );
+  return { room, vanya, katya };
+}
+
+describe('Room: история партий — цена вопроса-аукциона', () => {
+  it('пишет выигравшую ставку, а не номинал пакета', () => {
+    const history = fakeHistory();
+    const { room, vanya, katya } = auctionRoomWithHistory(history);
+    const picker = pickerOf(room);
+    const other = picker === vanya ? katya : vanya;
+
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'auc1');
+      room.placeBid(picker, 150); // выше номинала пакета (100)
+      room.passBid(other);
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      room.vote(other, true);
+      vi.advanceTimersByTime(VOTE_TIMER_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(history.questions).toHaveLength(1);
+    expect(history.questions[0].row).toMatchObject({
+      questionId: 'auc1',
+      type: 'аукцион',
+      price: 150, // выигравшая ставка, номинал (100) в неё не попадает
+      answeredByCounterId: picker,
+      correct: true,
+    });
+  });
+
+  // Вырожденный случай (design.md, «Схема»): весь круг торгов проходит без
+  // единой ставки — это достижимо, пас разрешён на любом ходу, включая
+  // самый первый (handlePassBid не требует предварительной ставки). Тогда
+  // auctionHighestBid остаётся 0 всю дорогу, и в price должен попасть
+  // номинал пакета, а не бессмысленный ноль.
+  it('пишет номинал пакета, если аукцион закрылся без единой ставки', () => {
+    const history = fakeHistory();
+    const { room, vanya, katya } = auctionRoomWithHistory(history);
+    const picker = pickerOf(room);
+    const other = picker === vanya ? katya : vanya;
+
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'auc1');
+      expect(room.toGameStateView()?.phase).toBe('auction-bidding');
+      room.passBid(picker);
+      room.passBid(other);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(history.questions).toHaveLength(1);
+    expect(history.questions[0].row).toMatchObject({
+      questionId: 'auc1',
+      type: 'аукцион',
+      price: 100, // номинал — ставок не было вовсе
+      answeredByCounterId: null,
+      correct: null,
+    });
+  });
+});
+
 describe('Room: история финала и итога партии', () => {
   // Финал и завершение партии — единственные два места, где Room ходит в
   // историю не через recordPlayedQuestion (тот реагирует на рост
