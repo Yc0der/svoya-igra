@@ -10,6 +10,7 @@ import {
   MEDIA_TIMER_MS,
   TEXT_REVEAL_MIN_MS,
   VOTE_TIMER_MS,
+  FINAL_REVEAL_TIMER_MS,
 } from './engine.js';
 import type {
   HistoryRecorder,
@@ -2640,6 +2641,13 @@ function playQuestionToTimeout(room: Room): void {
 // то есть contested по построению всегда false, никогда true).
 // historyGameId проставлен вручную — так, будто Room.startGame() уже
 // сходил в историю до того, как состояние оказалось на диске/в памяти.
+//
+// Важно: это состояние Room.startGame() сегодня в принципе не создаёт (трое
+// и больше без ведущего отвергаются им же) — тест существует не как
+// описание реального игрового пути, а чтобы зафиксировать контракт поля
+// contested на будущее. Живой партией сегодня contested: true недостижим
+// вовсе (docs/ideas.md, «Память и обучение генератора» — заметка про
+// недостижимость спорного голосования, добавлена по итогам этого разбора).
 function threeCounterNoHostRoom(history?: HistoryRecorder): {
   room: Room;
   ids: [string, string, string];
@@ -2860,5 +2868,165 @@ describe('Room: история партий', () => {
     room.startGame('requester');
     expect(() => playQuestionToTimeout(room)).not.toThrow();
     expect(room.getState().historyGameId).toBeNull();
+  });
+
+  // Регрессия финального ревью ветки, п. 1: setHistoryEnabled(false) посреди
+  // партии обнуляет historyGameId в памяти, но раньше не звал this.notify() —
+  // а на диск снапшот пишется только по room.onChange (index.ts). Партия,
+  // выключенная так, на диске оставалась записанной как идущая; после
+  // перезапуска сервера посреди неё запись вопросов пошла бы по FK в уже
+  // удалённую строку games. onChange — единственный канал, которым Room
+  // сообщает наружу «состояние изменилось», поэтому тест бьёт именно по нему,
+  // а не по getState() (тот отдаёт текущее состояние всегда одинаково честно,
+  // от notify() не зависит, и бага бы не поймал).
+  it('уведомляет onChange-слушателей (и значит доезжает до снапшота), когда тумблер выключают посреди партии', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const seen: RoomState[] = [];
+    room.onChange((state) => seen.push(state));
+
+    room.setHistoryEnabled(false);
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.at(-1)?.historyGameId).toBeNull();
+  });
+
+  it('isHistoryRecording отражает историю строго по historyGameId, не по historyEnabled', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    expect(room.isHistoryRecording()).toBe(false); // лобби, партии ещё нет
+
+    room.startGame('requester');
+    expect(room.isHistoryRecording()).toBe(true);
+
+    room.setHistoryEnabled(false);
+    expect(room.isHistoryRecording()).toBe(false);
+
+    room.setHistoryEnabled(true); // обратной операции нет — запись не возобновляется
+    expect(room.isHistoryRecording()).toBe(false);
+  });
+});
+
+describe('Room: история финала и итога партии', () => {
+  // Финал и завершение партии — единственные два места, где Room ходит в
+  // историю не через recordPlayedQuestion (тот реагирует на рост
+  // answeredQuestionIds, а финальный вопрос вообще не из сетки раундов).
+  // Прогоняет FINAL_PACK (см. `describe('Room final round', ...)` выше)
+  // вплоть до final-reveal тем же путём, что driveToFinalWager +
+  // finalVote-тесты там — здесь не переиспользуется напрямую, потому что
+  // тем функциям неоткуда взять history (финальное ревью ветки, п. 5).
+  function playFinalPackToFinalReveal(room: Room): {
+    picker: string;
+    other: string;
+    host: string;
+  } {
+    room.join('A');
+    room.join('B');
+    room.join('C');
+    const [a, b, host] = room.getState().participants.map((p) => p.id);
+    room.toggleHost(host);
+    room.startGame(host);
+    const picker = room.getState().game?.turnCounterId === a ? a : b;
+    const other = picker === a ? b : a;
+    room.selectQuestion(picker, 0, 'q1');
+    vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+    room.buzz(picker);
+    room.saidAnswer(picker);
+    room.vote(host, true); // судейство с ведущим — решает сразу
+    vi.advanceTimersByTime(REVEAL_TIMER_MS);
+    room.eliminateFinalTheme(other, 0); // выбывает 'Финал A', играется 'Финал B'
+    room.submitWager(picker, 50);
+    room.submitWager(other, 0);
+    room.submitFinalAnswer(picker, 'ответ picker');
+    room.submitFinalAnswer(other, 'ответ other');
+    room.finalVote(host, picker, true);
+    room.finalVote(host, other, false);
+    return { picker, other, host };
+  }
+
+  function driveToFinalReveal(history?: HistoryRecorder): {
+    room: Room;
+    picker: string;
+    other: string;
+    host: string;
+  } {
+    const room = new Room(
+      undefined,
+      FINAL_PACK,
+      undefined,
+      'final-test.json',
+      history,
+    );
+    const { picker, other, host } = playFinalPackToFinalReveal(room);
+    return { room, picker, other, host };
+  }
+
+  it('записывает финальный вопрос при переходе в final-reveal', () => {
+    vi.useFakeTimers();
+    try {
+      const history = fakeHistory();
+      const { room } = driveToFinalReveal(history);
+
+      expect(room.getState().game?.phase).toBe('final-reveal');
+      expect(history.questions).toHaveLength(2); // обычный q1 + финал
+      const finalRow = history.questions.find(
+        (q) => q.row.type === 'финал',
+      )!.row;
+      expect(finalRow).toMatchObject({
+        questionId: 'f2',
+        roundIndex: -1,
+        themeName: 'Финал B',
+        price: 0,
+        type: 'финал',
+        text: 'F2?',
+        answer: 'ответ f2',
+        answeredBy: null,
+        correct: null,
+        contested: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('не пишет финальный вопрос, когда тумблер выключен', () => {
+    vi.useFakeTimers();
+    try {
+      const history = fakeHistory();
+      const room = new Room(
+        undefined,
+        FINAL_PACK,
+        undefined,
+        'final-test.json',
+        history,
+      );
+      room.setHistoryEnabled(false);
+
+      playFinalPackToFinalReveal(room);
+
+      expect(room.getState().game?.phase).toBe('final-reveal');
+      expect(history.questions).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('записывает итоговый счёт при переходе в game-end', () => {
+    vi.useFakeTimers();
+    try {
+      const history = fakeHistory();
+      const { room } = driveToFinalReveal(history);
+      const gameId = room.getState().historyGameId!;
+
+      vi.advanceTimersByTime(FINAL_REVEAL_TIMER_MS);
+
+      expect(room.getState().game?.phase).toBe('game-end');
+      expect(history.finished).toHaveLength(1);
+      expect(history.finished[0].gameId).toBe(gameId);
+      expect(history.finished[0].scores).toEqual(room.getState().game?.scores);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -114,6 +114,63 @@ const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   'final-reveal': { timer: 'final-reveal', ms: FINAL_REVEAL_TIMER_MS },
 };
 
+// Единая точка отказоустойчивости для рекордера истории (design.md,
+// «Отказы не ломают партию»). Строится ОДИН раз в конструкторе Room —
+// дальше все вызовы this.history.* внутри класса прямые, без try/catch и
+// без локальных const-копий ради обхода TS-narrowing по `this`, которые
+// раньше приходилось заводить в четырёх местах отдельно (startHistoryGame,
+// safeHistoryCall и три вызова через него). Без переданного рекордера
+// (тесты без истории, ранние стадии main()) подставляется no-op — тогда
+// вызывающему коду не нужно помнить о `this.history?.`.
+function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
+  const target: HistoryRecorder = recorder ?? {
+    startGame: () => null,
+    recordQuestion: () => {},
+    finishGame: () => {},
+    discardGame: () => {},
+  };
+  return {
+    startGame(input) {
+      try {
+        return target.startGame(input);
+      } catch (err) {
+        console.error('История: рекордер бросил исключение (startGame) —', err);
+        return null;
+      }
+    },
+    recordQuestion(gameId, row) {
+      try {
+        target.recordQuestion(gameId, row);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (recordQuestion) —',
+          err,
+        );
+      }
+    },
+    finishGame(gameId, finalScores) {
+      try {
+        target.finishGame(gameId, finalScores);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (finishGame) —',
+          err,
+        );
+      }
+    },
+    discardGame(gameId) {
+      try {
+        target.discardGame(gameId);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (discardGame) —',
+          err,
+        );
+      }
+    },
+  };
+}
+
 // Сколько секунд ответивший неверно не может нажать повторно — не игровое
 // правило движка (тот вообще не знает, кто и когда переоткрыл вопрос), а
 // транспортное ограничение Комнаты, тем же паттерном, что и фальстарт
@@ -197,7 +254,10 @@ export class Room {
   // ли прямо сейчас» — выключение выбрасывает уже записанное.
   private historyEnabled = true;
   private historyEnabledListeners = new Set<(enabled: boolean) => void>();
-  private history?: HistoryRecorder;
+  // Всегда определён (wrapHistoryRecorder подставляет no-op вместо
+  // отсутствующего аргумента конструктора) — тело класса дальше вызывает
+  // this.history.* напрямую, без `?.`.
+  private history: HistoryRecorder;
   private historyGameId: number | null;
 
   constructor(
@@ -216,7 +276,7 @@ export class Room {
     this.lanCandidates = lan?.candidates ?? [];
     this.lanAddress = lan?.address ?? null;
     this.activePackFilename = initialPackFilename ?? null;
-    this.history = history;
+    this.history = wrapHistoryRecorder(history);
     this.historyGameId = initial?.historyGameId ?? null;
     if (this.game) {
       const restart = PHASE_TIMER[this.game.phase];
@@ -343,34 +403,19 @@ export class Room {
     this.clearGraceExclusion();
     const counterIds = counters.map((p) => p.id);
     this.game = createInitialState(this.pack, counterIds, hostId);
-    this.historyGameId =
-      this.historyEnabled && this.history
-        ? this.startHistoryGame(this.pack, counters)
-        : null;
+    this.historyGameId = this.historyEnabled
+      ? this.history.startGame({
+          startedAt: new Date().toISOString(),
+          packFilename: this.activePackFilename ?? 'неизвестный-пакет',
+          packTitle: this.pack.title,
+          participants: counters.map((p) => ({
+            counterId: p.id,
+            name: p.name,
+          })),
+        })
+      : null;
     this.notify();
     return { ok: true };
-  }
-
-  // Обёртка над HistoryRecorder.startGame() — см. safeHistoryCall() ниже.
-  // Отдельный метод, а не встроенный try/catch в startGame(), из-за
-  // возвращаемого значения: startGame() внутри try нужно вернуть наружу
-  // (id новой строки), а не просто выполнить и забыть, как остальные три
-  // вызова рекордера.
-  private startHistoryGame(pack: Pack, counters: Participant[]): number | null {
-    try {
-      return this.history!.startGame({
-        startedAt: new Date().toISOString(),
-        packFilename: this.activePackFilename ?? 'неизвестный-пакет',
-        packTitle: pack.title,
-        participants: counters.map((p) => ({
-          counterId: p.id,
-          name: p.name,
-        })),
-      });
-    } catch (err) {
-      console.error('История: рекордер бросил исключение (startGame) —', err);
-      return null;
-    }
   }
 
   // Отбрасывает текущую партию (в том числе восстановленную из снапшота
@@ -750,6 +795,17 @@ export class Room {
     return this.historyEnabled;
   }
 
+  // Правда о том, пишется ли ПРЯМО СЕЙЧАС конкретно идущая партия — в
+  // отличие от historyEnabled (намерение на партию, которая начнётся
+  // дальше), эти два расходятся именно после off→on посреди партии:
+  // historyEnabled снова true, а historyGameId уже null (обратной операции
+  // нет — см. комментарий у setHistoryEnabled). Админка (Admin.tsx) сверяет
+  // чекбокс с этим полем, а не только с historyEnabled, чтобы не показывать
+  // партию записываемой, когда она уже окончательно выброшена.
+  isHistoryRecording(): boolean {
+    return this.historyGameId !== null;
+  }
+
   // Выключение не просто останавливает запись, а выбрасывает уже записанное
   // этой партией: тумблер отвечает на вопрос «эта партия в истории?».
   // Обратной операции нет — historyGameId обнуляется вместе с удалением, так
@@ -758,11 +814,16 @@ export class Room {
   setHistoryEnabled(enabled: boolean): void {
     this.historyEnabled = enabled;
     if (!enabled && this.historyGameId !== null) {
-      const gameId = this.historyGameId;
+      this.history.discardGame(this.historyGameId);
       this.historyGameId = null;
-      this.safeHistoryCall('discardGame', () =>
-        this.history?.discardGame(gameId),
-      );
+      // historyGameId — часть RoomState, а на диск снапшот пишется по
+      // onChange (index.ts), не по onHistoryEnabledChange. Без notify()
+      // здесь обнуление строкой выше не доезжает до снапшота: переживший
+      // перезапуск сервера снапшот всё ещё указывает на партию, которую
+      // history.ts уже удалила, и первая же запись следующего вопроса
+      // пойдёт по FK в несуществующую строку games и молча провалится
+      // (финальное ревью ветки, п. 1).
+      this.notify();
     }
     for (const listener of this.historyEnabledListeners) {
       listener(this.historyEnabled);
@@ -772,25 +833,6 @@ export class Room {
   onHistoryEnabledChange(listener: (enabled: boolean) => void): () => void {
     this.historyEnabledListeners.add(listener);
     return () => this.historyEnabledListeners.delete(listener);
-  }
-
-  // Единая точка входа для всех вызовов HistoryRecorder, кроме startGame()
-  // (см. startHistoryGame() — там нужен возврат значения). Отказы истории
-  // не должны ронять партию (design.md, «Отказы не ломают партию»):
-  // GameHistory сама глотает собственные ошибки, но Room работает с
-  // произвольным HistoryRecorder — тесты подставляют фейки, а будущая
-  // реализация может повести себя иначе, — и не вправе полагаться на
-  // добросовестность каждой конкретной реализации. Без этой обёртки
-  // исключение из dispatch()/startGame()/setHistoryEnabled() уронило бы
-  // процесс целиком (в проекте нет глобального unhandledRejection/
-  // uncaughtException) либо, как минимум, оборвало бы функцию ДО
-  // this.notify() — клиенты не узнали бы об уже случившемся ходе.
-  private safeHistoryCall(action: string, fn: () => void): void {
-    try {
-      fn();
-    } catch (err) {
-      console.error(`История: рекордер бросил исключение (${action}) —`, err);
-    }
   }
 
   private isHostOrAdmin(requesterId: string | null): boolean {
@@ -1144,13 +1186,12 @@ export class Room {
     if (phaseBefore !== 'final-reveal' && state.phase === 'final-reveal') {
       this.recordFinalQuestion(state);
     }
-    if (phaseBefore !== 'game-end' && state.phase === 'game-end') {
-      if (this.historyGameId !== null) {
-        const gameId = this.historyGameId;
-        this.safeHistoryCall('finishGame', () =>
-          this.history?.finishGame(gameId, state.scores),
-        );
-      }
+    if (
+      phaseBefore !== 'game-end' &&
+      state.phase === 'game-end' &&
+      this.historyGameId !== null
+    ) {
+      this.history.finishGame(this.historyGameId, state.scores);
     }
     this.notify();
   }
@@ -1254,9 +1295,8 @@ export class Room {
     votes: Record<string, boolean>,
     buzzedBefore: string | null,
   ): void {
-    if (this.historyGameId === null || !this.history || !questionBefore) return;
+    if (this.historyGameId === null || !questionBefore) return;
     const gameId = this.historyGameId;
-    const recorder = this.history;
     const question = findQuestion(
       state.pack,
       roundIndexBefore,
@@ -1293,9 +1333,7 @@ export class Room {
           ? null
           : voteValues.some((v) => v !== voteValues[0]),
     };
-    this.safeHistoryCall('recordQuestion', () =>
-      recorder.recordQuestion(gameId, row),
-    );
+    this.history.recordQuestion(gameId, row);
   }
 
   // Финальный вопрос не проходит через answeredQuestionIds — он вообще не из
@@ -1303,27 +1341,24 @@ export class Room {
   // персональных полей у строки нет: для антиповтора важны текст и ответ, а
   // разбор вердиктов по игрокам — это уже слайс B/D.
   private recordFinalQuestion(state: EngineState): void {
-    if (this.historyGameId === null || !this.history) return;
+    if (this.historyGameId === null) return;
     const gameId = this.historyGameId;
-    const recorder = this.history;
     const themeIndex = state.finalThemeIndex;
     if (themeIndex === null) return;
     const theme = state.pack.final?.themes[themeIndex];
     if (!theme) return;
-    this.safeHistoryCall('recordQuestion', () =>
-      recorder.recordQuestion(gameId, {
-        questionId: theme.question.id,
-        roundIndex: -1,
-        themeName: theme.name,
-        price: 0,
-        type: 'финал',
-        text: theme.question.text,
-        answer: theme.question.answer,
-        answeredBy: null,
-        correct: null,
-        contested: null,
-      }),
-    );
+    this.history.recordQuestion(gameId, {
+      questionId: theme.question.id,
+      roundIndex: -1,
+      themeName: theme.name,
+      price: 0,
+      type: 'финал',
+      text: theme.question.text,
+      answer: theme.question.answer,
+      answeredBy: null,
+      correct: null,
+      contested: null,
+    });
   }
 
   private nameOf(participantId: string): string | null {
