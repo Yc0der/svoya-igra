@@ -345,18 +345,32 @@ export class Room {
     this.game = createInitialState(this.pack, counterIds, hostId);
     this.historyGameId =
       this.historyEnabled && this.history
-        ? this.history.startGame({
-            startedAt: new Date().toISOString(),
-            packFilename: this.activePackFilename ?? 'неизвестный-пакет',
-            packTitle: this.pack.title,
-            participants: counters.map((p) => ({
-              counterId: p.id,
-              name: p.name,
-            })),
-          })
+        ? this.startHistoryGame(this.pack, counters)
         : null;
     this.notify();
     return { ok: true };
+  }
+
+  // Обёртка над HistoryRecorder.startGame() — см. safeHistoryCall() ниже.
+  // Отдельный метод, а не встроенный try/catch в startGame(), из-за
+  // возвращаемого значения: startGame() внутри try нужно вернуть наружу
+  // (id новой строки), а не просто выполнить и забыть, как остальные три
+  // вызова рекордера.
+  private startHistoryGame(pack: Pack, counters: Participant[]): number | null {
+    try {
+      return this.history!.startGame({
+        startedAt: new Date().toISOString(),
+        packFilename: this.activePackFilename ?? 'неизвестный-пакет',
+        packTitle: pack.title,
+        participants: counters.map((p) => ({
+          counterId: p.id,
+          name: p.name,
+        })),
+      });
+    } catch (err) {
+      console.error('История: рекордер бросил исключение (startGame) —', err);
+      return null;
+    }
   }
 
   // Отбрасывает текущую партию (в том числе восстановленную из снапшота
@@ -744,8 +758,11 @@ export class Room {
   setHistoryEnabled(enabled: boolean): void {
     this.historyEnabled = enabled;
     if (!enabled && this.historyGameId !== null) {
-      this.history?.discardGame(this.historyGameId);
+      const gameId = this.historyGameId;
       this.historyGameId = null;
+      this.safeHistoryCall('discardGame', () =>
+        this.history?.discardGame(gameId),
+      );
     }
     for (const listener of this.historyEnabledListeners) {
       listener(this.historyEnabled);
@@ -755,6 +772,25 @@ export class Room {
   onHistoryEnabledChange(listener: (enabled: boolean) => void): () => void {
     this.historyEnabledListeners.add(listener);
     return () => this.historyEnabledListeners.delete(listener);
+  }
+
+  // Единая точка входа для всех вызовов HistoryRecorder, кроме startGame()
+  // (см. startHistoryGame() — там нужен возврат значения). Отказы истории
+  // не должны ронять партию (design.md, «Отказы не ломают партию»):
+  // GameHistory сама глотает собственные ошибки, но Room работает с
+  // произвольным HistoryRecorder — тесты подставляют фейки, а будущая
+  // реализация может повести себя иначе, — и не вправе полагаться на
+  // добросовестность каждой конкретной реализации. Без этой обёртки
+  // исключение из dispatch()/startGame()/setHistoryEnabled() уронило бы
+  // процесс целиком (в проекте нет глобального unhandledRejection/
+  // uncaughtException) либо, как минимум, оборвало бы функцию ДО
+  // this.notify() — клиенты не узнали бы об уже случившемся ходе.
+  private safeHistoryCall(action: string, fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      console.error(`История: рекордер бросил исключение (${action}) —`, err);
+    }
   }
 
   private isHostOrAdmin(requesterId: string | null): boolean {
@@ -1038,10 +1074,17 @@ export class Room {
     const roundIndexBefore = this.game.roundIndex;
     const scoresBefore = this.game.scores;
     const hostIdBefore = this.game.hostId;
-    // Голоса из состояния «до» ПЛЮС текущее событие, если это голос:
-    // последний голос, который и запускает подсчёт, в «до» ещё не лежит, а в
-    // «после» уже стёрт revealQuestion. Через таймер голосования события
-    // 'vote' нет, и тогда состояние «до» уже полное.
+    // Голоса из состояния «до» ПЛЮС текущее событие, если это голос. При
+    // нынешней семантике движка (engine.ts::handleVote) это НИКОГДА не
+    // меняет итог: 'vote' резолвит вопрос синхронно только когда
+    // hostId !== null (голос ведущего решает сразу), а recordPlayedQuestion
+    // ниже в этом случае и так пишет contested: null, не читая votes вовсе.
+    // Без ведущего 'vote' лишь копится в state.votes и ничего не решает —
+    // резолюция приходит только по 'timer-expired', и тогда состояние «до»
+    // уже полное само по себе, без всякого мержа. Мерж оставлен как
+    // страховка на случай, если синхронная резолюция голосом когда-нибудь
+    // появится и без ведущего — тогда «до» станет неполным ровно так же,
+    // как сейчас неполно для ведущего, и этот код нужно будет прочитать.
     const votesAtResolution =
       event.type === 'vote'
         ? { ...this.game.votes, [event.counterId]: event.correct }
@@ -1103,7 +1146,10 @@ export class Room {
     }
     if (phaseBefore !== 'game-end' && state.phase === 'game-end') {
       if (this.historyGameId !== null) {
-        this.history?.finishGame(this.historyGameId, state.scores);
+        const gameId = this.historyGameId;
+        this.safeHistoryCall('finishGame', () =>
+          this.history?.finishGame(gameId, state.scores),
+        );
       }
     }
     this.notify();
@@ -1209,6 +1255,8 @@ export class Room {
     buzzedBefore: string | null,
   ): void {
     if (this.historyGameId === null || !this.history || !questionBefore) return;
+    const gameId = this.historyGameId;
+    const recorder = this.history;
     const question = findQuestion(
       state.pack,
       roundIndexBefore,
@@ -1245,7 +1293,9 @@ export class Room {
           ? null
           : voteValues.some((v) => v !== voteValues[0]),
     };
-    this.history.recordQuestion(this.historyGameId, row);
+    this.safeHistoryCall('recordQuestion', () =>
+      recorder.recordQuestion(gameId, row),
+    );
   }
 
   // Финальный вопрос не проходит через answeredQuestionIds — он вообще не из
@@ -1254,22 +1304,26 @@ export class Room {
   // разбор вердиктов по игрокам — это уже слайс B/D.
   private recordFinalQuestion(state: EngineState): void {
     if (this.historyGameId === null || !this.history) return;
+    const gameId = this.historyGameId;
+    const recorder = this.history;
     const themeIndex = state.finalThemeIndex;
     if (themeIndex === null) return;
     const theme = state.pack.final?.themes[themeIndex];
     if (!theme) return;
-    this.history.recordQuestion(this.historyGameId, {
-      questionId: theme.question.id,
-      roundIndex: -1,
-      themeName: theme.name,
-      price: 0,
-      type: 'финал',
-      text: theme.question.text,
-      answer: theme.question.answer,
-      answeredBy: null,
-      correct: null,
-      contested: null,
-    });
+    this.safeHistoryCall('recordQuestion', () =>
+      recorder.recordQuestion(gameId, {
+        questionId: theme.question.id,
+        roundIndex: -1,
+        themeName: theme.name,
+        price: 0,
+        type: 'финал',
+        text: theme.question.text,
+        answer: theme.question.answer,
+        answeredBy: null,
+        correct: null,
+        contested: null,
+      }),
+    );
   }
 
   private nameOf(participantId: string): string | null {

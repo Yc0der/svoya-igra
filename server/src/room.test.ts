@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Room, type PackInfo } from './room.js';
+import { Room, type PackInfo, type RoomState } from './room.js';
 import { deserializeSnapshot, serializeSnapshot } from './snapshot.js';
 import {
+  createInitialState,
   QUESTION_TIMER_MS,
   REVEAL_TIMER_MS,
   CAT_HANDOFF_TIMER_MS,
@@ -2630,6 +2631,34 @@ function playQuestionToTimeout(room: Room): void {
   }
 }
 
+// Три счётчика, без ведущего, партия уже идёт — построена в обход
+// Room.startGame() (тот отклоняет старт с error: 'host-required' ровно для
+// этого состава — «Трое и больше счётчиков без ведущего... партия не
+// начнётся»). Нужен именно этот состав, чтобы у открытого голосования во
+// время судейства было больше одного голосующего и голоса могли разойтись
+// (двое без ведущего — судейство работает, но голосующий там ровно один,
+// то есть contested по построению всегда false, никогда true).
+// historyGameId проставлен вручную — так, будто Room.startGame() уже
+// сходил в историю до того, как состояние оказалось на диске/в памяти.
+function threeCounterNoHostRoom(history?: HistoryRecorder): {
+  room: Room;
+  ids: [string, string, string];
+} {
+  const lobby = new Room(undefined, TEST_PACK);
+  const id1 = joinedId(lobby, 'Ваня');
+  const id2 = joinedId(lobby, 'Катя');
+  const id3 = joinedId(lobby, 'Петя');
+  const game = createInitialState(TEST_PACK, [id1, id2, id3], null);
+  const state: RoomState = {
+    participants: lobby.getState().participants,
+    game,
+    hostParticipantId: null,
+    historyGameId: 1,
+  };
+  const room = new Room(state, TEST_PACK, undefined, 'test.json', history);
+  return { room, ids: [id1, id2, id3] };
+}
+
 describe('Room: история партий', () => {
   it('заводит партию в истории при старте', () => {
     const history = fakeHistory();
@@ -2670,6 +2699,138 @@ describe('Room: история партий', () => {
       correct: null,
       contested: null,
     });
+  });
+
+  it('пишет correct: true при верном ответе', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    const participants = room.getState().participants;
+    const other = participants.find((p) => p.id !== picker)!.id;
+    const answererName = participants.find((p) => p.id === picker)!.name;
+
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      // Двое, без ведущего — резолюция только по таймеру голосования.
+      room.vote(other, true);
+      vi.advanceTimersByTime(VOTE_TIMER_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(history.questions).toHaveLength(1);
+    expect(history.questions[0].row).toMatchObject({
+      answeredBy: answererName,
+      correct: true,
+    });
+  });
+
+  it('пишет correct: false при неверном ответе', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    const other = room.getState().participants.find((p) => p.id !== picker)!.id;
+
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      room.vote(other, false);
+      vi.advanceTimersByTime(VOTE_TIMER_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(history.questions).toHaveLength(1);
+    expect(history.questions[0].row).toMatchObject({ correct: false });
+  });
+
+  it('пишет contested: true, когда открытые голоса расходятся', () => {
+    const history = fakeHistory();
+    const { room, ids } = threeCounterNoHostRoom(history);
+    const picker = pickerOf(room);
+    const [voter1, voter2] = ids.filter((id) => id !== picker);
+
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      room.vote(voter1, true);
+      room.vote(voter2, false);
+      vi.advanceTimersByTime(VOTE_TIMER_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(history.questions).toHaveLength(1);
+    expect(history.questions[0].row.contested).toBe(true);
+  });
+
+  it('пишет contested: false, когда открытые голоса совпадают', () => {
+    const history = fakeHistory();
+    const { room, ids } = threeCounterNoHostRoom(history);
+    const picker = pickerOf(room);
+    const [voter1, voter2] = ids.filter((id) => id !== picker);
+
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      room.vote(voter1, true);
+      room.vote(voter2, true);
+      vi.advanceTimersByTime(VOTE_TIMER_MS);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(history.questions).toHaveLength(1);
+    expect(history.questions[0].row.contested).toBe(false);
+  });
+
+  // Требование спеки (design.md, «Тестирование» и «Отказы не ломают
+  // партию»): рекордер, чьи методы бросают, не имеет права ни уронить
+  // партию, ни сорвать рассылку клиентам. history.startGame() здесь
+  // намеренно НЕ бросает — иначе historyGameId остался бы null и
+  // recordQuestion() до отказавшего рекордера просто не дошёл бы, тест
+  // ничего не проверил бы про сам сбой записи.
+  it('партия продолжается и рассылает состояние, даже если рекордер бросает при записи вопроса', () => {
+    let nextId = 1;
+    const throwingHistory: HistoryRecorder = {
+      startGame: () => nextId++,
+      recordQuestion: () => {
+        throw new Error('boom: recordQuestion');
+      },
+      finishGame: () => {
+        throw new Error('boom: finishGame');
+      },
+      discardGame: () => {
+        throw new Error('boom: discardGame');
+      },
+    };
+    const room = roomWithHistory(throwingHistory);
+    room.startGame('requester');
+    expect(room.getState().historyGameId).toBe(1);
+
+    const listener = vi.fn();
+    room.onChange(listener);
+
+    expect(() => playQuestionToTimeout(room)).not.toThrow();
+    // Рассылка обязана дойти даже при упавшей записи — иначе клиенты
+    // никогда не узнают о ходе, которым партия только что продвинулась.
+    expect(listener).toHaveBeenCalled();
+    expect(room.toGameStateView()?.phase).toBe('reveal');
   });
 
   it('выбрасывает партию, когда тумблер выключают посреди неё', () => {
