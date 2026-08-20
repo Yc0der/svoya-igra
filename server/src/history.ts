@@ -107,6 +107,25 @@ function toBool(value: unknown): boolean | null {
   return value === null || value === undefined ? null : Number(value) === 1;
 }
 
+// Общий маппер строки played_questions → PlayedQuestionRow, вынесенный из
+// allPlayedQuestions(), чтобы recentPlayed() ниже не заводил вторую копию
+// той же логики распаковки колонок.
+function mapPlayedQuestionRow(row: Record<string, unknown>): PlayedQuestionRow {
+  return {
+    gameId: Number(row.game_id),
+    questionId: row.question_id as string,
+    roundIndex: Number(row.round_index),
+    themeName: row.theme_name as string,
+    price: Number(row.price),
+    type: row.type as string,
+    text: row.text as string,
+    answer: row.answer as string,
+    answeredBy: (row.answered_by as string | null) ?? null,
+    correct: toBool(row.correct),
+    contested: toBool(row.contested),
+  };
+}
+
 export class GameHistory implements HistoryRecorder {
   private db: DatabaseSync;
 
@@ -223,19 +242,7 @@ export class GameHistory implements HistoryRecorder {
       const rows = this.db
         .prepare(`SELECT * FROM played_questions ORDER BY id`)
         .all() as Record<string, unknown>[];
-      return rows.map((row) => ({
-        gameId: Number(row.game_id),
-        questionId: row.question_id as string,
-        roundIndex: Number(row.round_index),
-        themeName: row.theme_name as string,
-        price: Number(row.price),
-        type: row.type as string,
-        text: row.text as string,
-        answer: row.answer as string,
-        answeredBy: (row.answered_by as string | null) ?? null,
-        correct: toBool(row.correct),
-        contested: toBool(row.contested),
-      }));
+      return rows.map(mapPlayedQuestionRow);
     } catch (err) {
       console.error('История: не удалось прочитать сыгранные вопросы —', err);
       return [];
@@ -243,16 +250,32 @@ export class GameHistory implements HistoryRecorder {
   }
 
   /**
-   * Вопросы последних `gameLimit` партий. Ограничение по партиям, а не по
-   * числу строк: окно не должно расти вместе с базой.
+   * Вопросы последних `gameLimit` партий, в которых реально был сыгран хотя
+   * бы один вопрос. Партии-фальстарты (кто-то отвалился, не тот пакет,
+   * поздно подключился телефон) создают строку в `games`, но ни одного
+   * вопроса в `played_questions` — окно намеренно набирается от вторых, а не
+   * от первых: иначе пять фальстартов подряд вытеснили бы из окна всё, что
+   * реально игралось (финальное ревью ветки, п. 3).
+   *
+   * Ограничение по партиям, а не по числу строк: окно не должно расти вместе
+   * с базой. `DISTINCT game_id` в подзапросе и `LIMIT` в основном — один
+   * запрос, а не чтение всей истории с фильтрацией в памяти (design.md,
+   * 2026-08-20-game-history-design.md, «Окно не растёт вместе с историей»).
    */
   recentPlayed(gameLimit: number): PlayedQuestionRow[] {
     try {
-      const ids = this.db
-        .prepare(`SELECT id FROM games ORDER BY id DESC LIMIT ?`)
+      const rows = this.db
+        .prepare(
+          `SELECT * FROM played_questions
+             WHERE game_id IN (
+               SELECT DISTINCT game_id FROM played_questions
+               ORDER BY game_id DESC
+               LIMIT ?
+             )
+             ORDER BY id`,
+        )
         .all(gameLimit) as Record<string, unknown>[];
-      const recent = new Set(ids.map((row) => Number(row.id)));
-      return this.allPlayedQuestions().filter((row) => recent.has(row.gameId));
+      return rows.map(mapPlayedQuestionRow);
     } catch (err) {
       console.error('История: не удалось прочитать последние партии —', err);
       return [];
@@ -269,11 +292,24 @@ export class GameHistory implements HistoryRecorder {
  * (design.md, 2026-08-20-game-history-design.md, «Окно»).
  */
 export function formatRecentWindow(rows: PlayedQuestionRow[]): string {
+  // Дедупликация — по normalizeForCompare (та же функция, что и в
+  // findRepeats): «Канберра» и «канберра» из разных партий не должны
+  // занимать два места в окне. Печатается при этом ИСХОДНОЕ написание —
+  // нормализованная строка нужна только для сравнения, попади она на
+  // экран генератора, была бы менее узнаваемой (финальное ревью ветки, п.
+  // 6).
   const byTheme = new Map<string, string[]>();
+  const seenByTheme = new Map<string, Set<string>>();
   for (const row of rows) {
     const answers = byTheme.get(row.themeName) ?? [];
-    if (!answers.includes(row.answer)) answers.push(row.answer);
+    const seen = seenByTheme.get(row.themeName) ?? new Set<string>();
+    const normalized = normalizeForCompare(row.answer);
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      answers.push(row.answer);
+    }
     byTheme.set(row.themeName, answers);
+    seenByTheme.set(row.themeName, seen);
   }
   return [...byTheme.entries()]
     .map(([theme, answers]) => `${theme}: ${answers.join(', ')}`)
