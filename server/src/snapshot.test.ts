@@ -44,6 +44,7 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     };
 
     const restored = deserializeSnapshot(serializeSnapshot(state));
@@ -55,6 +56,7 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     });
   });
 });
@@ -84,6 +86,7 @@ describe('writeSnapshot / readSnapshot', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     };
 
     await writeSnapshot(path, state);
@@ -95,6 +98,7 @@ describe('writeSnapshot / readSnapshot', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     });
   });
 
@@ -126,6 +130,7 @@ describe('writeSnapshot / readSnapshot', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     };
     await writeSnapshot(path, initial);
 
@@ -144,6 +149,7 @@ describe('writeSnapshot / readSnapshot', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     };
     await expect(writeSnapshot(path, next)).rejects.toThrow(
       'simulated crash mid-write',
@@ -156,6 +162,7 @@ describe('writeSnapshot / readSnapshot', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     });
   });
 });
@@ -168,6 +175,7 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     };
     expect(deserializeSnapshot(serializeSnapshot(state))).toEqual({
       participants: [
@@ -175,6 +183,7 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
       ],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     });
   });
 
@@ -187,9 +196,17 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
       ],
       game,
       hostParticipantId: null,
+      historyGameId: null,
     };
     const restored = deserializeSnapshot(serializeSnapshot(state));
     expect(restored.game).toEqual(game);
+  });
+
+  it('восстанавливает historyGameId как null в снапшоте без этого поля', () => {
+    const state = deserializeSnapshot(
+      JSON.stringify({ participants: [], game: null }),
+    );
+    expect(state.historyGameId).toBeNull();
   });
 
   it('treats a snapshot written before this feature (no game field) as lobby-only', () => {

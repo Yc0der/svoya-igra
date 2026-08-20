@@ -10,6 +10,11 @@ import {
   TEXT_REVEAL_MIN_MS,
   VOTE_TIMER_MS,
 } from './engine.js';
+import type {
+  HistoryRecorder,
+  PlayedQuestionInput,
+  StartGameInput,
+} from './history.js';
 
 // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — кандидаты и
 // текущий адрес не часть RoomState (см. room.ts, LanInfo), поэтому и
@@ -264,6 +269,7 @@ describe('Room.join', () => {
       participants: [expect.objectContaining({ name: 'Ваня' })],
       game: null,
       hostParticipantId: null,
+      historyGameId: null,
     });
   });
 
@@ -1187,6 +1193,7 @@ describe('Room.resetRoom', () => {
       participants: [],
       hostParticipantId: null,
       game: null,
+      historyGameId: null,
     });
   });
 
@@ -2566,5 +2573,131 @@ describe('question-reveal / text reveal speed', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+interface FakeHistory extends HistoryRecorder {
+  games: StartGameInput[];
+  questions: { gameId: number; row: PlayedQuestionInput }[];
+  finished: { gameId: number; scores: Record<string, number> }[];
+  discarded: number[];
+}
+
+function fakeHistory(): FakeHistory {
+  const fake: FakeHistory = {
+    games: [],
+    questions: [],
+    finished: [],
+    discarded: [],
+    startGame(input) {
+      fake.games.push(input);
+      return fake.games.length;
+    },
+    recordQuestion(gameId, row) {
+      fake.questions.push({ gameId, row });
+    },
+    finishGame(gameId, scores) {
+      fake.finished.push({ gameId, scores });
+    },
+    discardGame(gameId) {
+      fake.discarded.push(gameId);
+    },
+  };
+  return fake;
+}
+
+function roomWithHistory(history?: HistoryRecorder): Room {
+  const room = new Room(undefined, TEST_PACK, undefined, 'test.json', history);
+  joinedId(room, 'Ваня');
+  joinedId(room, 'Катя');
+  return room;
+}
+
+function pickerOf(room: Room): string {
+  return room.toGameStateView()!.turnParticipantId!;
+}
+
+// Выбрать вопрос и дать ему истечь по таймауту — самый короткий путь до
+// закрытия вопроса, не требующий ни нажатия, ни судейства.
+function playQuestionToTimeout(room: Room): void {
+  vi.useFakeTimers();
+  try {
+    room.selectQuestion(pickerOf(room), 0, 'q1');
+    vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+    vi.advanceTimersByTime(QUESTION_TIMER_MS);
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+describe('Room: история партий', () => {
+  it('заводит партию в истории при старте', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    expect(history.games).toHaveLength(1);
+    expect(history.games[0].packFilename).toBe('test.json');
+    expect(history.games[0].participants).toHaveLength(2);
+    expect(room.getState().historyGameId).toBe(1);
+  });
+
+  it('не пишет ничего, пока тумблер выключен', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.setHistoryEnabled(false);
+    room.startGame('requester');
+    playQuestionToTimeout(room);
+    expect(history.games).toEqual([]);
+    expect(history.questions).toEqual([]);
+    expect(room.getState().historyGameId).toBeNull();
+  });
+
+  it('записывает закрывшийся вопрос', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    playQuestionToTimeout(room);
+    expect(history.questions).toHaveLength(1);
+    expect(history.questions[0].gameId).toBe(1);
+    expect(history.questions[0].row).toMatchObject({
+      questionId: 'q1',
+      roundIndex: 0,
+      themeName: 'Тема',
+      price: 100,
+      text: 'Вопрос 1?',
+      // Никто не нажал — вердикта не было, спора тоже.
+      answeredBy: null,
+      correct: null,
+      contested: null,
+    });
+  });
+
+  it('выбрасывает партию, когда тумблер выключают посреди неё', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    playQuestionToTimeout(room);
+    room.setHistoryEnabled(false);
+    expect(history.discarded).toEqual([1]);
+    expect(room.getState().historyGameId).toBeNull();
+  });
+
+  it('не начинает запись заново, если тумблер включить обратно в той же партии', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    room.setHistoryEnabled(false);
+    room.setHistoryEnabled(true);
+    playQuestionToTimeout(room);
+    expect(history.games).toHaveLength(1);
+    expect(history.questions).toEqual([]);
+    expect(room.getState().historyGameId).toBeNull();
+  });
+
+  it('работает без рекордера вообще', () => {
+    const room = roomWithHistory(undefined);
+    room.startGame('requester');
+    expect(() => playQuestionToTimeout(room)).not.toThrow();
+    expect(room.getState().historyGameId).toBeNull();
   });
 });
