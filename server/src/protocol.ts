@@ -152,6 +152,10 @@ export type ClientMessage =
   // тот же принцип, что admin-set-text-reveal-rate выше. false — вопрос
   // открывается сразу целиком, без ожидания (Room.computeTextRevealMs).
   | { type: 'admin-set-text-reveal-enabled'; enabled: boolean }
+  // Тумблер записи текущей партии в историю (room.ts, Room.historyEnabled) —
+  // тот же паттерн, что и admin-set-text-reveal-enabled выше, но постоянная
+  // функция, не временная.
+  | { type: 'admin-set-history-enabled'; enabled: boolean }
   // Выбор пакета — от участника (сервер сверяет отправителя с
   // hostParticipantId) и с админ-панели (без проверки личности), тем же
   // способом, каким уже разделены skip-to-final/admin-skip-to-final.
@@ -226,6 +230,8 @@ export type ServerMessage =
       // ВРЕМЕННЫЙ, как textRevealWordsPerSecond — вкл/выкл постепенного
       // показа целиком, меняется через admin-set-text-reveal-enabled.
       textRevealEnabled: boolean;
+      // Пишется ли текущая партия в историю (room.ts, Room.historyEnabled).
+      historyEnabled: boolean;
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }

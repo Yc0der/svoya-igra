@@ -62,6 +62,8 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     setTextRevealWordsPerSecond: vi.fn(),
     textRevealEnabled: true,
     setTextRevealEnabled: vi.fn(),
+    historyEnabled: true,
+    setHistoryEnabled: vi.fn(),
     availablePacks: [],
     activePackFilename: null,
     selectPackError: null,
@@ -144,6 +146,20 @@ describe('Admin', () => {
       screen.getByRole('button', { name: /192\.168\.31\.179/ }),
     );
     expect(setLanAddress).toHaveBeenCalledWith('192.168.31.179');
+  });
+
+  it('переключение записи истории вызывает setHistoryEnabled', async () => {
+    const setHistoryEnabled = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ historyEnabled: true, setHistoryEnabled }),
+    );
+    render(<Admin />);
+
+    await userEvent.click(
+      screen.getByLabelText('Записывать эту партию в историю'),
+    );
+
+    expect(setHistoryEnabled).toHaveBeenCalledWith(false);
   });
 
   it('shows a message instead of a pack list when none were found', () => {

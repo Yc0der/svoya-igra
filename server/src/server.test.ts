@@ -102,6 +102,7 @@ describe('createServer', () => {
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
+      historyEnabled: true,
     });
 
     ws.close();
@@ -141,6 +142,7 @@ describe('createServer', () => {
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
+      historyEnabled: true,
     });
 
     board.close();
@@ -199,6 +201,7 @@ describe('createServer', () => {
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
+      historyEnabled: true,
     });
 
     const reconnected = new WebSocket(url);
@@ -230,6 +233,7 @@ describe('createServer', () => {
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
+      historyEnabled: true,
     });
 
     board.close();
@@ -347,6 +351,7 @@ describe('createServer', () => {
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
+      historyEnabled: true,
     });
 
     other.close();
@@ -400,6 +405,7 @@ describe('createServer', () => {
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
+      historyEnabled: true,
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -437,6 +443,7 @@ describe('createServer', () => {
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
+      historyEnabled: true,
     });
 
     board.close();
@@ -480,6 +487,24 @@ describe('createServer', () => {
     ])) as { textRevealEnabled: boolean }[];
     expect(adminState.textRevealEnabled).toBe(false);
     expect(boardState.textRevealEnabled).toBe(false);
+
+    admin.ws.close();
+    board.ws.close();
+  });
+
+  it('admin-set-history-enabled changes the broadcast flag for everyone connected', async () => {
+    const admin = await connectAdmin(url);
+    const board = await connectAdmin(url);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-history-enabled', enabled: false }),
+    );
+    const [adminState, boardState] = (await Promise.all([
+      admin.nextMessage(),
+      board.nextMessage(),
+    ])) as { historyEnabled: boolean }[];
+    expect(adminState.historyEnabled).toBe(false);
+    expect(boardState.historyEnabled).toBe(false);
 
     admin.ws.close();
     board.ws.close();
@@ -559,6 +584,7 @@ describe('createServer heartbeat', () => {
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
       textRevealEnabled: true,
+      historyEnabled: true,
     });
 
     board.close();

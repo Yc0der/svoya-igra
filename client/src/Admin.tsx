@@ -37,6 +37,8 @@ export function Admin() {
     setTextRevealWordsPerSecond,
     textRevealEnabled,
     setTextRevealEnabled,
+    historyEnabled,
+    setHistoryEnabled,
     availablePacks,
     activePackFilename,
     selectPackError,
@@ -351,6 +353,27 @@ export function Admin() {
         >
           Применить
         </button>
+      </section>
+
+      <section className="admin-section">
+        <h2>История партий</h2>
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              checked={historyEnabled}
+              onChange={(e) => setHistoryEnabled(e.target.checked)}
+            />{' '}
+            Записывать эту партию в историю
+          </label>
+        </p>
+        <p>
+          Сыгранные вопросы попадают в историю, и генератор пакетов перестаёт их
+          повторять. Выключить стоит перед тестовым прогоном: выключение не
+          просто останавливает запись, а выбрасывает всё, что эта партия уже
+          успела записать. Обратно включить в той же партии нельзя — она уже
+          выброшена.
+        </p>
       </section>
 
       <section className="admin-section">

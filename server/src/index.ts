@@ -8,10 +8,12 @@ import { listLanCandidates, pickLanAddress } from './network.js';
 import { createServer } from './server.js';
 import { loadPack } from './pack.js';
 import { listAvailablePacks } from './packs.js';
+import { GameHistory } from './history.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
 const PACK_PATH = process.env.PACK_PATH ?? './packs/current.json';
+const HISTORY_PATH = process.env.HISTORY_PATH ?? './game-history.db';
 const LAN_HOST_CONFIG_PATH =
   process.env.LAN_HOST_CONFIG_PATH ?? './lan-host.local.json';
 const PROFILE_PATH =
@@ -124,11 +126,25 @@ async function main(): Promise<void> {
 
   const initialAvailablePacks = await listAvailablePacks(PACKS_DIR);
 
+  // Битая или недоступная база не должна мешать серверу подняться — история
+  // побочная функция, партия важнее её всегда (design.md,
+  // 2026-08-20-game-history-design.md, «Отказы не ломают партию»).
+  let history: GameHistory | undefined;
+  try {
+    history = new GameHistory(HISTORY_PATH);
+  } catch (err) {
+    console.error(
+      `Не удалось открыть историю партий ${HISTORY_PATH}, играем без записи:`,
+      err,
+    );
+  }
+
   const room = new Room(
     initial ?? undefined,
     pack,
     { candidates, address: lanAddress },
     basename(PACK_PATH),
+    history,
   );
   room.refreshAvailablePacks(null, initialAvailablePacks);
 

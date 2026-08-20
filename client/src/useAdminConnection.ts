@@ -67,6 +67,7 @@ type ServerMessage =
       textRevealWordsPerSecond: number;
       // ВРЕМЕННО — см. server/src/protocol.ts.
       textRevealEnabled: boolean;
+      historyEnabled: boolean;
     }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   | { type: 'select-pack-error'; reason: 'unknown-file' }
@@ -93,6 +94,7 @@ type ClientMessage =
   | { type: 'admin-set-text-reveal-rate'; wordsPerSecond: number }
   // ВРЕМЕННО — см. server/src/protocol.ts.
   | { type: 'admin-set-text-reveal-enabled'; enabled: boolean }
+  | { type: 'admin-set-history-enabled'; enabled: boolean }
   | { type: 'admin-refresh-packs' }
   | { type: 'admin-select-pack'; filename: string }
   | { type: 'admin-get-pack'; filename: string }
@@ -139,6 +141,8 @@ export interface AdminConnection {
   // ВРЕМЕННО — см. server/src/protocol.ts.
   textRevealEnabled: boolean;
   setTextRevealEnabled(enabled: boolean): void;
+  historyEnabled: boolean;
+  setHistoryEnabled(enabled: boolean): void;
   availablePacks: PackSummary[];
   activePackFilename: string | null;
   selectPackError: 'unknown-file' | null;
@@ -200,6 +204,7 @@ export function useAdminConnection(
     useState(2.5);
   // ВРЕМЕННО — см. server/src/protocol.ts.
   const [textRevealEnabled, setTextRevealEnabledState] = useState(true);
+  const [historyEnabled, setHistoryEnabledState] = useState(true);
   const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(
     null,
   );
@@ -248,6 +253,7 @@ export function useAdminConnection(
           setActivePackFilename(message.activePackFilename);
           setTextRevealWordsPerSecondState(message.textRevealWordsPerSecond);
           setTextRevealEnabledState(message.textRevealEnabled);
+          setHistoryEnabledState(message.historyEnabled);
           setSelectPackError(null);
           setStartGameError(null);
         }
@@ -321,6 +327,9 @@ export function useAdminConnection(
     textRevealEnabled,
     setTextRevealEnabled: (enabled) =>
       send({ type: 'admin-set-text-reveal-enabled', enabled }),
+    historyEnabled,
+    setHistoryEnabled: (enabled) =>
+      send({ type: 'admin-set-history-enabled', enabled }),
     availablePacks,
     activePackFilename,
     selectPackError,
