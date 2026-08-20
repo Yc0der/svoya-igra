@@ -137,3 +137,110 @@ describe('GameHistory', () => {
     expect(history.allPlayedQuestions()).toEqual([]);
   });
 });
+
+import { formatRecentWindow, type PlayedQuestionRow } from './history.js';
+
+const row = (
+  themeName: string,
+  answer: string,
+  gameId = 1,
+): PlayedQuestionRow => ({
+  gameId,
+  questionId: 'q',
+  roundIndex: 0,
+  themeName,
+  price: 100,
+  type: 'обычный',
+  text: 'вопрос',
+  answer,
+  answeredBy: null,
+  correct: null,
+  contested: null,
+});
+
+describe('formatRecentWindow', () => {
+  it('группирует ответы по темам, по строке на тему', () => {
+    const text = formatRecentWindow([
+      row('Кино 90-х', 'Тарантино'),
+      row('География', 'Канберра'),
+      row('Кино 90-х', 'Матрица'),
+    ]);
+    expect(text).toBe('Кино 90-х: Тарантино, Матрица\nГеография: Канберра');
+  });
+
+  it('не повторяет один и тот же ответ внутри темы', () => {
+    const text = formatRecentWindow([
+      row('Кино 90-х', 'Тарантино'),
+      row('Кино 90-х', 'Тарантино', 2),
+    ]);
+    expect(text).toBe('Кино 90-х: Тарантино');
+  });
+
+  it('на пустой истории возвращает пустую строку', () => {
+    expect(formatRecentWindow([])).toBe('');
+  });
+});
+
+import { findRepeats } from './history.js';
+import type { Pack } from './pack.js';
+
+const packWith = (text: string, answer: string): Pack => ({
+  title: 'Т',
+  author: 'а',
+  createdAt: '2026-08-20',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Тема',
+          questions: [
+            { id: 'r1-t-100', price: 100, text, answer, type: 'обычный' },
+          ],
+        },
+      ],
+    },
+  ],
+});
+
+describe('findRepeats', () => {
+  it('находит буквально тот же вопрос', () => {
+    const report = findRepeats(packWith('Столица Австралии?', 'Канберра'), [
+      { ...row('География', 'Канберра'), text: 'столица австралии' },
+    ]);
+    expect(report.sameQuestion).toHaveLength(1);
+    expect(report.sameQuestion[0].questionId).toBe('r1-t-100');
+    expect(report.sameAnswer).toHaveLength(0);
+  });
+
+  it('находит тот же ответ при другом вопросе', () => {
+    const report = findRepeats(
+      packWith('Какой город стал столицей Австралии в 1913 году?', 'Канберра'),
+      [{ ...row('География', 'Канберра'), text: 'столица австралии' }],
+    );
+    expect(report.sameQuestion).toHaveLength(0);
+    expect(report.sameAnswer).toHaveLength(1);
+    expect(report.sameAnswer[0].previous.answer).toBe('Канберра');
+  });
+
+  it('проверяет и финальные вопросы пакета', () => {
+    const pack = packWith('Новый вопрос', 'Новый ответ');
+    pack.final = {
+      themes: [
+        {
+          name: 'Финал',
+          question: { id: 'final-x', text: 'Ф', answer: 'Канберра' },
+        },
+      ],
+    };
+    const report = findRepeats(pack, [row('География', 'Канберра')]);
+    expect(report.sameAnswer.map((f) => f.questionId)).toEqual(['final-x']);
+  });
+
+  it('на чистом пакете не находит ничего', () => {
+    const report = findRepeats(packWith('Совсем новое?', 'Новое'), [
+      row('География', 'Канберра'),
+    ]);
+    expect(report.sameQuestion).toEqual([]);
+    expect(report.sameAnswer).toEqual([]);
+  });
+});

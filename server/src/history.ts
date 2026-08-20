@@ -2,6 +2,7 @@
 // 2026-08-20-game-history-design.md). Единственное место в сервере, знающее
 // про SQL. Игровой движок сюда не заглядывает вообще — пишет только Room.
 import { DatabaseSync } from 'node:sqlite';
+import type { Pack } from './pack.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS games (
@@ -240,4 +241,141 @@ export class GameHistory implements HistoryRecorder {
       return [];
     }
   }
+
+  /**
+   * Вопросы последних `gameLimit` партий. Ограничение по партиям, а не по
+   * числу строк: окно не должно расти вместе с базой.
+   */
+  recentPlayed(gameLimit: number): PlayedQuestionRow[] {
+    try {
+      const ids = this.db
+        .prepare(`SELECT id FROM games ORDER BY id DESC LIMIT ?`)
+        .all(gameLimit) as Record<string, unknown>[];
+      const recent = new Set(ids.map((row) => Number(row.id)));
+      return this.allPlayedQuestions().filter((row) => recent.has(row.gameId));
+    } catch (err) {
+      console.error('История: не удалось прочитать последние партии —', err);
+      return [];
+    }
+  }
+}
+
+/**
+ * Окно для Шага 0 генератора: только ответы, сгруппированные по темам.
+ *
+ * Текст вопроса сюда намеренно не попадает — увидев «Тарантино» в теме про
+ * кино, генератор и так не станет писать про Тарантино второй раз, а полный
+ * текст стоил бы примерно вшестеро больше токенов без выигрыша в результате
+ * (design.md, 2026-08-20-game-history-design.md, «Окно»).
+ */
+export function formatRecentWindow(rows: PlayedQuestionRow[]): string {
+  const byTheme = new Map<string, string[]>();
+  for (const row of rows) {
+    const answers = byTheme.get(row.themeName) ?? [];
+    if (!answers.includes(row.answer)) answers.push(row.answer);
+    byTheme.set(row.themeName, answers);
+  }
+  return [...byTheme.entries()]
+    .map(([theme, answers]) => `${theme}: ${answers.join(', ')}`)
+    .join('\n');
+}
+
+export interface RepeatFinding {
+  questionId: string;
+  text: string;
+  answer: string;
+  previous: { text: string; answer: string };
+}
+
+export interface RepeatReport {
+  sameQuestion: RepeatFinding[];
+  sameAnswer: RepeatFinding[];
+}
+
+interface PackQuestion {
+  id: string;
+  text: string;
+  answer: string;
+}
+
+// Все вопросы пакета одним списком — и сетка раундов, и финальные темы.
+// Финал проверяется наравне с остальными: это самый памятный вопрос вечера,
+// и повторить его было бы обиднее всего.
+function eachQuestion(pack: Pack): PackQuestion[] {
+  const questions: PackQuestion[] = [];
+  for (const round of pack.rounds) {
+    for (const theme of round.themes) {
+      for (const question of theme.questions) {
+        questions.push({
+          id: question.id,
+          text: question.text,
+          answer: question.answer,
+        });
+      }
+    }
+  }
+  for (const theme of pack.final?.themes ?? []) {
+    questions.push({
+      id: theme.question.id,
+      text: theme.question.text,
+      answer: theme.question.answer,
+    });
+  }
+  return questions;
+}
+
+/**
+ * Сверяет пакет со ВСЕЙ переданной историей.
+ *
+ * Правило «жёстко — вопрос, мягко — ответ» (design.md,
+ * 2026-08-20-game-history-design.md, «Сверка»): совпадение вопроса —
+ * безусловный брак, совпадение ответа — предупреждение. Жёсткий запрет на
+ * повтор ответа не годится: 50 вопросов за партию, через двадцать партий
+ * тысяча фактов оказалась бы выкошена, и генератор начал бы писать всё более
+ * натянутые вопросы.
+ *
+ * Вопрос, попавший в sameQuestion, в sameAnswer уже не повторяется: одно и то
+ * же место чинится один раз, а два сообщения про него только запутали бы.
+ */
+export function findRepeats(
+  pack: Pack,
+  history: PlayedQuestionRow[],
+): RepeatReport {
+  const byText = new Map<string, PlayedQuestionRow>();
+  const byAnswer = new Map<string, PlayedQuestionRow>();
+  for (const row of history) {
+    const text = normalizeForCompare(row.text);
+    const answer = normalizeForCompare(row.answer);
+    if (!byText.has(text)) byText.set(text, row);
+    if (!byAnswer.has(answer)) byAnswer.set(answer, row);
+  }
+  const report: RepeatReport = { sameQuestion: [], sameAnswer: [] };
+  for (const question of eachQuestion(pack)) {
+    const previousByText = byText.get(normalizeForCompare(question.text));
+    if (previousByText) {
+      report.sameQuestion.push({
+        questionId: question.id,
+        text: question.text,
+        answer: question.answer,
+        previous: {
+          text: previousByText.text,
+          answer: previousByText.answer,
+        },
+      });
+      continue;
+    }
+    const previousByAnswer = byAnswer.get(normalizeForCompare(question.answer));
+    if (previousByAnswer) {
+      report.sameAnswer.push({
+        questionId: question.id,
+        text: question.text,
+        answer: question.answer,
+        previous: {
+          text: previousByAnswer.text,
+          answer: previousByAnswer.answer,
+        },
+      });
+    }
+  }
+  return report;
 }
