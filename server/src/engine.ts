@@ -8,6 +8,12 @@ export type Phase =
   // жать «Ответ» нельзя. Только для вопросов с video (design.md,
   // 2026-08-18-video-questions-design.md, «Фаза проигрывания медиа»).
   | 'question-media'
+  // Вопрос открыт, текст показывается по буквам (design.md,
+  // 2026-08-19-gradual-text-reveal-design.md, «Фаза question-reveal»).
+  // Кнопка «Ответ» отклоняется той же проверкой phase !== 'question-open',
+  // что уже отсекает её в question-media — новой ветки в handleBuzz не
+  // нужно. Только для вопросов без video — у тех уже есть question-media.
+  | 'question-reveal'
   | 'question-open'
   | 'buzzed'
   | 'judging'
@@ -23,6 +29,7 @@ export type Phase =
 export type TimerName =
   | 'question'
   | 'media'
+  | 'text-reveal'
   | 'cat-handoff'
   | 'auction-bid'
   | 'said-answer'
@@ -43,6 +50,19 @@ export const QUESTION_TIMER_MS = 30_000;
 // нормальной партии срабатывать не должен (design.md,
 // 2026-08-18-video-questions-design.md, «Фаза проигрывания медиа»).
 export const MEDIA_TIMER_MS = 45_000;
+// Длительность здесь не рабочая: Room.applyEffects перехватывает именно этот
+// таймер (room.ts, «Временная скорость показа») и подставляет настоящее
+// значение, посчитанное по числу слов вопроса и текущей скорости. Число ниже
+// участвует только в тестах движка без Room (engine.test.ts) — любое
+// положительное значение подходит, в реальной игре оно никогда не
+// используется.
+export const TEXT_REVEAL_FALLBACK_MS = 5_000;
+// Нижняя граница настоящей длительности показа (design.md,
+// 2026-08-19-gradual-text-reveal-design.md, «Фаза question-reveal») — короткий
+// вопрос из одного-двух слов не должен мелькать почти мгновенно. Считает и
+// применяет Room (room.ts, computeTextRevealMs), константа здесь — чтобы у
+// движка и Room было ровно одно число, а не два синхронизируемых вручную.
+export const TEXT_REVEAL_MIN_MS = 1_200;
 export const CAT_HANDOFF_TIMER_MS = 15_000;
 export const AUCTION_BID_TIMER_MS = 20_000;
 export const SAID_ANSWER_TIMER_MS = 10_000;
@@ -254,10 +274,13 @@ export function reduce(state: EngineState, event: EngineEvent): Result {
 
 // Единственная точка входа в открытый вопрос. У вопроса с video сначала идёт
 // фаза проигрывания клипа, и только после неё — обычные QUESTION_TIMER_MS;
-// без video всё как было всегда. Три вызывающих (обычный выбор, «кот»,
-// победа в торгах) обязаны идти через неё, иначе механики разъедутся между
-// собой (design.md, «Фаза проигрывания медиа»). Переоткрытие вопроса после
-// неверного ответа сюда НЕ ходит — там клип уже смотрели, см. resolveVote.
+// без video вопрос идёт в question-reveal — постепенный показ текста по
+// словам, и лишь по его окончании открываются обычные QUESTION_TIMER_MS
+// (design.md, 2026-08-19-gradual-text-reveal-design.md, «Фаза
+// question-reveal»). Три вызывающих (обычный выбор, «кот», победа в торгах)
+// обязаны идти через неё, иначе механики разъедутся между собой (design.md,
+// «Фаза проигрывания медиа»). Переоткрытие вопроса после неверного ответа
+// сюда НЕ ходит — там текст уже видели/клип уже смотрели, см. resolveVote.
 function openQuestion(
   state: EngineState,
   extra: Partial<EngineState> = {},
@@ -278,9 +301,13 @@ function openQuestion(
     };
   }
   return {
-    state: { ...next, phase: 'question-open' },
+    state: { ...next, phase: 'question-reveal' },
     effects: [
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      {
+        type: 'start-timer',
+        timer: 'text-reveal',
+        ms: TEXT_REVEAL_FALLBACK_MS,
+      },
     ],
   };
 }
@@ -669,6 +696,16 @@ function handleTimerExpired(
         type: 'media-finished',
         questionId: state.currentQuestion!.questionId,
       });
+    case 'text-reveal':
+      // Показ текста закончился — вопрос становится обычным question-open с
+      // полными QUESTION_TIMER_MS, раньше ничего не тикало (design.md,
+      // 2026-08-19-gradual-text-reveal-design.md, «Фаза question-reveal»).
+      return {
+        state: { ...state, phase: 'question-open' },
+        effects: [
+          { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+        ],
+      };
     case 'cat-handoff': {
       const candidates = Object.keys(state.scores).filter(
         (id) => id !== state.turnCounterId,

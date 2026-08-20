@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { Board } from './Board';
 import { useRoomConnection } from './useRoomConnection';
@@ -366,6 +366,72 @@ describe('Board', () => {
     // Отсчёт идёт по страховочному таймеру медиа — игрокам его показывать
     // незачем, время на ответ ещё не началось.
     expect(document.querySelector('.board-timer')).not.toBeInTheDocument();
+  });
+
+  it('shows only the characters revealed so far during question-reveal, synced to timerDeadline/revealMs', () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      vi.setSystemTime(now);
+      const text = 'Первое второе третье четвёртое'; // length 30
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          game: baseGame({
+            phase: 'question-reveal',
+            currentQuestion: {
+              id: 'q1',
+              text,
+              price: 100,
+              themeName: 'Тема',
+              revealMs: 4000,
+            },
+            timerDeadline: now + 4000,
+          }),
+        }),
+      );
+      render(<Board />);
+      // count = floor(30 * 0 / 4000) + 1 = 1 — первая буква видна сразу
+      // (useTextReveal.ts), остальной текст — ещё нет.
+      expect(screen.getByText('П')).toBeInTheDocument();
+      expect(screen.queryByText(text)).not.toBeInTheDocument();
+
+      act(() => {
+        // advanceTimersByTime двигает подложные часы вместе с таймером —
+        // реальный elapsed на момент срабатывания интервала 2000+250=2250мс,
+        // не 2000 (см. useTextReveal.test.ts).
+        vi.setSystemTime(now + 2000);
+        vi.advanceTimersByTime(250);
+      });
+      // count = floor(30 * 2250 / 4000) + 1 = 16 + 1 = 17.
+      expect(screen.getByText('Первое второе тре')).toBeInTheDocument();
+      // Отсчёт — по question-таймеру, который в question-reveal ещё не идёт
+      // (design.md, 2026-08-19-gradual-text-reveal-design.md).
+      expect(document.querySelector('.board-timer')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the full question text once question-open, even if it was revealed only partially before', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: {
+            id: 'q1',
+            text: 'Первое второе третье четвёртое',
+            price: 100,
+            themeName: 'Тема',
+            revealMs: null,
+          },
+          timerDeadline: Date.now() + 30000,
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(
+      screen.getByText('Первое второе третье четвёртое'),
+    ).toBeInTheDocument();
   });
 
   it('tells the server which question finished playing', async () => {

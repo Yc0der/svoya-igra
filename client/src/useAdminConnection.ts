@@ -63,6 +63,10 @@ type ServerMessage =
       lanCandidates: LanCandidate[];
       availablePacks: PackSummary[];
       activePackFilename: string | null;
+      // ВРЕМЕННО — см. server/src/protocol.ts.
+      textRevealWordsPerSecond: number;
+      // ВРЕМЕННО — см. server/src/protocol.ts.
+      textRevealEnabled: boolean;
     }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   | { type: 'select-pack-error'; reason: 'unknown-file' }
@@ -85,6 +89,10 @@ type ClientMessage =
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   | { type: 'admin-skip-to-final' }
   | { type: 'admin-set-lan-address'; address: string }
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  | { type: 'admin-set-text-reveal-rate'; wordsPerSecond: number }
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  | { type: 'admin-set-text-reveal-enabled'; enabled: boolean }
   | { type: 'admin-refresh-packs' }
   | { type: 'admin-select-pack'; filename: string }
   | { type: 'admin-get-pack'; filename: string }
@@ -125,6 +133,12 @@ export interface AdminConnection {
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   skipToFinal(): void;
   setLanAddress(address: string): void;
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  textRevealWordsPerSecond: number;
+  setTextRevealWordsPerSecond(wordsPerSecond: number): void;
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  textRevealEnabled: boolean;
+  setTextRevealEnabled(enabled: boolean): void;
   availablePacks: PackSummary[];
   activePackFilename: string | null;
   selectPackError: 'unknown-file' | null;
@@ -181,6 +195,11 @@ export function useAdminConnection(
   const [activePackFilename, setActivePackFilename] = useState<string | null>(
     null,
   );
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  const [textRevealWordsPerSecond, setTextRevealWordsPerSecondState] =
+    useState(2.5);
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  const [textRevealEnabled, setTextRevealEnabledState] = useState(true);
   const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(
     null,
   );
@@ -227,6 +246,8 @@ export function useAdminConnection(
           setLanCandidates(message.lanCandidates);
           setAvailablePacks(message.availablePacks);
           setActivePackFilename(message.activePackFilename);
+          setTextRevealWordsPerSecondState(message.textRevealWordsPerSecond);
+          setTextRevealEnabledState(message.textRevealEnabled);
           setSelectPackError(null);
           setStartGameError(null);
         }
@@ -294,6 +315,12 @@ export function useAdminConnection(
     skipToFinal: () => send({ type: 'admin-skip-to-final' }),
     setLanAddress: (address) =>
       send({ type: 'admin-set-lan-address', address }),
+    textRevealWordsPerSecond,
+    setTextRevealWordsPerSecond: (wordsPerSecond) =>
+      send({ type: 'admin-set-text-reveal-rate', wordsPerSecond }),
+    textRevealEnabled,
+    setTextRevealEnabled: (enabled) =>
+      send({ type: 'admin-set-text-reveal-enabled', enabled }),
     availablePacks,
     activePackFilename,
     selectPackError,

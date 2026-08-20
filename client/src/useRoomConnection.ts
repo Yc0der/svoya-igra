@@ -12,6 +12,7 @@ export interface GameStateView {
     | 'cat-handoff'
     | 'auction-bidding'
     | 'question-media'
+    | 'question-reveal'
     | 'question-open'
     | 'buzzed'
     | 'judging'
@@ -64,6 +65,10 @@ export interface GameStateView {
       durationSeconds: number;
       audioOnly: boolean;
     } | null;
+    // Тот же приём, что и у video выше — необязательное поле в этом
+    // локальном типе ради тестовых фикстур. Реальные сообщения с сервера
+    // всегда содержат revealMs (server/src/protocol.ts).
+    revealMs?: number | null;
   } | null;
   buzzedParticipantId: string | null;
   exclusiveAnswererParticipantId: string | null;

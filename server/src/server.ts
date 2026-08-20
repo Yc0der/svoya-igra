@@ -127,6 +127,10 @@ export function createServer(options: CreateServerOptions): GameServer {
       lanCandidates: lan.candidates,
       availablePacks: packInfo.available,
       activePackFilename: packInfo.activeFilename,
+      // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
+      textRevealWordsPerSecond: room.getTextRevealWordsPerSecond(),
+      // ВРЕМЕННО — см. Room.textRevealEnabled.
+      textRevealEnabled: room.getTextRevealEnabled(),
     };
   };
 
@@ -160,6 +164,10 @@ export function createServer(options: CreateServerOptions): GameServer {
   room.onChange(broadcastState);
   room.onLanChange(broadcastState);
   room.onPackChange(broadcastState);
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
+  room.onTextRevealRateChange(broadcastState);
+  // ВРЕМЕННО — см. Room.textRevealEnabled.
+  room.onTextRevealEnabledChange(broadcastState);
 
   // `ws`, будучи прицепленным к готовому httpServer, переподписывает его
   // 'error' на себя. Без слушателя здесь EventEmitter на 'error' бросает
@@ -444,6 +452,22 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.address === 'string'
       ) {
         room.setLanAddress(message.address);
+      }
+
+      // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
+      if (
+        message.type === 'admin-set-text-reveal-rate' &&
+        typeof message.wordsPerSecond === 'number'
+      ) {
+        room.setTextRevealWordsPerSecond(message.wordsPerSecond);
+      }
+
+      // ВРЕМЕННО — см. Room.textRevealEnabled.
+      if (
+        message.type === 'admin-set-text-reveal-enabled' &&
+        typeof message.enabled === 'boolean'
+      ) {
+        room.setTextRevealEnabled(message.enabled);
       }
 
       if (message.type === 'refresh-packs') {

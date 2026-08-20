@@ -15,6 +15,7 @@ import {
   CAT_HANDOFF_TIMER_MS,
   AUCTION_BID_TIMER_MS,
   MEDIA_TIMER_MS,
+  TEXT_REVEAL_FALLBACK_MS,
   type EngineState,
 } from './engine.js';
 import type { Pack } from './pack.js';
@@ -126,21 +127,25 @@ const AUCTION_PACK = makePack({
 });
 
 function selectAuction(state: EngineState) {
-  return reduce(state, {
+  const opened = reduce(state, {
     type: 'select-question',
     counterId: state.turnCounterId,
     themeIndex: 0,
     questionId: 'a1',
   });
+  if (opened.state.phase !== 'question-reveal') return opened;
+  return reduce(opened.state, { type: 'timer-expired', timer: 'text-reveal' });
 }
 
 function selectCat(state: EngineState) {
-  return reduce(state, {
+  const opened = reduce(state, {
     type: 'select-question',
     counterId: state.turnCounterId,
     themeIndex: 0,
     questionId: 'a1',
   });
+  if (opened.state.phase !== 'question-reveal') return opened;
+  return reduce(opened.state, { type: 'timer-expired', timer: 'text-reveal' });
 }
 
 const PACK = makePack();
@@ -178,12 +183,14 @@ function finalElimState(scores: Record<string, number>): EngineState {
 }
 
 function selectFirst(state: EngineState) {
-  return reduce(state, {
+  const opened = reduce(state, {
     type: 'select-question',
     counterId: state.turnCounterId,
     themeIndex: 0,
     questionId: 'a1',
   });
+  if (opened.state.phase !== 'question-reveal') return opened;
+  return reduce(opened.state, { type: 'timer-expired', timer: 'text-reveal' });
 }
 
 describe('createInitialState', () => {
@@ -198,13 +205,26 @@ describe('createInitialState', () => {
 });
 
 describe('select-question', () => {
-  it("opens the question and starts the question timer when it is the picker's turn", () => {
+  it("opens the question into question-reveal when it is the picker's turn", () => {
     const state = createInitialState(PACK, ['p1', 'p2']);
-    const { state: next, effects } = selectFirst(state);
-    expect(next.phase).toBe('question-open');
+    // Прямой reduce(), не selectFirst() — сам хелпер (Step 5) намеренно
+    // всегда доводит вопрос без video до question-open, чтобы остальным
+    // тестам не пришлось знать о показе; проверить сам факт остановки в
+    // question-reveal можно только в обход хелпера.
+    const { state: next, effects } = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    });
+    expect(next.phase).toBe('question-reveal');
     expect(next.currentQuestion).toEqual({ themeIndex: 0, questionId: 'a1' });
     expect(effects).toEqual([
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      {
+        type: 'start-timer',
+        timer: 'text-reveal',
+        ms: TEXT_REVEAL_FALLBACK_MS,
+      },
     ]);
   });
 
@@ -583,6 +603,10 @@ describe('timer-expired: reveal', () => {
       themeIndex: 0,
       questionId: 'a1',
     }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
     state = reduce(state, {
@@ -590,6 +614,10 @@ describe('timer-expired: reveal', () => {
       counterId: state.turnCounterId,
       themeIndex: 0,
       questionId: 'a2',
+    }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     const { state: next, effects } = reduce(state, {
@@ -631,6 +659,10 @@ describe('timer-expired: reveal', () => {
       themeIndex: 0,
       questionId: 'a1',
     }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     const { state: next, effects } = reduce(state, {
       type: 'timer-expired',
@@ -651,6 +683,10 @@ describe('timer-expired: round-end', () => {
       themeIndex: 0,
       questionId: 'a1',
     }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
     state = reduce(state, {
@@ -658,6 +694,10 @@ describe('timer-expired: round-end', () => {
       counterId: state.turnCounterId,
       themeIndex: 0,
       questionId: 'a2',
+    }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
@@ -859,6 +899,10 @@ describe('a full two-question game, played end to end', () => {
       themeIndex: 0,
       questionId: 'a1',
     }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
     state = reduce(state, { type: 'buzz', counterId: 'p1' }).state;
     state = reduce(state, { type: 'said-answer', counterId: 'p1' }).state;
     state = reduce(state, {
@@ -882,6 +926,10 @@ describe('a full two-question game, played end to end', () => {
       counterId: 'p1',
       themeIndex: 0,
       questionId: 'b1',
+    }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     state = reduce(state, { type: 'buzz', counterId: 'p2' }).state;
     state = reduce(state, { type: 'said-answer', counterId: 'p2' }).state;
@@ -916,6 +964,10 @@ describe('final round transition', () => {
       themeIndex: 0,
       questionId: 'a1',
     }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
     state = reduce(state, {
@@ -923,6 +975,10 @@ describe('final round transition', () => {
       counterId: state.turnCounterId,
       themeIndex: 0,
       questionId: 'a2',
+    }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
@@ -932,6 +988,10 @@ describe('final round transition', () => {
       counterId: state.turnCounterId,
       themeIndex: 0,
       questionId: 'b1',
+    }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     const { state: next, effects } = reduce(state, {
@@ -955,6 +1015,10 @@ describe('final round transition', () => {
       themeIndex: 0,
       questionId: 'a1',
     }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
     state = reduce(state, {
@@ -962,6 +1026,10 @@ describe('final round transition', () => {
       counterId: state.turnCounterId,
       themeIndex: 0,
       questionId: 'a2',
+    }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
@@ -971,6 +1039,10 @@ describe('final round transition', () => {
       counterId: state.turnCounterId,
       themeIndex: 0,
       questionId: 'b1',
+    }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     const { state: next } = reduce(state, {
@@ -989,6 +1061,10 @@ describe('final round transition', () => {
       themeIndex: 0,
       questionId: 'a1',
     }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     // hostId === null: голосует единственный не отвечавший, разрешается
     // немедленно тем же путём, что уже покрыт в 'vote' — здесь важен только
@@ -1001,6 +1077,10 @@ describe('final round transition', () => {
       themeIndex: 0,
       questionId: 'a2',
     }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'reveal' }).state;
@@ -1010,6 +1090,10 @@ describe('final round transition', () => {
       counterId: state.turnCounterId,
       themeIndex: 0,
       questionId: 'b1',
+    }).state;
+    state = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'question' }).state;
     state = reduce(state, { type: 'timer-expired', timer: 'vote' }).state;
@@ -1385,7 +1469,7 @@ describe('select-question — вопрос-«кот»', () => {
 });
 
 describe('assign-cat', () => {
-  it('assigns the recipient, opens the question, and starts the question timer', () => {
+  it('assigns the recipient and opens the question into question-reveal', () => {
     const state = createInitialState(CAT_PACK, ['p1', 'p2']);
     const handoff = selectCat(state).state;
     const recipientId = handoff.turnCounterId === 'p1' ? 'p2' : 'p1';
@@ -1394,10 +1478,14 @@ describe('assign-cat', () => {
       counterId: handoff.turnCounterId,
       recipientCounterId: recipientId,
     });
-    expect(next.phase).toBe('question-open');
+    expect(next.phase).toBe('question-reveal');
     expect(next.exclusiveAnswererCounterId).toBe(recipientId);
     expect(effects).toEqual([
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      {
+        type: 'start-timer',
+        timer: 'text-reveal',
+        ms: TEXT_REVEAL_FALLBACK_MS,
+      },
     ]);
   });
 
@@ -1452,10 +1540,14 @@ describe('buzz — вопрос-«кот»', () => {
     const state = createInitialState(CAT_PACK, ['p1', 'p2']);
     const handoff = selectCat(state).state;
     const recipientId = handoff.turnCounterId === 'p1' ? 'p2' : 'p1';
-    return reduce(handoff, {
+    const revealing = reduce(handoff, {
       type: 'assign-cat',
       counterId: handoff.turnCounterId,
       recipientCounterId: recipientId,
+    }).state;
+    return reduce(revealing, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
   }
 
@@ -1489,11 +1581,15 @@ describe('timer-expired: cat-handoff', () => {
       type: 'timer-expired',
       timer: 'cat-handoff',
     });
-    expect(next.phase).toBe('question-open');
+    expect(next.phase).toBe('question-reveal');
     expect(next.exclusiveAnswererCounterId).not.toBe(handoff.turnCounterId);
     expect(['p1', 'p2']).toContain(next.exclusiveAnswererCounterId);
     expect(effects).toEqual([
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      {
+        type: 'start-timer',
+        timer: 'text-reveal',
+        ms: TEXT_REVEAL_FALLBACK_MS,
+      },
     ]);
   });
 });
@@ -1506,10 +1602,14 @@ describe('resolveVote — вопрос-«кот»', () => {
     const state = createInitialState(CAT_PACK, counterIds, hostId);
     const handoff = selectCat(state).state;
     const recipientId = counterIds.find((id) => id !== handoff.turnCounterId)!;
-    const opened = reduce(handoff, {
+    const revealing = reduce(handoff, {
       type: 'assign-cat',
       counterId: handoff.turnCounterId,
       recipientCounterId: recipientId,
+    }).state;
+    const opened = reduce(revealing, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
     }).state;
     const buzzed = reduce(opened, {
       type: 'buzz',
@@ -1871,12 +1971,16 @@ describe('pass-bid', () => {
       type: 'pass-bid',
       counterId: order[2],
     });
-    expect(next.phase).toBe('question-open');
+    expect(next.phase).toBe('question-reveal');
     expect(next.exclusiveAnswererCounterId).toBe(order[0]);
     expect(next.auctionOrder).toBeNull();
     expect(next.auctionHighestBid).toBe(150);
     expect(effects).toEqual([
-      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+      {
+        type: 'start-timer',
+        timer: 'text-reveal',
+        ms: TEXT_REVEAL_FALLBACK_MS,
+      },
     ]);
   });
 
@@ -1978,7 +2082,11 @@ describe('resolveVote — вопрос-аукцион', () => {
       state = reduce(state, { type: 'pass-bid', counterId: id }).state;
     }
     const winnerId = state.exclusiveAnswererCounterId!;
-    const buzzed = reduce(state, { type: 'buzz', counterId: winnerId }).state;
+    const opened = reduce(state, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
+    const buzzed = reduce(opened, { type: 'buzz', counterId: winnerId }).state;
     return reduce(buzzed, { type: 'said-answer', counterId: winnerId }).state;
   }
 
@@ -2248,5 +2356,172 @@ describe('question-media phase', () => {
 
     expect(next.phase).toBe('reveal');
     expect(next.answeredQuestionIds).toEqual(['a1']);
+  });
+});
+
+describe('question-reveal phase', () => {
+  it('sends a question without video into question-reveal, not straight to question-open', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2']);
+    const { state: next, effects } = reduce(initial, {
+      type: 'select-question',
+      counterId: initial.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    });
+
+    expect(next.phase).toBe('question-reveal');
+    expect(effects).toEqual([
+      {
+        type: 'start-timer',
+        timer: 'text-reveal',
+        ms: TEXT_REVEAL_FALLBACK_MS,
+      },
+    ]);
+  });
+
+  it('starts the full question timer once the reveal timer expires', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2']);
+    const revealing = reduce(initial, {
+      type: 'select-question',
+      counterId: initial.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    }).state;
+    const { state: next, effects } = reduce(revealing, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    });
+
+    expect(next.phase).toBe('question-open');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+
+  it('refuses a buzz while the text is still being revealed', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2']);
+    const revealing = reduce(initial, {
+      type: 'select-question',
+      counterId: initial.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    }).state;
+    const { state: next } = reduce(revealing, {
+      type: 'buzz',
+      counterId: 'p1',
+    });
+
+    expect(next.phase).toBe('question-reveal');
+    expect(next.buzzedCounterId).toBeNull();
+  });
+
+  it('reveals the cat question only after the cat has been handed off, not before', () => {
+    const initial = createInitialState(CAT_PACK, ['p1', 'p2']);
+    const handoff = selectCat(initial).state;
+    const recipient = handoff.turnCounterId === 'p1' ? 'p2' : 'p1';
+    const { state: next, effects } = reduce(handoff, {
+      type: 'assign-cat',
+      counterId: handoff.turnCounterId,
+      recipientCounterId: recipient,
+    });
+
+    expect(next.phase).toBe('question-reveal');
+    expect(next.exclusiveAnswererCounterId).toBe(recipient);
+    expect(effects).toEqual([
+      {
+        type: 'start-timer',
+        timer: 'text-reveal',
+        ms: TEXT_REVEAL_FALLBACK_MS,
+      },
+    ]);
+  });
+
+  it('reveals the auction question only once the auction has a winner, not during bidding', () => {
+    const initial = createInitialState(AUCTION_PACK, ['p1', 'p2']);
+    const bidding = selectAuction(initial).state;
+    const bidder = bidding.auctionTurnCounterId!;
+    const afterBid = reduce(bidding, {
+      type: 'place-bid',
+      counterId: bidder,
+      amount: 100,
+    }).state;
+    const other = bidder === 'p1' ? 'p2' : 'p1';
+    const { state: next, effects } = reduce(afterBid, {
+      type: 'pass-bid',
+      counterId: other,
+    });
+
+    expect(next.phase).toBe('question-reveal');
+    expect(next.exclusiveAnswererCounterId).toBe(bidder);
+    expect(effects).toEqual([
+      {
+        type: 'start-timer',
+        timer: 'text-reveal',
+        ms: TEXT_REVEAL_FALLBACK_MS,
+      },
+    ]);
+  });
+
+  it('does not replay the reveal when a wrong answer reopens the question under a host', () => {
+    const state = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const revealing = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    }).state;
+    const open = reduce(revealing, {
+      type: 'timer-expired',
+      timer: 'text-reveal',
+    }).state;
+    const judging = reduce(buzzP1(open), {
+      type: 'said-answer',
+      counterId: 'p1',
+    }).state;
+    const { state: next, effects } = reduce(judging, {
+      type: 'vote',
+      counterId: 'judge',
+      correct: false,
+    });
+
+    expect(next.phase).toBe('question-open');
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'question', ms: QUESTION_TIMER_MS },
+    ]);
+  });
+
+  it('lets the host cancel the question while the text is still being revealed', () => {
+    const state = createInitialState(PACK, ['p1', 'p2'], 'judge');
+    const revealing = reduce(state, {
+      type: 'select-question',
+      counterId: state.turnCounterId,
+      themeIndex: 0,
+      questionId: 'a1',
+    }).state;
+    const { state: next } = reduce(revealing, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    });
+
+    expect(next.phase).toBe('reveal');
+    expect(next.answeredQuestionIds).toEqual(['a1']);
+  });
+
+  it('still sends a video question into question-media, not question-reveal', () => {
+    // Регрессия: область действия — только вопросы без video (design.md,
+    // 2026-08-19-gradual-text-reveal-design.md, «Правило»).
+    const initial = createInitialState(VIDEO_PACK, ['p1', 'p2']);
+    const { state: next } = selectFirst(initial);
+
+    // selectFirst для видео проходит только question-media: проверка
+    // opened.state.phase !== 'question-reveal' (Step 5) для видео истинна,
+    // поэтому selectFirst возвращает результат сразу после select-question и
+    // вовсе не шлёт timer-expired/text-reveal в этой ветке — фаза остаётся
+    // question-media. (Если бы timer-expired/text-reveal всё же пришёл на
+    // question-media, handleTimerExpired обработал бы его тем же
+    // непроверяющим фазу case'ом, что и case 'question'/case 'media' в этом
+    // же switch, и перевёл бы состояние в question-open — этот case
+    // намеренно не проверяет текущую фазу, см. handleTimerExpired.)
+    expect(next.phase).toBe('question-media');
   });
 });

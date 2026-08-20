@@ -6,6 +6,8 @@ import {
   findQuestion,
   QUESTION_TIMER_MS,
   MEDIA_TIMER_MS,
+  TEXT_REVEAL_FALLBACK_MS,
+  TEXT_REVEAL_MIN_MS,
   CAT_HANDOFF_TIMER_MS,
   AUCTION_BID_TIMER_MS,
   SAID_ANSWER_TIMER_MS,
@@ -91,6 +93,7 @@ function normalizeName(name: string): string {
 const PHASE_TIMER: Partial<Record<Phase, { timer: TimerName; ms: number }>> = {
   'question-open': { timer: 'question', ms: QUESTION_TIMER_MS },
   'question-media': { timer: 'media', ms: MEDIA_TIMER_MS },
+  'question-reveal': { timer: 'text-reveal', ms: TEXT_REVEAL_FALLBACK_MS },
   'cat-handoff': { timer: 'cat-handoff', ms: CAT_HANDOFF_TIMER_MS },
   'auction-bidding': { timer: 'auction-bid', ms: AUCTION_BID_TIMER_MS },
   buzzed: { timer: 'said-answer', ms: SAID_ANSWER_TIMER_MS },
@@ -158,6 +161,28 @@ export class Room {
   private availablePacks: PackSummary[] = [];
   private activePackFilename: string | null;
   private packListeners = new Set<(info: PackInfo) => void>();
+  // Скорость показа текста вопроса, слов/сек — ВРЕМЕННЫЙ настраиваемый
+  // параметр (design.md, 2026-08-19-gradual-text-reveal-design.md,
+  // «Временная скорость показа»), не часть RoomState по тому же принципу,
+  // что lanAddress/availablePacks: транспортная настройка табло, не игровое
+  // состояние, сбрасывается при перезапуске сервера. Убрать вместе с полем и
+  // UI в админке, как только число зафиксируется в спеке.
+  private textRevealWordsPerSecond = 2.5;
+  private textRevealRateListeners = new Set<(wordsPerSecond: number) => void>();
+  // Живое вкл/выкл постепенного показа — тот же ВРЕМЕННЫЙ статус и тот же
+  // принцип, что у textRevealWordsPerSecond выше: транспортная настройка
+  // табло для подбора на живых партиях, не часть игровых правил. true —
+  // текст появляется по буквам (обычное поведение); false — computeTextRevealMs
+  // ниже возвращает 0, вопрос открывается сразу.
+  private textRevealEnabled = true;
+  private textRevealEnabledListeners = new Set<(enabled: boolean) => void>();
+  // Настоящая длительность показа текущего вопроса — то самое число, которое
+  // applyEffects только что подставило в таймер (Step 3 ниже). Не null,
+  // только пока идёт question-reveal; отдаётся в toGameStateView, чтобы
+  // табло считало прогресс показа по тому же значению, что и реальный
+  // серверный таймер — иначе смена скорости админкой прямо посреди показа
+  // рассинхронила бы клиент и сервер.
+  private currentTextRevealMs: number | null = null;
 
   constructor(
     initial?: RoomState,
@@ -637,6 +662,36 @@ export class Room {
     };
   }
 
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
+  getTextRevealWordsPerSecond(): number {
+    return this.textRevealWordsPerSecond;
+  }
+
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
+  // Без проверки отправителя, как и остальные admin-* настройки этого
+  // класса — админ-панель не проверяет личность (server.ts).
+  setTextRevealWordsPerSecond(wordsPerSecond: number): void {
+    if (!Number.isFinite(wordsPerSecond) || wordsPerSecond <= 0) return;
+    this.textRevealWordsPerSecond = wordsPerSecond;
+    for (const listener of this.textRevealRateListeners) {
+      listener(this.textRevealWordsPerSecond);
+    }
+  }
+
+  // ВРЕМЕННО — см. Room.textRevealEnabled.
+  getTextRevealEnabled(): boolean {
+    return this.textRevealEnabled;
+  }
+
+  // ВРЕМЕННО — см. Room.textRevealEnabled. Без проверки отправителя, тем же
+  // паттерном, что setTextRevealWordsPerSecond выше.
+  setTextRevealEnabled(enabled: boolean): void {
+    this.textRevealEnabled = enabled;
+    for (const listener of this.textRevealEnabledListeners) {
+      listener(this.textRevealEnabled);
+    }
+  }
+
   private isHostOrAdmin(requesterId: string | null): boolean {
     return requesterId === null || requesterId === this.hostParticipantId;
   }
@@ -777,6 +832,11 @@ export class Room {
                     durationSeconds: currentQuestionData.video.durationSeconds,
                     audioOnly: currentQuestionData.video.audioOnly ?? false,
                   },
+            // Сколько всего мс займёт показ текущего вопроса — то самое
+            // значение, что applyEffects только что подставило в таймер
+            // (Step 3 выше). Не null только в question-reveal (design.md,
+            // 2026-08-19-gradual-text-reveal-design.md, «Сервер и клиент»).
+            revealMs: this.currentTextRevealMs,
           }
         : null,
       buzzedParticipantId: game.buzzedCounterId,
@@ -884,6 +944,20 @@ export class Room {
     return () => this.packListeners.delete(listener);
   }
 
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
+  onTextRevealRateChange(
+    listener: (wordsPerSecond: number) => void,
+  ): () => void {
+    this.textRevealRateListeners.add(listener);
+    return () => this.textRevealRateListeners.delete(listener);
+  }
+
+  // ВРЕМЕННО — см. Room.textRevealEnabled.
+  onTextRevealEnabledChange(listener: (enabled: boolean) => void): () => void {
+    this.textRevealEnabledListeners.add(listener);
+    return () => this.textRevealEnabledListeners.delete(listener);
+  }
+
   private stillGraceExcluded(): boolean {
     return (
       this.graceExcludedUntil !== null && Date.now() < this.graceExcludedUntil
@@ -988,12 +1062,44 @@ export class Room {
           ms = this.pendingReopenBudget.remainingMs;
           this.pendingReopenBudget = null;
         }
+        if (effect.timer === 'text-reveal') {
+          ms = this.computeTextRevealMs();
+          this.currentTextRevealMs = ms;
+        } else {
+          this.currentTextRevealMs = null;
+        }
         this.gameTimerDeadline = Date.now() + ms;
         this.gameTimeoutHandle = setTimeout(() => {
           this.dispatch({ type: 'timer-expired', timer: effect.timer });
         }, ms);
       }
     }
+  }
+
+  // Число слов текущего вопроса делённое на текущую скорость, не ниже
+  // TEXT_REVEAL_MIN_MS (design.md, 2026-08-19-gradual-text-reveal-design.md,
+  // «Фаза question-reveal»). Вызывается из applyEffects в момент, когда
+  // движок эмитит таймер 'text-reveal' — сам движок этого числа не знает
+  // (инвариант 1, и скорость показа — настройка Комнаты, не игровое
+  // правило).
+  private computeTextRevealMs(): number {
+    // Выключено админкой (Room.textRevealEnabled, ВРЕМЕННО) — 0 без учёта
+    // TEXT_REVEAL_MIN_MS: вопрос должен открыться сразу, а не хотя бы на
+    // минимальный порог. useTextReveal.ts на клиенте уже трактует
+    // revealMs <= 0 как «показать текст целиком», отдельного случая на
+    // клиенте не требуется.
+    if (!this.textRevealEnabled) return 0;
+    const question = findQuestion(
+      this.game!.pack,
+      this.game!.roundIndex,
+      this.game!.currentQuestion!.themeIndex,
+      this.game!.currentQuestion!.questionId,
+    )!;
+    const words = question.text.trim().split(/\s+/).filter(Boolean).length;
+    return Math.max(
+      TEXT_REVEAL_MIN_MS,
+      Math.round((words / this.textRevealWordsPerSecond) * 1000),
+    );
   }
 
   private notify(): void {

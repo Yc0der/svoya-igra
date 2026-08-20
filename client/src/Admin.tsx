@@ -33,6 +33,10 @@ export function Admin() {
     setHost,
     skipToFinal,
     setLanAddress,
+    textRevealWordsPerSecond,
+    setTextRevealWordsPerSecond,
+    textRevealEnabled,
+    setTextRevealEnabled,
     availablePacks,
     activePackFilename,
     selectPackError,
@@ -59,6 +63,10 @@ export function Admin() {
   // (design.md), лишняя защита на каждой кнопке не соответствовала бы этому
   // выбору.
   const [confirmingWipe, setConfirmingWipe] = useState(false);
+  // ВРЕМЕННО — подбор скорости показа текста вопроса вживую, см.
+  // server/src/protocol.ts, StateMessage.textRevealWordsPerSecond. Убрать
+  // вместе с полем, как только число зафиксируется в спеке.
+  const [textRevealRateInput, setTextRevealRateInput] = useState('2.5');
   // Режим редактора: какой файл сейчас открыт (null — обычный список
   // пакетов), какой вопрос открыт формой, и текущие значения формы —
   // отдельные строковые поля, а не готовые number/enum: значение в инпуте
@@ -302,6 +310,47 @@ export function Admin() {
             })}
           </ul>
         )}
+      </section>
+
+      {/* ВРЕМЕННО — подбор скорости показа текста вопроса вживую, см.
+        server/src/protocol.ts, StateMessage.textRevealWordsPerSecond.
+        Убрать секцию целиком, как только число зафиксируется в спеке. */}
+      <section className="admin-section">
+        <h2>Скорость показа текста (временно)</h2>
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              checked={textRevealEnabled}
+              onChange={(e) => setTextRevealEnabled(e.target.checked)}
+            />{' '}
+            Постепенный показ включён
+          </label>
+        </p>
+        <p>
+          Сейчас: {textRevealWordsPerSecond.toFixed(1)} слов/сек. Пока включено,
+          обычный текстовый вопрос показывается на табло по буквам в темпе этой
+          скорости чтения, прежде чем открывается кнопка «Ответ». Выключено —
+          вопрос открывается сразу целиком, как раньше.
+        </p>
+        <input
+          type="number"
+          min={0.1}
+          step={0.1}
+          value={textRevealRateInput}
+          onChange={(e) => setTextRevealRateInput(e.target.value)}
+        />
+        <button
+          className="button"
+          onClick={() => {
+            const rate = Number(textRevealRateInput);
+            if (Number.isFinite(rate) && rate > 0) {
+              setTextRevealWordsPerSecond(rate);
+            }
+          }}
+        >
+          Применить
+        </button>
       </section>
 
       <section className="admin-section">

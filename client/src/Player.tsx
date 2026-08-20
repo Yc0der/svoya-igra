@@ -303,6 +303,7 @@ export function Player() {
     const questionActive =
       game.phase === 'cat-handoff' ||
       game.phase === 'auction-bidding' ||
+      game.phase === 'question-reveal' ||
       game.phase === 'question-media' ||
       game.phase === 'question-open' ||
       game.phase === 'buzzed' ||
@@ -519,6 +520,16 @@ export function Player() {
           </div>
         );
       }
+
+      // Текст ещё показывается по буквам — кнопки «Ответ» нет ни у кого, как
+      // и во время клипа video-вопроса (design.md,
+      // 2026-08-19-gradual-text-reveal-design.md, «Сервер и клиент»).
+      case 'question-reveal':
+        return (
+          <div className="player player--center">
+            <p>Читаем вопрос…</p>
+          </div>
+        );
 
       // Пока идёт клип, кнопки «Ответ» нет ни у кого и отсчёта тоже: сначала
       // все досматривают целиком, и только потом вопрос открывается

@@ -12,7 +12,11 @@ import {
 } from './server.js';
 import type { ServerMessage } from './protocol.js';
 import type { Pack } from './pack.js';
-import { REVEAL_TIMER_MS, VOTE_TIMER_MS } from './engine.js';
+import {
+  REVEAL_TIMER_MS,
+  VOTE_TIMER_MS,
+  TEXT_REVEAL_MIN_MS,
+} from './engine.js';
 
 // Attaches a persistent 'message' listener synchronously at socket creation
 // (before any await), so no frame can ever arrive unheard even if the server
@@ -96,6 +100,8 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     ws.close();
@@ -133,6 +139,8 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     board.close();
@@ -189,6 +197,8 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     const reconnected = new WebSocket(url);
@@ -218,6 +228,8 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     board.close();
@@ -333,6 +345,8 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     other.close();
@@ -384,6 +398,8 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -419,11 +435,54 @@ describe('createServer', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     board.close();
     reconnected.close();
     bystander.close();
+  });
+
+  // ВРЕМЕННО — см. Room.textRevealWordsPerSecond. Тот же паттерн, что
+  // admin-set-lan-address: ephemeral-поле Комнаты, не часть RoomState,
+  // рассылается отдельным listener'ом (room.onTextRevealRateChange).
+  it('admin-set-text-reveal-rate changes the broadcast rate for everyone connected', async () => {
+    const admin = await connectAdmin(url);
+    const board = await connectAdmin(url); // табло — тоже не 'join'-сокет
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-text-reveal-rate', wordsPerSecond: 4 }),
+    );
+    const [adminState, boardState] = (await Promise.all([
+      admin.nextMessage(),
+      board.nextMessage(),
+    ])) as { textRevealWordsPerSecond: number }[];
+    expect(adminState.textRevealWordsPerSecond).toBe(4);
+    expect(boardState.textRevealWordsPerSecond).toBe(4);
+
+    admin.ws.close();
+    board.ws.close();
+  });
+
+  // ВРЕМЕННО — см. Room.textRevealEnabled. Тот же паттерн, что и тест выше
+  // для textRevealWordsPerSecond.
+  it('admin-set-text-reveal-enabled changes the broadcast flag for everyone connected', async () => {
+    const admin = await connectAdmin(url);
+    const board = await connectAdmin(url);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-text-reveal-enabled', enabled: false }),
+    );
+    const [adminState, boardState] = (await Promise.all([
+      admin.nextMessage(),
+      board.nextMessage(),
+    ])) as { textRevealEnabled: boolean }[];
+    expect(adminState.textRevealEnabled).toBe(false);
+    expect(boardState.textRevealEnabled).toBe(false);
+
+    admin.ws.close();
+    board.ws.close();
   });
 });
 
@@ -498,6 +557,8 @@ describe('createServer heartbeat', () => {
       lanCandidates: [],
       availablePacks: [],
       activePackFilename: null,
+      textRevealWordsPerSecond: 2.5,
+      textRevealEnabled: true,
     });
 
     board.close();
@@ -696,6 +757,11 @@ describe('createServer game flow', () => {
           questionId: 'q1',
         }),
       );
+      const onReveal = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(onReveal.game.phase).toBe('question-reveal');
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
       const afterSelect = (await settle(a, b, picker)) as {
         game: { phase: string };
       };
@@ -834,6 +900,11 @@ describe('createServer game flow', () => {
         questionId: 'q1',
       }),
     );
+    const onReveal = (await settle(a, b, picker)) as {
+      game: { phase: string };
+    };
+    expect(onReveal.game.phase).toBe('question-reveal');
+    await new Promise((r) => setTimeout(r, TEXT_REVEAL_MIN_MS + 50));
     const afterSelect = (await settle(a, b, picker)) as {
       game: {
         phase: string;
@@ -977,6 +1048,7 @@ describe('createServer cat-in-the-bag', () => {
       themeName: 'Тема',
       image: null,
       video: null,
+      revealMs: null,
     });
 
     picker.ws.send(
@@ -985,6 +1057,16 @@ describe('createServer cat-in-the-bag', () => {
         recipientParticipantId: other.participantId,
       }),
     );
+    // «Кот» тоже проходит через openQuestion() — тот же вход в question-reveal,
+    // что и обычный выбор вопроса (design.md, «Область действия»). Этот
+    // describe не включает фейковые таймеры, поэтому пауза здесь настоящая —
+    // тот же паттерн, что уже используется для onClip/afterClip в
+    // 'createServer media-finished'.
+    const onReveal = (await settle(a, b, picker)) as {
+      game: { phase: string };
+    };
+    expect(onReveal.game.phase).toBe('question-reveal');
+    await new Promise((r) => setTimeout(r, TEXT_REVEAL_MIN_MS + 50));
     const afterAssign = (await settle(a, b, picker)) as {
       game: {
         phase: string;
@@ -1000,6 +1082,7 @@ describe('createServer cat-in-the-bag', () => {
       themeName: 'Тема',
       image: null,
       video: null,
+      revealMs: null,
     });
     expect(afterAssign.game.exclusiveAnswererParticipantId).toBe(
       other.participantId,
@@ -1177,6 +1260,15 @@ describe('createServer auction', () => {
     expect(afterBid.game.auctionTurnParticipantId).toBe(other.participantId);
 
     other.ws.send(JSON.stringify({ type: 'pass-bid' }));
+    // Победа в торгах тоже идёт через openQuestion() — question-reveal перед
+    // question-open, тот же паттерн, что и в 'createServer cat-in-the-bag'
+    // (этот describe тоже без фейковых таймеров — пауза здесь настоящая).
+    const onReveal = (await settle(a, b, other)) as {
+      game: { phase: string };
+    };
+    expect(onReveal.game.phase).toBe('question-reveal');
+    await c.nextMessage();
+    await new Promise((r) => setTimeout(r, TEXT_REVEAL_MIN_MS + 50));
     const afterPass = (await settle(a, b, other)) as {
       game: { phase: string; exclusiveAnswererParticipantId: string };
     };
@@ -1294,7 +1386,20 @@ describe('createServer host mode', () => {
         questionId: 'q1',
       }),
     );
-    await settle(a, b, picker);
+    // Этот describe тоже без фейковых таймеров — та же настоящая пауза, что
+    // уже используется в 'createServer cat-in-the-bag'/'createServer
+    // auction' выше: буз во время question-reveal — фальстарт (Room.buzz),
+    // а не игровое действие, поэтому его нужно дождаться, не пропустить.
+    const onReveal = (await settle(a, b, picker)) as {
+      game: { phase: string };
+    };
+    expect(onReveal.game.phase).toBe('question-reveal');
+    await c.nextMessage();
+    await new Promise((r) => setTimeout(r, TEXT_REVEAL_MIN_MS + 50));
+    const afterSelect = (await settle(a, b, picker)) as {
+      game: { phase: string };
+    };
+    expect(afterSelect.game.phase).toBe('question-open');
     await c.nextMessage();
 
     picker.ws.send(JSON.stringify({ type: 'buzz' }));
@@ -1470,7 +1575,16 @@ describe('createServer final round', () => {
           questionId: 'q1',
         }),
       );
-      await settle(a, b, picker);
+      const onReveal = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(onReveal.game.phase).toBe('question-reveal');
+      await c.nextMessage();
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      const afterSelect = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterSelect.game.phase).toBe('question-open');
       await c.nextMessage();
 
       picker.ws.send(JSON.stringify({ type: 'buzz' }));

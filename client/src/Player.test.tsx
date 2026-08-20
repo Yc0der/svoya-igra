@@ -376,6 +376,22 @@ describe('Player', () => {
     expect(screen.queryByText(/^\d+с$/)).not.toBeInTheDocument();
   });
 
+  it('offers no buzz button while the question text is still being revealed', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-reveal',
+          timerDeadline: Date.now() + 1600,
+        }),
+      }),
+    );
+    render(<Player />);
+    expect(
+      screen.queryByRole('button', { name: /^ответ$/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/читаем вопрос/i)).toBeInTheDocument();
+  });
+
   it('shows the buzz button while the question is open', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({ game: baseGame({ phase: 'question-open' }) }),
