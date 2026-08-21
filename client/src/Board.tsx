@@ -249,6 +249,12 @@ export function Board() {
         <div className="board-answer">
           <p>{game.correctAnswer.text}</p>
           {game.correctAnswer.comment && <p>{game.correctAnswer.comment}</p>}
+          {game.questionTags &&
+            game.questionTags.up + game.questionTags.down > 0 && (
+              <p className="board-tags">
+                👍 {game.questionTags.up} 👎 {game.questionTags.down}
+              </p>
+            )}
         </div>
       )}
 

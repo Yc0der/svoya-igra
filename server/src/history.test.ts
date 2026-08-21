@@ -278,7 +278,7 @@ describe('formatRecentWindow', () => {
   });
 });
 
-import { findRepeats } from './history.js';
+import { findRepeats, type QuestionTagInput } from './history.js';
 import type { Pack } from './pack.js';
 
 // image задаётся отдельным аргументом, потому что именно наличие картинки
@@ -417,5 +417,337 @@ describe('findRepeats', () => {
       { ...row('Тема', 'в'), text: 'а б' },
     ]);
     expect(report.sameQuestion).toEqual([]);
+  });
+});
+
+describe('GameHistory: оценки вопросов', () => {
+  function gameWithQuestion(history: GameHistory): number {
+    const id = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    history.recordQuestion(id, QUESTION);
+    return id;
+  }
+
+  const TAG: QuestionTagInput = {
+    questionId: 'r1-geo-100',
+    participantId: 'p1',
+    participantName: 'Ваня',
+    thumb: 'down',
+  };
+
+  it('записывает оценку', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    expect(history.allTags()).toEqual([
+      { gameId, ...TAG, reason: null, reasonText: null },
+    ]);
+  });
+
+  it('«передумал» обновляет строку, а не плодит вторую', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTag(gameId, { ...TAG, thumb: 'up' });
+    const tags = history.allTags();
+    expect(tags).toHaveLength(1);
+    expect(tags[0].thumb).toBe('up');
+  });
+
+  it('оценки разных игроков по одному вопросу не мешают друг другу', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTag(gameId, {
+      ...TAG,
+      participantId: 'p2',
+      participantName: 'Катя',
+      thumb: 'up',
+    });
+    expect(history.allTags()).toHaveLength(2);
+  });
+
+  it('снятая оценка удаляется', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.clearTag(gameId, TAG.questionId, TAG.participantId);
+    expect(history.allTags()).toEqual([]);
+  });
+
+  it('причина дописывается к уже поставленной оценке', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Слишком сложный',
+      'вообще не слышал про это',
+    );
+    const [row] = history.allTags();
+    expect(row.reason).toBe('Слишком сложный');
+    expect(row.reasonText).toBe('вообще не слышал про это');
+  });
+
+  it('не роняет вызовы, когда база недоступна', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.close();
+    expect(() => history.recordTag(gameId, TAG)).not.toThrow();
+    expect(() =>
+      history.clearTag(gameId, TAG.questionId, TAG.participantId),
+    ).not.toThrow();
+    expect(() =>
+      history.recordTagReason(
+        gameId,
+        TAG.questionId,
+        TAG.participantId,
+        'X',
+        '',
+      ),
+    ).not.toThrow();
+    expect(history.allTags()).toEqual([]);
+  });
+
+  it('пустые reason и reasonText приводятся к null', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTagReason(gameId, TAG.questionId, TAG.participantId, '', '');
+    const [row] = history.allTags();
+    expect(row.reason).toBeNull();
+    expect(row.reasonText).toBeNull();
+  });
+
+  it('партия с оценками выбрасывается целиком, включая оценки', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.discardGame(gameId);
+    expect(history.allGames()).toEqual([]);
+    expect(history.allPlayedQuestions()).toEqual([]);
+    expect(history.allTags()).toEqual([]);
+  });
+
+  it('передумал и сменил палец — причина осталась', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Слишком лёгкий',
+      'знал с детства',
+    );
+    // Передумали, сменили палец на up
+    history.recordTag(gameId, { ...TAG, thumb: 'up' });
+    const [row] = history.allTags();
+    expect(row.thumb).toBe('up');
+    // Причина должна остаться, не стереться
+    expect(row.reason).toBe('Слишком лёгкий');
+    expect(row.reasonText).toBe('знал с детства');
+  });
+
+  // Финальное ревью ветки, п. 7: guard `AND thumb = 0` защищает профиль
+  // генератора от записи по вопросу с пальцем ВВЕРХ. Раньше это проверялось
+  // только фейком в room.test.ts, повторяющим ту же логику своими руками, —
+  // здесь настоящий SQL.
+  it('причина не проходит по вопросу с пальцем вверх', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, { ...TAG, thumb: 'up' });
+
+    const updated = history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Слишком сложный',
+      'текст',
+    );
+
+    expect(updated).toBe(false);
+    const [row] = history.allTags();
+    expect(row.reason).toBeNull();
+    expect(row.reasonText).toBeNull();
+  });
+
+  // Финальное ревью ветки, п. 3: без `AND reason IS NULL AND reason_text IS
+  // NULL` в WHERE повторный UPDATE теми же (или другими) значениями снова
+  // матчит строку и снова возвращает true — сервер дописал бы в профиль
+  // генератора вторую, возможно противоречащую первой, претензию на один и
+  // тот же вопрос.
+  it('повторная отправка причины по уже разобранному вопросу не проходит и не переписывает её', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+
+    const first = history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Слишком сложный',
+      'первая причина',
+    );
+    const second = history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Спорный ответ',
+      'вторая причина',
+    );
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    const [row] = history.allTags();
+    expect(row.reason).toBe('Слишком сложный');
+    expect(row.reasonText).toBe('первая причина');
+  });
+});
+
+describe('GameHistory.complaintContext', () => {
+  it('отдаёт вопрос таким, каким его видели в СЫГРАННОЙ партии', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    history.recordQuestion(gameId, QUESTION);
+
+    expect(history.complaintContext(gameId, QUESTION.questionId)).toEqual({
+      packFilename: 'p.json',
+      packTitle: 'Пак',
+      themeName: QUESTION.themeName,
+      price: QUESTION.price,
+      text: QUESTION.text,
+      answer: QUESTION.answer,
+    });
+  });
+
+  it('неизвестный в этой партии вопрос — null', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'Пак',
+      participants: [],
+    })!;
+    history.recordQuestion(gameId, QUESTION);
+
+    expect(history.complaintContext(gameId, 'ghost')).toBeNull();
+  });
+
+  it('не роняет вызов, когда база недоступна', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'Пак',
+      participants: [],
+    })!;
+    history.close();
+    expect(() =>
+      history.complaintContext(gameId, QUESTION.questionId),
+    ).not.toThrow();
+    expect(history.complaintContext(gameId, QUESTION.questionId)).toBeNull();
+  });
+});
+
+describe('GameHistory.downTagsForReview', () => {
+  function gameWithTwoQuestions(history: GameHistory): number {
+    const id = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [],
+    })!;
+    history.recordQuestion(id, { ...QUESTION, questionId: 'q1' });
+    history.recordQuestion(id, {
+      ...QUESTION,
+      questionId: 'q2',
+      text: 'Второй вопрос?',
+      answer: 'Второй ответ',
+    });
+    return id;
+  }
+
+  it('возвращает только пальцы вниз этого игрока, с текстом и ответом', () => {
+    const history = makeHistory();
+    const gameId = gameWithTwoQuestions(history);
+    history.recordTag(gameId, {
+      questionId: 'q1',
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'down',
+    });
+    history.recordTag(gameId, {
+      questionId: 'q2',
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'up',
+    });
+    history.recordTag(gameId, {
+      questionId: 'q2',
+      participantId: 'p2',
+      participantName: 'Катя',
+      thumb: 'down',
+    });
+
+    const items = history.downTagsForReview(gameId, 'p1', 5);
+
+    expect(items).toEqual([
+      {
+        questionId: 'q1',
+        themeName: 'География',
+        price: 100,
+        text: 'Столица Австралии?',
+        answer: 'Канберра',
+      },
+    ]);
+  });
+
+  it('уже разобранный вопрос из списка уходит', () => {
+    const history = makeHistory();
+    const gameId = gameWithTwoQuestions(history);
+    history.recordTag(gameId, {
+      questionId: 'q1',
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'down',
+    });
+    history.recordTagReason(gameId, 'q1', 'p1', 'Слишком сложный', null);
+
+    expect(history.downTagsForReview(gameId, 'p1', 5)).toEqual([]);
+  });
+
+  it('соблюдает потолок', () => {
+    const history = makeHistory();
+    const gameId = gameWithTwoQuestions(history);
+    for (const questionId of ['q1', 'q2']) {
+      history.recordTag(gameId, {
+        questionId,
+        participantId: 'p1',
+        participantName: 'Ваня',
+        thumb: 'down',
+      });
+    }
+
+    expect(history.downTagsForReview(gameId, 'p1', 1)).toHaveLength(1);
+  });
+
+  it('не роняет вызов, когда база недоступна', () => {
+    const history = makeHistory();
+    const gameId = gameWithTwoQuestions(history);
+    history.close();
+    expect(() => history.downTagsForReview(gameId, 'p1', 5)).not.toThrow();
+    expect(history.downTagsForReview(gameId, 'p1', 5)).toEqual([]);
   });
 });

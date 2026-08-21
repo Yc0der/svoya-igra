@@ -18,6 +18,8 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     grid: [],
     turnParticipantId: '',
     currentQuestion: null,
+    questionTags: null,
+    tagReview: [],
     buzzedParticipantId: null,
     exclusiveAnswererParticipantId: null,
     auctionTurnParticipantId: null,
@@ -60,6 +62,8 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     passBid: vi.fn(),
     assignCat: vi.fn(),
     buzz: vi.fn(),
+    tagQuestion: vi.fn(),
+    submitTagReason: vi.fn(),
     mediaFinished: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
@@ -557,6 +561,50 @@ describe('Board', () => {
     expect(screen.getByText('Париж')).toBeInTheDocument();
     expect(screen.getByText('Ваня')).toBeInTheDocument();
     expect(screen.getByText('100')).toBeInTheDocument();
+  });
+
+  it('shows an anonymous up/down tag count on reveal once someone has voted', () => {
+    // participants/scores заданы непусто и содержат «Ваня» намеренно: сам
+    // экран reveal рисует табло очков с этим именем (см. ниже
+    // getByText('Ваня') — оно там ЕСТЬ), поэтому проверка ниже
+    // queryByText('Ваня', { selector: '.board-tags' }) реально что-то
+    // доказывает про анонимность именно строки со счётом, а не про
+    // отсутствие имени на экране вообще (ревью задачи 3, Important 2: с
+    // дефолтным пустым participants имени не было бы нигде, и утверждение
+    // «Ваня» не в документе было бы истинно независимо от поведения кода).
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        participants: [{ id: '1', name: 'Ваня', connected: true }],
+        game: baseGame({
+          phase: 'reveal',
+          correctAnswer: { text: 'Париж' },
+          questionTags: { up: 2, down: 1, mine: null },
+          scores: [{ participantId: '1', score: 100 }],
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText(/👍 2/)).toBeInTheDocument();
+    expect(screen.getByText(/👎 1/)).toBeInTheDocument();
+    // Имя на экране есть (табло очков) — но не рядом со счётом оценок.
+    expect(screen.getByText('Ваня')).toBeInTheDocument();
+    expect(
+      screen.getByText(/👍 2/).closest('.board-answer')?.textContent,
+    ).not.toContain('Ваня');
+  });
+
+  it('does not show a tag count on reveal before anyone has voted', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'reveal',
+          correctAnswer: { text: 'Париж' },
+          questionTags: { up: 0, down: 0, mine: null },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.queryByText(/👍/)).not.toBeInTheDocument();
   });
 
   it('shows the correct answer during judging too, not only reveal', () => {

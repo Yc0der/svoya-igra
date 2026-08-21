@@ -5,7 +5,12 @@ import { Player } from './Player';
 import { useRoomConnection } from './useRoomConnection';
 import type { GameStateView, RoomConnection } from './useRoomConnection';
 
-vi.mock('./useRoomConnection', () => ({
+// TAG_REASONS приходит из настоящего модуля (importActual), а не своей
+// копией литерала: копия внутри теста может разойтись с рабочим кодом
+// клиента и с сервером молча — сервер отверг бы строку, кнопка не пропала
+// бы, и ни один тест этого не поймал (финальное ревью ветки, п. 8).
+vi.mock('./useRoomConnection', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./useRoomConnection')>()),
   useRoomConnection: vi.fn(),
 }));
 
@@ -19,6 +24,8 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     grid: [],
     turnParticipantId: '',
     currentQuestion: null,
+    questionTags: null,
+    tagReview: [],
     buzzedParticipantId: null,
     exclusiveAnswererParticipantId: null,
     auctionTurnParticipantId: null,
@@ -61,6 +68,8 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     passBid: vi.fn(),
     assignCat: vi.fn(),
     buzz: vi.fn(),
+    tagQuestion: vi.fn(),
+    submitTagReason: vi.fn(),
     mediaFinished: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
@@ -78,6 +87,16 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     selectPack: vi.fn(),
     ...overrides,
   };
+}
+
+function renderPlayer(
+  game: Partial<GameStateView>,
+  conn: Partial<RoomConnection> = {},
+): void {
+  mockedUseRoomConnection.mockReturnValue(
+    connection({ selfId: 'p1', game: baseGame(game), ...conn }),
+  );
+  render(<Player />);
 }
 
 describe('Player', () => {
@@ -895,6 +914,51 @@ describe('Player', () => {
     expect(screen.getByText(/следующий раунд/i)).toBeInTheDocument();
     expect(screen.getByText('Ваня')).toBeInTheDocument();
     expect(screen.getByText('100')).toBeInTheDocument();
+  });
+
+  it('показывает пальцы, когда окно оценки открыто, и шлёт оценку', async () => {
+    const tagQuestion = vi.fn();
+    renderPlayer(
+      { phase: 'reveal', questionTags: { up: 0, down: 0, mine: null } },
+      { tagQuestion },
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Понравился' }));
+
+    expect(tagQuestion).toHaveBeenCalledWith('up');
+  });
+
+  it('подсвечивает уже поставленную оценку', () => {
+    renderPlayer({
+      phase: 'reveal',
+      questionTags: { up: 1, down: 0, mine: 'up' },
+    });
+
+    expect(screen.getByRole('button', { name: 'Понравился' })).toHaveClass(
+      'is-selected',
+    );
+  });
+
+  it('не показывает пальцы, когда окно закрыто', () => {
+    renderPlayer({ phase: 'question-open', questionTags: null });
+
+    expect(
+      screen.queryByRole('button', { name: 'Понравился' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('не показывает пальцы тому, кто сейчас выбирает вопрос', () => {
+    // «Выбирает сейчас» — это turnParticipantId === selfId; отдельного поля
+    // isMyTurn в GameStateView нет, Player.tsx выводит его сам.
+    renderPlayer({
+      phase: 'selecting',
+      turnParticipantId: 'p1',
+      questionTags: { up: 0, down: 0, mine: null },
+    });
+
+    expect(
+      screen.queryByRole('button', { name: 'Понравился' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows the final standings at game-end by name, not raw id', () => {
@@ -1913,5 +1977,116 @@ describe('Player — уведомление о перебитой ставке',
     );
     rerender(<Player />);
     expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
+  });
+
+  const REVIEW_ITEM = {
+    questionId: 'q1',
+    themeName: 'География',
+    price: 100,
+    text: 'Столица Австралии?',
+    answer: 'Канберра',
+  };
+
+  it('на конце игры показывает разбор помеченных вниз вопросов, включая тему и цену', () => {
+    renderPlayer({ phase: 'game-end', tagReview: [REVIEW_ITEM] });
+
+    expect(screen.getByText('Столица Австралии?')).toBeInTheDocument();
+    // Тема и цена — иначе через час после партии «Столица Австралии?» не
+    // опознать среди прочих карточек разбора (финальное ревью ветки, п. 8).
+    expect(screen.getByText(/География/)).toBeInTheDocument();
+    expect(screen.getByText(/100/)).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Слишком сложный' }),
+    ).toBeInTheDocument();
+  });
+
+  // Финальное ревью ветки, п. 1: тап по варианту раньше отправлял его
+  // немедленно и стирал уже набранный текст. Теперь варианты — переключатели
+  // (.is-selected, тот же приём, что у пальцев/голосования), а отправка
+  // происходит только по «Отправить», вместе с текстом.
+  it('тап по варианту выделяет его, но не отправляет — отправка только по кнопке «Отправить»', async () => {
+    const submitTagReason = vi.fn();
+    renderPlayer(
+      { phase: 'game-end', tagReview: [REVIEW_ITEM] },
+      { submitTagReason },
+    );
+
+    const reasonButton = screen.getByRole('button', {
+      name: 'Слишком сложный',
+    });
+    await userEvent.click(reasonButton);
+
+    expect(submitTagReason).not.toHaveBeenCalled();
+    expect(reasonButton).toHaveClass('is-selected');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+
+    expect(submitTagReason).toHaveBeenCalledWith('q1', 'Слишком сложный', '');
+  });
+
+  it('повторный тап по выделенному варианту снимает выбор', async () => {
+    renderPlayer({ phase: 'game-end', tagReview: [REVIEW_ITEM] });
+
+    const reasonButton = screen.getByRole('button', {
+      name: 'Слишком сложный',
+    });
+    await userEvent.click(reasonButton);
+    expect(reasonButton).toHaveClass('is-selected');
+
+    await userEvent.click(reasonButton);
+    expect(reasonButton).not.toHaveClass('is-selected');
+  });
+
+  it('вариант и текст уходят вместе одним тапом по «Отправить»', async () => {
+    const submitTagReason = vi.fn();
+    renderPlayer(
+      { phase: 'game-end', tagReview: [REVIEW_ITEM] },
+      { submitTagReason },
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Слишком сложный' }),
+    );
+    await userEvent.type(
+      screen.getByPlaceholderText('или своими словами'),
+      'два верных ответа',
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Отправить' }));
+
+    expect(submitTagReason).toHaveBeenCalledWith(
+      'q1',
+      'Слишком сложный',
+      'два верных ответа',
+    );
+  });
+
+  it('без помеченных вниз вопросов разбора нет', () => {
+    renderPlayer({ phase: 'game-end', tagReview: [] });
+
+    expect(screen.queryByText(/что было не так/i)).not.toBeInTheDocument();
+  });
+
+  // Ревью задачи 4, Minor 2, и финальное ревью ветки, п. 1: кнопка обязана
+  // оставаться неактивной, пока не заполнено ХОТЯ БЫ ОДНО из двух —
+  // выбранный вариант или текст, — а не только текст, как раньше.
+  it('кнопка «Отправить» неактивна, пока не выбран вариант и не введён текст', async () => {
+    renderPlayer({ phase: 'game-end', tagReview: [REVIEW_ITEM] });
+
+    const submitButton = screen.getByRole('button', { name: 'Отправить' });
+    expect(submitButton).toBeDisabled();
+
+    await userEvent.type(
+      screen.getByPlaceholderText('или своими словами'),
+      'непонятно, о чём вопрос',
+    );
+    expect(submitButton).toBeEnabled();
+
+    await userEvent.clear(screen.getByPlaceholderText('или своими словами'));
+    expect(submitButton).toBeDisabled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Слишком сложный' }),
+    );
+    expect(submitButton).toBeEnabled();
   });
 });

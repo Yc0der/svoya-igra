@@ -29,7 +29,12 @@ import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
-import type { HistoryRecorder, PlayedQuestionInput } from './history.js';
+import type {
+  HistoryRecorder,
+  PlayedQuestionInput,
+  TagComplaintContext,
+  Thumb,
+} from './history.js';
 
 export interface Participant {
   id: string;
@@ -128,8 +133,19 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     recordQuestion: () => {},
     finishGame: () => {},
     discardGame: () => {},
+    recordTag: () => {},
+    clearTag: () => {},
+    recordTagReason: () => false,
+    downTagsForReview: () => [],
+    complaintContext: () => null,
   };
-  return {
+  // Аннотация типа на самом литерале (не только на возврате функции) —
+  // без неё пропущенный метод интерфейса не ловится `tsc`, потому что
+  // структурная типизация TS не требует полноты для необъявленного
+  // литерала, только для присвоения переменной с явным типом (ревью
+  // задачи 4, Minor 3 — забытый downTagsForReview всплыл только на
+  // прогоне теста, не на typecheck).
+  const wrapped: HistoryRecorder = {
     startGame(input) {
       try {
         return target.startGame(input);
@@ -168,7 +184,61 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
         );
       }
     },
+    recordTag(gameId, tag) {
+      try {
+        target.recordTag(gameId, tag);
+      } catch (err) {
+        console.error('История: рекордер бросил исключение (recordTag) —', err);
+      }
+    },
+    clearTag(gameId, questionId, participantId) {
+      try {
+        target.clearTag(gameId, questionId, participantId);
+      } catch (err) {
+        console.error('История: рекордер бросил исключение (clearTag) —', err);
+      }
+    },
+    recordTagReason(gameId, questionId, participantId, reason, reasonText) {
+      try {
+        return target.recordTagReason(
+          gameId,
+          questionId,
+          participantId,
+          reason,
+          reasonText,
+        );
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (recordTagReason) —',
+          err,
+        );
+        return false;
+      }
+    },
+    downTagsForReview(gameId, participantId, limit) {
+      try {
+        return target.downTagsForReview(gameId, participantId, limit);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (downTagsForReview) —',
+          err,
+        );
+        return [];
+      }
+    },
+    complaintContext(gameId, questionId) {
+      try {
+        return target.complaintContext(gameId, questionId);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (complaintContext) —',
+          err,
+        );
+        return null;
+      }
+    },
   };
+  return wrapped;
 }
 
 // Сколько секунд ответивший неверно не может нажать повторно — не игровое
@@ -178,6 +248,12 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
 // возобновившимся отсчётом вопроса, а не перед ним — общее время на вопрос
 // от этого не растёт.
 const GRACE_EXCLUSION_MS = 5_000;
+
+// Потолок разбора: больше пяти вопросов подряд гарантированно бросят на
+// третьем, и не будет разобрано ни одного. Число условное, подлежит
+// калибровке на живых партиях (design.md,
+// 2026-08-21-question-tags-design.md, «Потолок в пять вопросов»).
+const TAG_REVIEW_LIMIT = 5;
 
 export class Room {
   private participants: Participant[];
@@ -259,6 +335,16 @@ export class Room {
   // this.history.* напрямую, без `?.`.
   private history: HistoryRecorder;
   private historyGameId: number | null;
+  // Вопрос, который только что доиграли, и оценки по нему. Эфемерные: окно
+  // оценки живёт секунды и переживать перезапуск сервера не обязано (design.md,
+  // 2026-08-21-question-tags-design.md, «Движок не трогаем»). null — окно
+  // закрыто.
+  private taggableQuestionId: string | null = null;
+  // participantId -> палец. Из неё считается счёт для табло и работает
+  // «передумал». В базу пишется отдельно, сквозняком: при выключенном
+  // тумблере остаётся только эта память, и всё видимое ведёт себя как в
+  // настоящей партии, просто не оставляет следа.
+  private currentTags = new Map<string, Thumb>();
 
   constructor(
     initial?: RoomState,
@@ -401,6 +487,8 @@ export class Room {
     // и в applyEffects.
     this.clearGameTimer();
     this.clearGraceExclusion();
+    this.taggableQuestionId = null;
+    this.currentTags.clear();
     const counterIds = counters.map((p) => p.id);
     this.game = createInitialState(this.pack, counterIds, hostId);
     this.historyGameId = this.historyEnabled
@@ -436,6 +524,8 @@ export class Room {
     this.clearGameTimer();
     this.clearGraceExclusion();
     this.game = null;
+    this.taggableQuestionId = null;
+    this.currentTags.clear();
     // Партия брошена, но её вопросы игроки видели — из истории они не
     // удаляются. Обнуляем только ссылку, чтобы следующая партия завела свою
     // строку, а не дописывалась в брошенную.
@@ -457,6 +547,8 @@ export class Room {
     this.participants = [];
     this.hostParticipantId = null;
     this.game = null;
+    this.taggableQuestionId = null;
+    this.currentTags.clear();
     // Партия брошена, но её вопросы игроки видели — из истории они не
     // удаляются. Обнуляем только ссылку, чтобы следующая партия завела свою
     // строку, а не дописывалась в брошенную.
@@ -726,6 +818,74 @@ export class Room {
     });
   }
 
+  /**
+   * Оценка только что сыгранного вопроса. Не правило игры: ничего не решает,
+   * ни на что не влияет, фазу не меняет — поэтому живёт здесь, а не в движке.
+   *
+   * Повторный тап по тому же пальцу снимает оценку, тап по другому — меняет.
+   */
+  tagQuestion(participantId: string, thumb: Thumb): void {
+    if (this.taggableQuestionId === null) return;
+    if (!this.participants.some((p) => p.id === participantId)) return;
+    const questionId = this.taggableQuestionId;
+    if (this.currentTags.get(participantId) === thumb) {
+      this.currentTags.delete(participantId);
+      if (this.historyGameId !== null) {
+        this.history.clearTag(this.historyGameId, questionId, participantId);
+      }
+    } else {
+      this.currentTags.set(participantId, thumb);
+      if (this.historyGameId !== null) {
+        this.history.recordTag(this.historyGameId, {
+          questionId,
+          participantId,
+          participantName: this.nameOf(participantId) ?? '',
+          thumb,
+        });
+      }
+    }
+    this.notify();
+  }
+
+  /**
+   * Причина, по которой игрок пометил вопрос пальцем вниз. Приходит с экрана
+   * разбора в конце партии.
+   *
+   * Возвращает контекст вопроса ТОЙ ПАРТИИ, В КОТОРОЙ ЕГО РЕАЛЬНО ИГРАЛИ
+   * (history.complaintContext, читает played_questions/games, а не текущий
+   * активный пакет — финальное ревью ветки, п. 2), только если строка в
+   * истории реально обновилась: разбор идёт на экране game-end (сам экран
+   * существует только там) И этот участник действительно ставил палец ВНИЗ
+   * именно по этому вопросу И ещё не разбирал его (это проверяет
+   * history.recordTagReason своим `AND thumb = 0 AND reason IS NULL AND
+   * reason_text IS NULL`). null — ничего не обновилось и записывать в
+   * профиль генератора нечего.
+   *
+   * Вызывающий (server.ts) обязан смотреть на возврат перед тем, как
+   * дописывать претензию в профиль генератора — иначе устаревший или
+   * подложный questionId от клиента превращался бы в выдуманную жалобу на
+   * долгоживущем артефакте (ревью задачи 4, Important 1).
+   */
+  submitTagReason(
+    participantId: string,
+    questionId: string,
+    reason: string | null,
+    text: string,
+  ): TagComplaintContext | null {
+    if (this.game?.phase !== 'game-end') return null;
+    if (this.historyGameId === null) return null;
+    const updated = this.history.recordTagReason(
+      this.historyGameId,
+      questionId,
+      participantId,
+      reason,
+      text,
+    );
+    if (!updated) return null;
+    this.notify();
+    return this.history.complaintContext(this.historyGameId, questionId);
+  }
+
   getState(): RoomState {
     return {
       participants: this.participants.map((p) => ({ ...p })),
@@ -982,6 +1142,29 @@ export class Room {
             revealMs: this.currentTextRevealMs,
           }
         : null,
+      questionTags:
+        this.taggableQuestionId === null
+          ? null
+          : {
+              up: [...this.currentTags.values()].filter((t) => t === 'up')
+                .length,
+              down: [...this.currentTags.values()].filter((t) => t === 'down')
+                .length,
+              mine:
+                viewerId === null
+                  ? null
+                  : (this.currentTags.get(viewerId) ?? null),
+            },
+      tagReview:
+        game.phase === 'game-end' &&
+        viewerId !== null &&
+        this.historyGameId !== null
+          ? this.history.downTagsForReview(
+              this.historyGameId,
+              viewerId,
+              TAG_REVIEW_LIMIT,
+            )
+          : [],
       buzzedParticipantId: game.buzzedCounterId,
       exclusiveAnswererParticipantId: game.exclusiveAnswererCounterId,
       auctionTurnParticipantId: game.auctionTurnCounterId,
@@ -1191,6 +1374,39 @@ export class Room {
         buzzedBefore,
         auctionHighestBidBefore,
       );
+      // Окно оценки открывается ровно здесь: вопрос доиграли, его текст и
+      // ответ сейчас на экране.
+      this.taggableQuestionId = questionBefore?.questionId ?? null;
+      this.currentTags.clear();
+    }
+    // Окно закрывается, когда выбрали следующий вопрос. Именно переход
+    // «было null, стало не-null», а не список фаз: revealQuestion оставляет
+    // currentQuestion заполненным на время фазы reveal и обнуляет его только
+    // переход в selecting, так что этот переход однозначно означает выбор
+    // нового вопроса. Список фаз перечислять нельзя — он растёт от вехи к
+    // вехе, и перечисление молча теряло бы окно (design.md,
+    // 2026-08-21-question-tags-design.md, «Где и как долго»).
+    if (questionBefore === null && state.currentQuestion !== null) {
+      this.taggableQuestionId = null;
+      this.currentTags.clear();
+    }
+    // Партия уходит в финал или в конец: окно оценки обязано закрыться и
+    // здесь, а не только «выбрали следующий вопрос» — финальный вопрос не
+    // оценивается вовсе (design.md, «Финальный вопрос не оценивается»), и
+    // после последнего вопроса основных раундов currentQuestion следующим
+    // событием не станет ни разу за весь финал: он обнуляется сразу
+    // (afterReveal → base с currentQuestion: null) и остаётся null через
+    // final-elim/…/final-reveal/game-end. Без этой ветки условие выше
+    // «questionBefore === null && currentQuestion !== null» никогда не
+    // срабатывает на этом пути, и taggableQuestionId (а с ним счёт на
+    // табло) доживает через весь финал до game-end включительно (финальное
+    // ревью ветки, п. 4).
+    if (
+      (phaseBefore !== 'final-elim' && state.phase === 'final-elim') ||
+      (phaseBefore !== 'game-end' && state.phase === 'game-end')
+    ) {
+      this.taggableQuestionId = null;
+      this.currentTags.clear();
     }
     if (phaseBefore !== 'final-reveal' && state.phase === 'final-reveal') {
       this.recordFinalQuestion(state);
