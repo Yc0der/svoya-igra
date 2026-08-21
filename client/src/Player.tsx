@@ -64,6 +64,16 @@ export function Player() {
   // Текст разбора помеченных вниз вопросов, по questionId — экран
   // game-end (design.md, 2026-08-21-question-tags-design.md).
   const [reviewText, setReviewText] = useState<Record<string, string>>({});
+  // Выбранный готовый вариант причины, по questionId — undefined/null,
+  // пока ничего не выбрано. Отдельно от reviewText: вариант и текст не
+  // исключают друг друга (design.md, «Готовые варианты» — «можно выбрать
+  // вариант, можно дописать к нему текст, можно только текст»), и оба
+  // должны уйти вместе одним тапом по «Отправить», а не порознь (финальное
+  // ревью ветки, п. 1: раньше тап по варианту слал его немедленно и стирал
+  // уже набранный текст).
+  const [reviewReason, setReviewReason] = useState<
+    Record<string, string | null>
+  >({});
   // Один раз за подключение ведущий решает, продолжать ли партию, найденную
   // на сервере при заходе (например, восстановленную из снапшота после
   // перезапуска), или отбросить её и начать заново — см. блок ниже
@@ -353,13 +363,16 @@ export function Player() {
   // и не показываются тому, кто в этот момент выбирает вопрос: у него на
   // экране сетка тем и цен, на телефоне она и так плотная (design.md,
   // 2026-08-21-question-tags-design.md, «Где и как долго»). Ему остаётся окно
-  // экрана ответа, где сетки ещё нет. Решение «кому показывать» целиком
-  // здесь, внутри функции, а не в форме switch ниже — вызов
-  // questionTagButtons() в обеих ветках case 'selecting' (и когда ход мой, и
-  // когда чужой) безусловный именно поэтому: если бы отсечение выбирающего
-  // держалось только на том, что вызов стоит под `!isMyTurn`, эта проверка
-  // здесь была бы мёртвым кодом, который ничего не тестирует (ревью задачи 3,
-  // Important 1).
+  // экрана ответа, где сетки ещё нет.
+  //
+  // Вызывается ОДИН раз, вне switch ниже (в финальном return, сразу после
+  // phaseContent) — не в каждой фазе, где окно МОЖЕТ быть открыто. Сервер держит
+  // окно переходами, а не списком фаз (см. комментарий у Room.dispatch в
+  // room.ts); перечисление фаз здесь, на клиенте, было бы ровно тем же
+  // антипаттерном с другой стороны провода — новая межвопросная фаза молча
+  // теряла бы пальцы, пока про неё не вспомнят (финальное ревью ветки, п. 4).
+  // Единственное условие — сами данные (questionTags !== null) и исключение
+  // выбирающего, оба уже здесь, внутри функции.
   function questionTagButtons() {
     if (!game?.questionTags) return null;
     if (game.phase === 'selecting' && isMyTurn) return null;
@@ -389,7 +402,6 @@ export function Player() {
           return (
             <div className="player">
               <p>Сейчас выбирает {nameOf(game.turnParticipantId)}</p>
-              {questionTagButtons()}
             </div>
           );
         }
@@ -421,11 +433,6 @@ export function Player() {
                 </Fragment>
               ))}
             </div>
-            {/* Вызов безусловный — questionTagButtons() сама возвращает
-                null, пока это мой ход выбора (см. комментарий у функции
-                выше). Убери там условие — и пальцы появятся здесь, поверх
-                сетки, чего быть не должно. */}
-            {questionTagButtons()}
           </div>
         );
 
@@ -781,7 +788,6 @@ export function Player() {
               <p className="player-comment">{game.correctAnswer.comment}</p>
             )}
             {scoreboard(game.scores)}
-            {questionTagButtons()}
           </div>
         );
 
@@ -790,7 +796,6 @@ export function Player() {
           <div className="player">
             <p>Раунд окончен, следующий раунд начинается</p>
             {scoreboard(game.scores)}
-            {questionTagButtons()}
           </div>
         );
 
@@ -811,54 +816,77 @@ export function Player() {
             {game.tagReview.length > 0 && (
               <div className="player-review">
                 <h3>Что было не так?</h3>
-                {game.tagReview.map((item) => (
-                  <div key={item.questionId} className="player-review-item">
-                    <p className="player-review-question">{item.text}</p>
-                    <p className="player-review-answer">Ответ: {item.answer}</p>
-                    <div className="player-review-reasons">
-                      {TAG_REASONS.map((reason) => (
-                        <button
-                          key={reason}
-                          className="button"
-                          onClick={() =>
-                            submitTagReason(item.questionId, reason, '')
-                          }
-                        >
-                          {reason}
-                        </button>
-                      ))}
+                {game.tagReview.map((item) => {
+                  const selectedReason = reviewReason[item.questionId] ?? null;
+                  const text = reviewText[item.questionId] ?? '';
+                  // Отправлять есть что, если выбран вариант ИЛИ введён
+                  // текст — ровно три допустимых способа ответить из спеки
+                  // (вариант, текст, оба сразу); пустая карточка без обоих
+                  // не о чем отправлять (design.md, «Что спрашивается»).
+                  const canSubmit = selectedReason !== null || text.trim();
+                  return (
+                    <div key={item.questionId} className="player-review-item">
+                      <p className="player-review-meta">
+                        {item.themeName}, {item.price}
+                      </p>
+                      <p className="player-review-question">{item.text}</p>
+                      <p className="player-review-answer">
+                        Ответ: {item.answer}
+                      </p>
+                      <div className="player-review-reasons">
+                        {TAG_REASONS.map((reason) => (
+                          <button
+                            key={reason}
+                            // Переключатель, тем же приёмом .is-selected, что
+                            // у пальцев и голосования (design.md, «Готовые
+                            // варианты»/«Поведение»): тап выделяет вариант,
+                            // повторный тап по выделенному снимает его.
+                            // Сама отправка происходит только по «Отправить»
+                            // ниже, вместе с текстом — раньше клик здесь
+                            // отправлял reason немедленно и стирал уже
+                            // набранный текст (финальное ревью ветки, п. 1).
+                            className={`button${selectedReason === reason ? ' is-selected' : ''}`}
+                            onClick={() =>
+                              setReviewReason((prev) => ({
+                                ...prev,
+                                [item.questionId]:
+                                  prev[item.questionId] === reason
+                                    ? null
+                                    : reason,
+                              }))
+                            }
+                          >
+                            {reason}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea
+                        value={text}
+                        onChange={(e) =>
+                          setReviewText((prev) => ({
+                            ...prev,
+                            [item.questionId]: e.target.value,
+                          }))
+                        }
+                        placeholder="или своими словами"
+                      />
+                      <button
+                        className="button"
+                        // Неактивна, пока не выбран вариант и не введён
+                        // текст — то есть пока не заполнено ни то, ни
+                        // другое (финальное ревью ветки, п. 1: раньше
+                        // смотрела только на текст, и одиночный вариант без
+                        // текста отправить было нельзя).
+                        disabled={!canSubmit}
+                        onClick={() =>
+                          submitTagReason(item.questionId, selectedReason, text)
+                        }
+                      >
+                        Отправить
+                      </button>
                     </div>
-                    <textarea
-                      value={reviewText[item.questionId] ?? ''}
-                      onChange={(e) =>
-                        setReviewText((prev) => ({
-                          ...prev,
-                          [item.questionId]: e.target.value,
-                        }))
-                      }
-                      placeholder="или своими словами"
-                    />
-                    <button
-                      className="button"
-                      // Пустое поле — не о чем отправлять: без готового
-                      // варианта (те кнопки выше шлют reason сами) и без
-                      // текста «Отправить» слал бы {reason: null, text: ''},
-                      // который нормализуется в NULL и не убирает вопрос из
-                      // списка — то есть выглядел бы рабочим и молча ничего
-                      // не делал (ревью задачи 4, Minor 2).
-                      disabled={!(reviewText[item.questionId] ?? '').trim()}
-                      onClick={() =>
-                        submitTagReason(
-                          item.questionId,
-                          null,
-                          reviewText[item.questionId] ?? '',
-                        )
-                      }
-                    >
-                      Отправить
-                    </button>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             {scoreboard(game.scores)}
@@ -1142,10 +1170,14 @@ export function Player() {
       {isHost && !isFinalPhase ? (
         <>
           {phaseContent}
+          {questionTagButtons()}
           {hostAdminPanel()}
         </>
       ) : (
-        phaseContent
+        <>
+          {phaseContent}
+          {questionTagButtons()}
+        </>
       )}
     </>
   );

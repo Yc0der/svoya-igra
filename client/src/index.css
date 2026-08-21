@@ -391,6 +391,11 @@ code {
   margin-bottom: 1.25rem;
 }
 
+.player-review-meta {
+  font-size: 0.85rem;
+  opacity: 0.6;
+}
+
 .player-review-question {
   font-weight: 600;
 }
