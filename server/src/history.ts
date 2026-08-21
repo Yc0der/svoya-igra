@@ -127,13 +127,17 @@ export interface HistoryRecorder {
   discardGame(gameId: number): void;
   recordTag(gameId: number, tag: QuestionTagInput): void;
   clearTag(gameId: number, questionId: string, participantId: string): void;
+  // true — только если строка реально обновилась (участник действительно
+  // ставил палец вниз именно по этому вопросу). Вызывающий код обязан
+  // проверять возврат, а не считать запись состоявшейся по факту вызова
+  // (ревью задачи 4, Important 1).
   recordTagReason(
     gameId: number,
     questionId: string,
     participantId: string,
     reason: string | null,
     reasonText: string | null,
-  ): void;
+  ): boolean;
   downTagsForReview(
     gameId: number,
     participantId: string,
@@ -387,21 +391,30 @@ export class GameHistory implements HistoryRecorder {
     }
   }
 
+  /**
+   * Возвращает true, только если строка реально обновилась — то есть этот
+   * участник действительно ставил палец ВНИЗ именно по этому вопросу
+   * (`AND thumb = 0` в WHERE). Без этой проверки и без проверки возврата
+   * вызывающим кодом жалоба уходила бы в профиль генератора по одному
+   * только присланному клиентом questionId, включая устаревший/подложный —
+   * ревью задачи 4, Important 1.
+   */
   recordTagReason(
     gameId: number,
     questionId: string,
     participantId: string,
     reason: string | null,
     reasonText: string | null,
-  ): void {
+  ): boolean {
     try {
       // Пустые строки приводятся к null: по этим двум полям задача 4 отбирает
       // неразобранные вопросы через WHERE reason IS NULL AND reason_text IS NULL.
       // Пустая строка вместо NULL молча убрала бы вопрос из списка разбора.
-      this.db
+      const result = this.db
         .prepare(
           `UPDATE question_tags SET reason = ?, reason_text = ?
-           WHERE game_id = ? AND question_id = ? AND participant_id = ?`,
+           WHERE game_id = ? AND question_id = ? AND participant_id = ?
+             AND thumb = 0`,
         )
         .run(
           reason === null || reason === '' ? null : reason,
@@ -410,8 +423,10 @@ export class GameHistory implements HistoryRecorder {
           questionId,
           participantId,
         );
+      return Number(result.changes) > 0;
     } catch (err) {
       console.error('История: не удалось записать причину оценки —', err);
+      return false;
     }
   }
 

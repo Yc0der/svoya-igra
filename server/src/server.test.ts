@@ -536,7 +536,7 @@ describe('createServer history recording honesty', () => {
       discardGame: () => {},
       recordTag: () => {},
       clearTag: () => {},
-      recordTagReason: () => {},
+      recordTagReason: () => false,
       downTagsForReview: () => [],
     };
     const room = new Room(

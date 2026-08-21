@@ -130,10 +130,16 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     discardGame: () => {},
     recordTag: () => {},
     clearTag: () => {},
-    recordTagReason: () => {},
+    recordTagReason: () => false,
     downTagsForReview: () => [],
   };
-  return {
+  // Аннотация типа на самом литерале (не только на возврате функции) —
+  // без неё пропущенный метод интерфейса не ловится `tsc`, потому что
+  // структурная типизация TS не требует полноты для необъявленного
+  // литерала, только для присвоения переменной с явным типом (ревью
+  // задачи 4, Minor 3 — забытый downTagsForReview всплыл только на
+  // прогоне теста, не на typecheck).
+  const wrapped: HistoryRecorder = {
     startGame(input) {
       try {
         return target.startGame(input);
@@ -188,7 +194,7 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     },
     recordTagReason(gameId, questionId, participantId, reason, reasonText) {
       try {
-        target.recordTagReason(
+        return target.recordTagReason(
           gameId,
           questionId,
           participantId,
@@ -200,6 +206,7 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
           'История: рекордер бросил исключение (recordTagReason) —',
           err,
         );
+        return false;
       }
     },
     downTagsForReview(gameId, participantId, limit) {
@@ -214,6 +221,7 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
       }
     },
   };
+  return wrapped;
 }
 
 // Сколько секунд ответивший неверно не может нажать повторно — не игровое
@@ -825,22 +833,33 @@ export class Room {
   /**
    * Причина, по которой игрок пометил вопрос пальцем вниз. Приходит с экрана
    * разбора в конце партии.
+   *
+   * Возвращает true, только если строка в истории реально обновилась —
+   * то есть разбор идёт на экране game-end (сам экран существует только
+   * там) И этот участник действительно ставил палец ВНИЗ именно по этому
+   * вопросу (это проверяет history.recordTagReason своим `AND thumb = 0`).
+   * Вызывающий (server.ts) обязан смотреть на возврат перед тем, как
+   * дописывать претензию в профиль генератора — иначе устаревший или
+   * подложный questionId от клиента превращался бы в выдуманную жалобу на
+   * долгоживущем артефакте (ревью задачи 4, Important 1).
    */
   submitTagReason(
     participantId: string,
     questionId: string,
     reason: string | null,
     text: string,
-  ): void {
-    if (this.historyGameId === null) return;
-    this.history.recordTagReason(
+  ): boolean {
+    if (this.game?.phase !== 'game-end') return false;
+    if (this.historyGameId === null) return false;
+    const updated = this.history.recordTagReason(
       this.historyGameId,
       questionId,
       participantId,
       reason,
       text,
     );
-    this.notify();
+    if (updated) this.notify();
+    return updated;
   }
 
   getState(): RoomState {

@@ -421,17 +421,25 @@ export function createServer(options: CreateServerOptions): GameServer {
       ) {
         const participantId = connections.get(ws);
         if (participantId) {
-          room.submitTagReason(
+          // room.submitTagReason сама проверяет фазу game-end и что
+          // participantId реально ставил палец вниз по этому questionId —
+          // в профиль генератора уходит только реально существовавшая
+          // оценка, а не любой присланный клиентом id (ревью задачи 4,
+          // Important 1: устаревший/подложный questionId раньше долетал до
+          // appendTagReasonToProfile безусловно).
+          const updated = room.submitTagReason(
             participantId,
             message.questionId,
             message.reason,
             message.text,
           );
-          await appendTagReasonToProfile(
-            message.questionId,
-            message.reason,
-            message.text,
-          );
+          if (updated) {
+            await appendTagReasonToProfile(
+              message.questionId,
+              message.reason,
+              message.text,
+            );
+          }
         }
       }
 

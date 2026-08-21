@@ -144,9 +144,14 @@ export type ClientMessage =
   // Room.tagQuestion — здесь только форма сообщения.
   | { type: 'tag-question'; thumb: 'up' | 'down' }
   // Причина, по которой игрок пометил вопрос пальцем вниз — экран разбора в
-  // конце партии (design.md, 2026-08-21-question-tags-design.md). Сервер сам
-  // сверяет фазу и что участник действительно ставил палец вниз именно по
-  // этому вопросу через Room.submitTagReason.
+  // конце партии (design.md, 2026-08-21-question-tags-design.md).
+  // Room.submitTagReason сверяет фазу (game-end) и — через
+  // history.recordTagReason (`AND thumb = 0` в WHERE) — что участник
+  // действительно ставил палец вниз именно по этому вопросу; при отказе
+  // любой из проверок возвращает false. Сервер обязан смотреть на этот
+  // возврат: запись в docs/pack-generator-profile.md уходит, только если
+  // он true (ревью задачи 4, Important 1) — устаревший/подложный questionId
+  // не должен превращаться в выдуманную жалобу на долгоживущем артефакте.
   | {
       type: 'tag-reason';
       questionId: string;

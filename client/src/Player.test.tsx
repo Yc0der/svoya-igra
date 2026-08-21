@@ -2031,4 +2031,35 @@ describe('Player — уведомление о перебитой ставке',
 
     expect(screen.queryByText(/что было не так/i)).not.toBeInTheDocument();
   });
+
+  // Ревью задачи 4, Minor 2: пустой textarea + невыбранный вариант раньше
+  // всё равно слали {reason: null, text: ''} — кнопка выглядела рабочей и
+  // молча ничего не делала (пустая строка нормализуется в NULL и не убирает
+  // вопрос из списка разбора).
+  it('кнопка «Отправить» неактивна, пока в поле нет текста', async () => {
+    renderPlayer({
+      phase: 'game-end',
+      tagReview: [
+        {
+          questionId: 'q1',
+          themeName: 'География',
+          price: 100,
+          text: 'Столица Австралии?',
+          answer: 'Канберра',
+        },
+      ],
+    });
+
+    const submitButton = screen.getByRole('button', { name: 'Отправить' });
+    expect(submitButton).toBeDisabled();
+
+    await userEvent.type(
+      screen.getByPlaceholderText('или своими словами'),
+      'непонятно, о чём вопрос',
+    );
+    expect(submitButton).toBeEnabled();
+
+    await userEvent.clear(screen.getByPlaceholderText('или своими словами'));
+    expect(submitButton).toBeDisabled();
+  });
 });

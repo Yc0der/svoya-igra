@@ -840,6 +840,13 @@ export function Player() {
                     />
                     <button
                       className="button"
+                      // Пустое поле — не о чем отправлять: без готового
+                      // варианта (те кнопки выше шлют reason сами) и без
+                      // текста «Отправить» слал бы {reason: null, text: ''},
+                      // который нормализуется в NULL и не убирает вопрос из
+                      // списка — то есть выглядел бы рабочим и молча ничего
+                      // не делал (ревью задачи 4, Minor 2).
+                      disabled={!(reviewText[item.questionId] ?? '').trim()}
                       onClick={() =>
                         submitTagReason(
                           item.questionId,

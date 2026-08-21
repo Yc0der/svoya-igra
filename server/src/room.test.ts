@@ -2631,7 +2631,19 @@ function fakeHistory(): FakeHistory {
     clearTag(gameId, questionId, participantId) {
       fake.clearedTags.push({ gameId, questionId, participantId });
     },
+    // Тот же смысл, что и WHERE ... AND thumb = 0 в настоящем
+    // GameHistory.recordTagReason: «записалось», только если у этого
+    // участника по этому вопросу СЕЙЧАС стоит палец вниз (последняя запись
+    // в fake.tags для этой тройки) — иначе false и fake.reasons не растёт.
     recordTagReason(gameId, questionId, participantId, reason, reasonText) {
+      const relevant = fake.tags.filter(
+        (t) =>
+          t.gameId === gameId &&
+          t.tag.questionId === questionId &&
+          t.tag.participantId === participantId,
+      );
+      const latest = relevant[relevant.length - 1];
+      if (!latest || latest.tag.thumb !== 'down') return false;
       fake.reasons.push({
         gameId,
         questionId,
@@ -2639,6 +2651,7 @@ function fakeHistory(): FakeHistory {
         reason,
         reasonText,
       });
+      return true;
     },
     downTagsForReview(gameId, participantId, limit) {
       return fake.tags
@@ -2910,7 +2923,7 @@ describe('Room: история партий', () => {
       },
       recordTag: () => {},
       clearTag: () => {},
-      recordTagReason: () => {},
+      recordTagReason: () => false,
       downTagsForReview: () => {
         throw new Error('boom: downTagsForReview');
       },
@@ -3367,5 +3380,52 @@ describe('Room: оценки вопросов', () => {
     room.tagQuestion(picker, 'down');
 
     expect(room.toGameStateView(picker)?.tagReview).toEqual([]);
+  });
+
+  // Ревью задачи 4, Important 1: без этой проверки любой присланный клиентом
+  // questionId — устаревший или подложный — безусловно долетал бы до записи
+  // в профиль генератора. Источник правды — история (recordTagReason
+  // проверяет thumb = 0), а не память Room, поэтому тест идёт через
+  // fakeHistory().reasons, а не через currentTags.
+  it('причина по вопросу, который участник не помечал вниз, ничего не меняет и не дописывается', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS); // question-reveal -> question-open
+      vi.advanceTimersByTime(QUESTION_TIMER_MS); // question timer -> reveal
+      room.tagQuestion(picker, 'down');
+      vi.advanceTimersByTime(REVEAL_TIMER_MS); // reveal -> selecting
+      driveToGameEnd(room, ['q2']);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // picker поставил палец вниз только по q1 (см. выше) — q2 он никогда не
+    // тегал, значит причина по q2 не должна ни на что повлиять.
+    const updated = room.submitTagReason(picker, 'q2', 'Слишком сложный', '');
+
+    expect(updated).toBe(false);
+    expect(history.reasons).toEqual([]);
+    expect(room.toGameStateView(picker)?.tagReview).toHaveLength(1);
+  });
+
+  it('причина не принимается вне фазы game-end', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    playQuestionToTimeout(room);
+    room.tagQuestion(picker, 'down');
+
+    // Фаза здесь 'reveal', не 'game-end' — экран разбора существует только
+    // на game-end (см. тест выше «до конца партии разбор пуст»).
+    const updated = room.submitTagReason(picker, 'q1', 'Слишком сложный', '');
+
+    expect(updated).toBe(false);
+    expect(history.reasons).toEqual([]);
   });
 });
