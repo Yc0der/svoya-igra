@@ -514,4 +514,44 @@ describe('GameHistory: оценки вопросов', () => {
     ).not.toThrow();
     expect(history.allTags()).toEqual([]);
   });
+
+  it('пустые reason и reasonText приводятся к null', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTagReason(gameId, TAG.questionId, TAG.participantId, '', '');
+    const [row] = history.allTags();
+    expect(row.reason).toBeNull();
+    expect(row.reasonText).toBeNull();
+  });
+
+  it('партия с оценками выбрасывается целиком, включая оценки', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.discardGame(gameId);
+    expect(history.allGames()).toEqual([]);
+    expect(history.allPlayedQuestions()).toEqual([]);
+    expect(history.allTags()).toEqual([]);
+  });
+
+  it('передумал и сменил палец — причина осталась', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Слишком просто',
+      'знал с детства',
+    );
+    // Передумали, сменили палец на up
+    history.recordTag(gameId, { ...TAG, thumb: 'up' });
+    const [row] = history.allTags();
+    expect(row.thumb).toBe('up');
+    // Причина должна остаться, не стереться
+    expect(row.reason).toBe('Слишком просто');
+    expect(row.reasonText).toBe('знал с детства');
+  });
 });

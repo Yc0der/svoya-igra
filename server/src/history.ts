@@ -250,6 +250,11 @@ export class GameHistory implements HistoryRecorder {
 
   discardGame(gameId: number): void {
     try {
+      // Удаляем оценки перед удалением игры — иначе FK-ограничение
+      // (question_tags.game_id REFERENCES games.id) упадёт на DELETE FROM games.
+      this.db
+        .prepare(`DELETE FROM question_tags WHERE game_id = ?`)
+        .run(gameId);
       this.db
         .prepare(`DELETE FROM played_questions WHERE game_id = ?`)
         .run(gameId);
@@ -377,13 +382,16 @@ export class GameHistory implements HistoryRecorder {
     reasonText: string | null,
   ): void {
     try {
+      // Пустые строки приводятся к null: по этим двум полям задача 4 отбирает
+      // неразобранные вопросы через WHERE reason IS NULL AND reason_text IS NULL.
+      // Пустая строка вместо NULL молча убрала бы вопрос из списка разбора.
       this.db
         .prepare(
           `UPDATE question_tags SET reason = ?, reason_text = ?
            WHERE game_id = ? AND question_id = ? AND participant_id = ?`,
         )
         .run(
-          reason,
+          reason === null || reason === '' ? null : reason,
           reasonText === null || reasonText === '' ? null : reasonText,
           gameId,
           questionId,
