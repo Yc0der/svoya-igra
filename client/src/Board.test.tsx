@@ -18,6 +18,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     grid: [],
     turnParticipantId: '',
     currentQuestion: null,
+    questionTags: null,
     buzzedParticipantId: null,
     exclusiveAnswererParticipantId: null,
     auctionTurnParticipantId: null,
@@ -60,6 +61,7 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     passBid: vi.fn(),
     assignCat: vi.fn(),
     buzz: vi.fn(),
+    tagQuestion: vi.fn(),
     mediaFinished: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
@@ -557,6 +559,37 @@ describe('Board', () => {
     expect(screen.getByText('Париж')).toBeInTheDocument();
     expect(screen.getByText('Ваня')).toBeInTheDocument();
     expect(screen.getByText('100')).toBeInTheDocument();
+  });
+
+  it('shows an anonymous up/down tag count on reveal once someone has voted', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'reveal',
+          correctAnswer: { text: 'Париж' },
+          questionTags: { up: 2, down: 1, mine: null },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.getByText(/👍 2/)).toBeInTheDocument();
+    expect(screen.getByText(/👎 1/)).toBeInTheDocument();
+    // Анонимный счёт — никаких имён участников рядом с ним.
+    expect(screen.queryByText('Ваня')).not.toBeInTheDocument();
+  });
+
+  it('does not show a tag count on reveal before anyone has voted', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'reveal',
+          correctAnswer: { text: 'Париж' },
+          questionTags: { up: 0, down: 0, mine: null },
+        }),
+      }),
+    );
+    render(<Board />);
+    expect(screen.queryByText(/👍/)).not.toBeInTheDocument();
   });
 
   it('shows the correct answer during judging too, not only reveal', () => {

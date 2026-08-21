@@ -17,6 +17,7 @@ import {
   REVEAL_TIMER_MS,
   VOTE_TIMER_MS,
   TEXT_REVEAL_MIN_MS,
+  QUESTION_TIMER_MS,
 } from './engine.js';
 
 // Attaches a persistent 'message' listener synchronously at socket creation
@@ -942,6 +943,86 @@ describe('createServer game flow', () => {
 
       a.ws.close();
       b.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tag-question доносит оценку игрока до комнаты', async () => {
+    // Тем же способом, каким соседний тест выше доводит партию до 'reveal',
+    // но проще: вопрос доигрывается до таймаута (никто не нажал), а не через
+    // buzz/said-answer/vote — questionTags открывается в reveal независимо
+    // от того, как вопрос туда пришёл.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-tag-question-'));
+      const room = new Room(undefined, TEST_PACK);
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        port: 8080,
+        packsDir: dir,
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } =
+        server.httpServer.address() as import('node:net').AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const first = await joinPlayer(url, 'Ваня');
+      const second = await joinPlayer(url, 'Катя');
+      await first.nextMessage(); // трансляция лобби после join второго
+
+      first.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(first, second, first)) as {
+        game: { phase: string; turnParticipantId: string };
+      };
+      expect(aState.game.phase).toBe('selecting');
+
+      const picker =
+        aState.game.turnParticipantId === first.participantId ? first : second;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(first, second, picker);
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      const afterSelect = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterSelect.game.phase).toBe('question-open');
+
+      // Никто не жмёт — таймер вопроса истекает сам, той же гранулярностью
+      // HEARTBEAT_INTERVAL_MS-шагов, что и соседний тест выше (см. его
+      // комментарий про живые пинги/понги во время advanceTimersByTimeAsync).
+      let remaining = QUESTION_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterTimeout = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterTimeout.game.phase).toBe('reveal');
+
+      first.ws.send(JSON.stringify({ type: 'tag-question', thumb: 'down' }));
+      await settle(first, second, picker);
+
+      expect(room.toGameStateView(first.participantId)?.questionTags).toEqual({
+        up: 0,
+        down: 1,
+        mine: 'down',
+      });
+
+      first.ws.close();
+      second.ws.close();
       await server.close();
       await rm(dir, { recursive: true, force: true });
     } finally {

@@ -19,6 +19,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     grid: [],
     turnParticipantId: '',
     currentQuestion: null,
+    questionTags: null,
     buzzedParticipantId: null,
     exclusiveAnswererParticipantId: null,
     auctionTurnParticipantId: null,
@@ -61,6 +62,7 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     passBid: vi.fn(),
     assignCat: vi.fn(),
     buzz: vi.fn(),
+    tagQuestion: vi.fn(),
     mediaFinished: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
@@ -78,6 +80,16 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     selectPack: vi.fn(),
     ...overrides,
   };
+}
+
+function renderPlayer(
+  game: Partial<GameStateView>,
+  conn: Partial<RoomConnection> = {},
+): void {
+  mockedUseRoomConnection.mockReturnValue(
+    connection({ selfId: 'p1', game: baseGame(game), ...conn }),
+  );
+  render(<Player />);
 }
 
 describe('Player', () => {
@@ -895,6 +907,51 @@ describe('Player', () => {
     expect(screen.getByText(/следующий раунд/i)).toBeInTheDocument();
     expect(screen.getByText('Ваня')).toBeInTheDocument();
     expect(screen.getByText('100')).toBeInTheDocument();
+  });
+
+  it('показывает пальцы, когда окно оценки открыто, и шлёт оценку', async () => {
+    const tagQuestion = vi.fn();
+    renderPlayer(
+      { phase: 'reveal', questionTags: { up: 0, down: 0, mine: null } },
+      { tagQuestion },
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Понравился' }));
+
+    expect(tagQuestion).toHaveBeenCalledWith('up');
+  });
+
+  it('подсвечивает уже поставленную оценку', () => {
+    renderPlayer({
+      phase: 'reveal',
+      questionTags: { up: 1, down: 0, mine: 'up' },
+    });
+
+    expect(screen.getByRole('button', { name: 'Понравился' })).toHaveClass(
+      'is-selected',
+    );
+  });
+
+  it('не показывает пальцы, когда окно закрыто', () => {
+    renderPlayer({ phase: 'question-open', questionTags: null });
+
+    expect(
+      screen.queryByRole('button', { name: 'Понравился' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('не показывает пальцы тому, кто сейчас выбирает вопрос', () => {
+    // «Выбирает сейчас» — это turnParticipantId === selfId; отдельного поля
+    // isMyTurn в GameStateView нет, Player.tsx выводит его сам.
+    renderPlayer({
+      phase: 'selecting',
+      turnParticipantId: 'p1',
+      questionTags: { up: 0, down: 0, mine: null },
+    });
+
+    expect(
+      screen.queryByRole('button', { name: 'Понравился' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows the final standings at game-end by name, not raw id', () => {

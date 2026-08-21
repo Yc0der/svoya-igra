@@ -70,6 +70,13 @@ export interface GameStateView {
     // всегда содержат revealMs (server/src/protocol.ts).
     revealMs?: number | null;
   } | null;
+  // Оценки вопроса, который только что доиграли (design.md,
+  // 2026-08-21-question-tags-design.md). null — окно оценки закрыто.
+  questionTags: {
+    up: number;
+    down: number;
+    mine: 'up' | 'down' | null;
+  } | null;
   buzzedParticipantId: string | null;
   exclusiveAnswererParticipantId: string | null;
   auctionTurnParticipantId: string | null;
@@ -135,6 +142,7 @@ type ClientMessage =
   | { type: 'pass-bid' }
   | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
+  | { type: 'tag-question'; thumb: 'up' | 'down' }
   | { type: 'media-finished'; questionId: string }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
@@ -174,6 +182,7 @@ export interface RoomConnection {
   passBid(): void;
   assignCat(recipientParticipantId: string): void;
   buzz(): void;
+  tagQuestion(thumb: 'up' | 'down'): void;
   mediaFinished(questionId: string): void;
   saidAnswer(): void;
   vote(correct: boolean): void;
@@ -373,6 +382,7 @@ export function useRoomConnection(
     assignCat: (recipientParticipantId) =>
       send({ type: 'assign-cat', recipientParticipantId }),
     buzz: () => send({ type: 'buzz' }),
+    tagQuestion: (thumb) => send({ type: 'tag-question', thumb }),
     // Шлёт только табло, доиграв клип: по этому сигналу сервер запускает
     // таймер вопроса (design.md, 2026-08-18-video-questions-design.md,
     // «Фаза проигрывания медиа»).

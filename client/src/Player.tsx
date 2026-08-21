@@ -29,6 +29,7 @@ export function Player() {
     passBid,
     assignCat,
     buzz,
+    tagQuestion,
     saidAnswer,
     vote,
     adjustScore,
@@ -340,6 +341,33 @@ export function Player() {
     );
   }
 
+  // Пальцы показываются, пока открыто окно оценки (game.questionTags !== null),
+  // и не показываются тому, кто в этот момент выбирает вопрос: у него на
+  // экране сетка тем и цен, на телефоне она и так плотная (design.md,
+  // 2026-08-21-question-tags-design.md, «Где и как долго»). Ему остаётся окно
+  // экрана ответа, где сетки ещё нет.
+  function questionTagButtons() {
+    if (!game?.questionTags) return null;
+    if (game.phase === 'selecting' && isMyTurn) return null;
+    const { mine } = game.questionTags;
+    return (
+      <div className="player-tags">
+        <button
+          className={`button button--yes${mine === 'up' ? ' is-selected' : ''}`}
+          onClick={() => tagQuestion('up')}
+        >
+          Понравился
+        </button>
+        <button
+          className={`button button--no${mine === 'down' ? ' is-selected' : ''}`}
+          onClick={() => tagQuestion('down')}
+        >
+          Не понравился
+        </button>
+      </div>
+    );
+  }
+
   const phaseContent = (() => {
     switch (game.phase) {
       case 'selecting':
@@ -347,6 +375,7 @@ export function Player() {
           return (
             <div className="player">
               <p>Сейчас выбирает {nameOf(game.turnParticipantId)}</p>
+              {questionTagButtons()}
             </div>
           );
         }
@@ -733,6 +762,7 @@ export function Player() {
               <p className="player-comment">{game.correctAnswer.comment}</p>
             )}
             {scoreboard(game.scores)}
+            {questionTagButtons()}
           </div>
         );
 
@@ -741,6 +771,7 @@ export function Player() {
           <div className="player">
             <p>Раунд окончен, следующий раунд начинается</p>
             {scoreboard(game.scores)}
+            {questionTagButtons()}
           </div>
         );
 

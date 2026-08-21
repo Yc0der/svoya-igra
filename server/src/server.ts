@@ -344,6 +344,16 @@ export function createServer(options: CreateServerOptions): GameServer {
         }
       }
 
+      if (
+        message.type === 'tag-question' &&
+        (message.thumb === 'up' || message.thumb === 'down')
+      ) {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.tagQuestion(participantId, message.thumb);
+        }
+      }
+
       if (message.type === 'adjust-score') {
         const participantId = connections.get(ws);
         if (

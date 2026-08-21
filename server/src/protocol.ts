@@ -128,6 +128,10 @@ export type ClientMessage =
   | { type: 'media-finished'; questionId: string }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
+  // Пальцы вверх/вниз по только что доигранному вопросу (design.md,
+  // 2026-08-21-question-tags-design.md). Сервер сам сверяет фазу/окно через
+  // Room.tagQuestion — здесь только форма сообщения.
+  | { type: 'tag-question'; thumb: 'up' | 'down' }
   // Панель ведущего — сервер сам проверяет, что отправитель и есть hostId,
   // клиентскому participantId в поле не доверяет.
   | { type: 'adjust-score'; participantId: string; delta: number }
@@ -211,6 +215,20 @@ export type StartGameErrorReason =
 // StartGameErrorReason — по смыслу это разные отказы, и раздельные типы не
 // дадут по ошибке присвоить одно на месте другого.
 export type SelectQuestionErrorReason = 'no-recipient';
+
+/**
+ * Готовые варианты причины для разбора в конце партии. Пять, и они не
+ * случайны: это ровно те разделы, из которых уже состоит
+ * docs/pack-generator-profile.md — «Калибровка сложности», «Брак», «Вкус».
+ * Клиент рисует их кнопками, сервер принимает только их.
+ */
+export const TAG_REASONS = [
+  'Слишком сложный',
+  'Слишком лёгкий',
+  'Непонятная формулировка',
+  'Спорный ответ',
+  'Неинтересная тема',
+] as const;
 
 export type ServerMessage =
   | { type: 'joined'; participantId: string; token: string; name: string }

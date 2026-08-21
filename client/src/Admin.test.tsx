@@ -20,6 +20,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     grid: [],
     turnParticipantId: '',
     currentQuestion: null,
+    questionTags: null,
     buzzedParticipantId: null,
     exclusiveAnswererParticipantId: null,
     auctionTurnParticipantId: null,
