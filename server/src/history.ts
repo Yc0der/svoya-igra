@@ -28,6 +28,17 @@ CREATE TABLE IF NOT EXISTS played_questions (
   correct               INTEGER,
   contested             INTEGER
 );
+CREATE TABLE IF NOT EXISTS question_tags (
+  id               INTEGER PRIMARY KEY,
+  game_id          INTEGER NOT NULL REFERENCES games(id),
+  question_id      TEXT NOT NULL,
+  participant_id   TEXT NOT NULL,
+  participant_name TEXT NOT NULL,
+  thumb            INTEGER NOT NULL,
+  reason           TEXT,
+  reason_text      TEXT,
+  UNIQUE (game_id, question_id, participant_id)
+);
 `;
 
 export interface ParticipantRecord {
@@ -69,6 +80,25 @@ export interface PlayedQuestionRow extends PlayedQuestionInput {
   gameId: number;
 }
 
+export type Thumb = 'up' | 'down';
+
+export interface QuestionTagInput {
+  questionId: string;
+  participantId: string;
+  // Имя лежит копией рядом с id по той же причине, что и в played_questions:
+  // оно человекочитаемо и переживает смену id.
+  participantName: string;
+  thumb: Thumb;
+}
+
+export interface QuestionTagRow extends QuestionTagInput {
+  gameId: number;
+  // Готовый вариант причины; null — игрок не разбирал этот вопрос в конце.
+  reason: string | null;
+  // Свободный текст; null — не писал.
+  reasonText: string | null;
+}
+
 export interface GameRow {
   id: number;
   startedAt: string;
@@ -87,6 +117,15 @@ export interface HistoryRecorder {
   recordQuestion(gameId: number, row: PlayedQuestionInput): void;
   finishGame(gameId: number, finalScores: Record<string, number>): void;
   discardGame(gameId: number): void;
+  recordTag(gameId: number, tag: QuestionTagInput): void;
+  clearTag(gameId: number, questionId: string, participantId: string): void;
+  recordTagReason(
+    gameId: number,
+    questionId: string,
+    participantId: string,
+    reason: string | null,
+    reasonText: string | null,
+  ): void;
 }
 
 /**
@@ -288,6 +327,89 @@ export class GameHistory implements HistoryRecorder {
       return rows.map(mapPlayedQuestionRow);
     } catch (err) {
       console.error('История: не удалось прочитать последние партии —', err);
+      return [];
+    }
+  }
+
+  recordTag(gameId: number, tag: QuestionTagInput): void {
+    try {
+      // Upsert по UNIQUE (game_id, question_id, participant_id) — это и есть
+      // «передумал»: повторная оценка того же игрока по тому же вопросу
+      // обновляет строку, а не заводит вторую.
+      this.db
+        .prepare(
+          `INSERT INTO question_tags
+             (game_id, question_id, participant_id, participant_name, thumb)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT (game_id, question_id, participant_id)
+           DO UPDATE SET thumb = excluded.thumb`,
+        )
+        .run(
+          gameId,
+          tag.questionId,
+          tag.participantId,
+          tag.participantName,
+          tag.thumb === 'up' ? 1 : 0,
+        );
+    } catch (err) {
+      console.error('История: не удалось записать оценку вопроса —', err);
+    }
+  }
+
+  clearTag(gameId: number, questionId: string, participantId: string): void {
+    try {
+      this.db
+        .prepare(
+          `DELETE FROM question_tags
+           WHERE game_id = ? AND question_id = ? AND participant_id = ?`,
+        )
+        .run(gameId, questionId, participantId);
+    } catch (err) {
+      console.error('История: не удалось снять оценку вопроса —', err);
+    }
+  }
+
+  recordTagReason(
+    gameId: number,
+    questionId: string,
+    participantId: string,
+    reason: string | null,
+    reasonText: string | null,
+  ): void {
+    try {
+      this.db
+        .prepare(
+          `UPDATE question_tags SET reason = ?, reason_text = ?
+           WHERE game_id = ? AND question_id = ? AND participant_id = ?`,
+        )
+        .run(
+          reason,
+          reasonText === null || reasonText === '' ? null : reasonText,
+          gameId,
+          questionId,
+          participantId,
+        );
+    } catch (err) {
+      console.error('История: не удалось записать причину оценки —', err);
+    }
+  }
+
+  allTags(): QuestionTagRow[] {
+    try {
+      const rows = this.db
+        .prepare(`SELECT * FROM question_tags ORDER BY id`)
+        .all() as Record<string, unknown>[];
+      return rows.map((row) => ({
+        gameId: Number(row.game_id),
+        questionId: row.question_id as string,
+        participantId: row.participant_id as string,
+        participantName: row.participant_name as string,
+        thumb: Number(row.thumb) === 1 ? 'up' : 'down',
+        reason: (row.reason as string | null) ?? null,
+        reasonText: (row.reason_text as string | null) ?? null,
+      }));
+    } catch (err) {
+      console.error('История: не удалось прочитать оценки —', err);
       return [];
     }
   }

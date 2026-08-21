@@ -128,6 +128,9 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     recordQuestion: () => {},
     finishGame: () => {},
     discardGame: () => {},
+    recordTag: () => {},
+    clearTag: () => {},
+    recordTagReason: () => {},
   };
   return {
     startGame(input) {
@@ -164,6 +167,36 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
       } catch (err) {
         console.error(
           'История: рекордер бросил исключение (discardGame) —',
+          err,
+        );
+      }
+    },
+    recordTag(gameId, tag) {
+      try {
+        target.recordTag(gameId, tag);
+      } catch (err) {
+        console.error('История: рекордер бросил исключение (recordTag) —', err);
+      }
+    },
+    clearTag(gameId, questionId, participantId) {
+      try {
+        target.clearTag(gameId, questionId, participantId);
+      } catch (err) {
+        console.error('История: рекордер бросил исключение (clearTag) —', err);
+      }
+    },
+    recordTagReason(gameId, questionId, participantId, reason, reasonText) {
+      try {
+        target.recordTagReason(
+          gameId,
+          questionId,
+          participantId,
+          reason,
+          reasonText,
+        );
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (recordTagReason) —',
           err,
         );
       }

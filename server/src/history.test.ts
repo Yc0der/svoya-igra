@@ -278,7 +278,7 @@ describe('formatRecentWindow', () => {
   });
 });
 
-import { findRepeats } from './history.js';
+import { findRepeats, type QuestionTagInput } from './history.js';
 import type { Pack } from './pack.js';
 
 // image задаётся отдельным аргументом, потому что именно наличие картинки
@@ -417,5 +417,101 @@ describe('findRepeats', () => {
       { ...row('Тема', 'в'), text: 'а б' },
     ]);
     expect(report.sameQuestion).toEqual([]);
+  });
+});
+
+describe('GameHistory: оценки вопросов', () => {
+  function gameWithQuestion(history: GameHistory): number {
+    const id = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    history.recordQuestion(id, QUESTION);
+    return id;
+  }
+
+  const TAG: QuestionTagInput = {
+    questionId: 'r1-geo-100',
+    participantId: 'p1',
+    participantName: 'Ваня',
+    thumb: 'down',
+  };
+
+  it('записывает оценку', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    expect(history.allTags()).toEqual([
+      { gameId, ...TAG, reason: null, reasonText: null },
+    ]);
+  });
+
+  it('«передумал» обновляет строку, а не плодит вторую', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTag(gameId, { ...TAG, thumb: 'up' });
+    const tags = history.allTags();
+    expect(tags).toHaveLength(1);
+    expect(tags[0].thumb).toBe('up');
+  });
+
+  it('оценки разных игроков по одному вопросу не мешают друг другу', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTag(gameId, {
+      ...TAG,
+      participantId: 'p2',
+      participantName: 'Катя',
+      thumb: 'up',
+    });
+    expect(history.allTags()).toHaveLength(2);
+  });
+
+  it('снятая оценка удаляется', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.clearTag(gameId, TAG.questionId, TAG.participantId);
+    expect(history.allTags()).toEqual([]);
+  });
+
+  it('причина дописывается к уже поставленной оценке', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+    history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Слишком сложный',
+      'вообще не слышал про это',
+    );
+    const [row] = history.allTags();
+    expect(row.reason).toBe('Слишком сложный');
+    expect(row.reasonText).toBe('вообще не слышал про это');
+  });
+
+  it('не роняет вызовы, когда база недоступна', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.close();
+    expect(() => history.recordTag(gameId, TAG)).not.toThrow();
+    expect(() =>
+      history.clearTag(gameId, TAG.questionId, TAG.participantId),
+    ).not.toThrow();
+    expect(() =>
+      history.recordTagReason(
+        gameId,
+        TAG.questionId,
+        TAG.participantId,
+        'X',
+        '',
+      ),
+    ).not.toThrow();
+    expect(history.allTags()).toEqual([]);
   });
 });

@@ -2604,6 +2604,9 @@ function fakeHistory(): FakeHistory {
     discardGame(gameId) {
       fake.discarded.push(gameId);
     },
+    recordTag() {},
+    clearTag() {},
+    recordTagReason() {},
   };
   return fake;
 }
@@ -2826,6 +2829,9 @@ describe('Room: история партий', () => {
       discardGame: () => {
         throw new Error('boom: discardGame');
       },
+      recordTag: () => {},
+      clearTag: () => {},
+      recordTagReason: () => {},
     };
     const room = roomWithHistory(throwingHistory);
     room.startGame('requester');
