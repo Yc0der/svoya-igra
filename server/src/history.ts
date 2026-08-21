@@ -107,6 +107,32 @@ export interface ReviewItem {
   answer: string;
 }
 
+/**
+ * Вопрос таким, каким его реально видели на экране в СЫГРАННОЙ партии, а не
+ * содержимое файла пакета прямо сейчас — то, из чего собирается жалоба в
+ * профиль генератора за разбор в конце игры (финальное ревью ветки, п. 2).
+ *
+ * До этой правки жалоба собиралась через room.getPackInfo().activeFilename —
+ * то есть привязывалась к пакету, который активен ПРЯМО СЕЙЧАС, а не к тому,
+ * на котором реально играли. На game-end ведущий волен переключить пакет к
+ * следующей партии, пока остальные ещё дописывают разбор; тогда questionId
+ * искался бы в чужом пакете — либо совпал бы по slug'у с другим вопросом
+ * (id вида `r1-<slug>-<price>`, slug'и тем между пакетами легко повторяются),
+ * либо не нашёлся бы вовсе, и жалоба молча терялась в проглоченном catch.
+ * Чтение из played_questions этой партии устраняет обе проблемы разом: не
+ * зависит от того, какой пакет активен сейчас, не трогает диск на каждую
+ * отправку и переживает правку пакета после партии — в профиль попадает тот
+ * текст, который люди реально видели на экране.
+ */
+export interface TagComplaintContext {
+  packFilename: string;
+  packTitle: string;
+  themeName: string;
+  price: number;
+  text: string;
+  answer: string;
+}
+
 export interface GameRow {
   id: number;
   startedAt: string;
@@ -143,6 +169,12 @@ export interface HistoryRecorder {
     participantId: string,
     limit: number,
   ): ReviewItem[];
+  // null — вопрос не найден в played_questions этой партии (устаревший/
+  // подложный questionId). См. докстринг TagComplaintContext.
+  complaintContext(
+    gameId: number,
+    questionId: string,
+  ): TagComplaintContext | null;
 }
 
 /**
@@ -394,10 +426,20 @@ export class GameHistory implements HistoryRecorder {
   /**
    * Возвращает true, только если строка реально обновилась — то есть этот
    * участник действительно ставил палец ВНИЗ именно по этому вопросу
-   * (`AND thumb = 0` в WHERE). Без этой проверки и без проверки возврата
+   * (`AND thumb = 0` в WHERE) И ещё не разбирал его (`AND reason IS NULL
+   * AND reason_text IS NULL`). Без этой проверки и без проверки возврата
    * вызывающим кодом жалоба уходила бы в профиль генератора по одному
    * только присланному клиентом questionId, включая устаревший/подложный —
    * ревью задачи 4, Important 1.
+   *
+   * Второе условие — «разобрал — больше не спрашиваем» (правило уже описано
+   * в докстринге downTagsForReview, но раньше не было в этом WHERE): без
+   * него повторный тап по «Отправить» с тем же уже заполненным reason/text
+   * снова матчил бы строку (SQLite засчитывает совпавший WHERE как
+   * изменение, даже если новые значения совпадают со старыми), возвращал бы
+   * true и дописывал бы в docs/pack-generator-profile.md вторую, возможно
+   * противоречащую первой, претензию на один и тот же вопрос (финальное
+   * ревью ветки, п. 3).
    */
   recordTagReason(
     gameId: number,
@@ -414,7 +456,7 @@ export class GameHistory implements HistoryRecorder {
         .prepare(
           `UPDATE question_tags SET reason = ?, reason_text = ?
            WHERE game_id = ? AND question_id = ? AND participant_id = ?
-             AND thumb = 0`,
+             AND thumb = 0 AND reason IS NULL AND reason_text IS NULL`,
         )
         .run(
           reason === null || reason === '' ? null : reason,
@@ -466,6 +508,44 @@ export class GameHistory implements HistoryRecorder {
     } catch (err) {
       console.error('История: не удалось прочитать оценки для разбора —', err);
       return [];
+    }
+  }
+
+  /**
+   * Материал для жалобы в профиль генератора — см. докстринг
+   * TagComplaintContext. Читает played_questions/games ЭТОЙ партии, а не
+   * текущий активный пакет: questionId ищется среди вопросов, которые в этой
+   * партии реально были сыграны (recordPlayedQuestion в room.ts пишет туда
+   * каждый закрывшийся вопрос), поэтому подмена активного пакета между
+   * game-end и отправкой разбора на него не влияет.
+   */
+  complaintContext(
+    gameId: number,
+    questionId: string,
+  ): TagComplaintContext | null {
+    try {
+      const row = this.db
+        .prepare(
+          `SELECT g.pack_filename, g.pack_title, q.theme_name, q.price,
+                  q.text, q.answer
+           FROM played_questions q
+           JOIN games g ON g.id = q.game_id
+           WHERE q.game_id = ? AND q.question_id = ?
+           LIMIT 1`,
+        )
+        .get(gameId, questionId) as Record<string, unknown> | undefined;
+      if (!row) return null;
+      return {
+        packFilename: row.pack_filename as string,
+        packTitle: row.pack_title as string,
+        themeName: row.theme_name as string,
+        price: Number(row.price),
+        text: row.text as string,
+        answer: row.answer as string,
+      };
+    } catch (err) {
+      console.error('История: не удалось прочитать контекст жалобы —', err);
+      return null;
     }
   }
 

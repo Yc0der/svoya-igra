@@ -543,7 +543,7 @@ describe('GameHistory: оценки вопросов', () => {
       gameId,
       TAG.questionId,
       TAG.participantId,
-      'Слишком просто',
+      'Слишком лёгкий',
       'знал с детства',
     );
     // Передумали, сменили палец на up
@@ -551,8 +551,113 @@ describe('GameHistory: оценки вопросов', () => {
     const [row] = history.allTags();
     expect(row.thumb).toBe('up');
     // Причина должна остаться, не стереться
-    expect(row.reason).toBe('Слишком просто');
+    expect(row.reason).toBe('Слишком лёгкий');
     expect(row.reasonText).toBe('знал с детства');
+  });
+
+  // Финальное ревью ветки, п. 7: guard `AND thumb = 0` защищает профиль
+  // генератора от записи по вопросу с пальцем ВВЕРХ. Раньше это проверялось
+  // только фейком в room.test.ts, повторяющим ту же логику своими руками, —
+  // здесь настоящий SQL.
+  it('причина не проходит по вопросу с пальцем вверх', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, { ...TAG, thumb: 'up' });
+
+    const updated = history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Слишком сложный',
+      'текст',
+    );
+
+    expect(updated).toBe(false);
+    const [row] = history.allTags();
+    expect(row.reason).toBeNull();
+    expect(row.reasonText).toBeNull();
+  });
+
+  // Финальное ревью ветки, п. 3: без `AND reason IS NULL AND reason_text IS
+  // NULL` в WHERE повторный UPDATE теми же (или другими) значениями снова
+  // матчит строку и снова возвращает true — сервер дописал бы в профиль
+  // генератора вторую, возможно противоречащую первой, претензию на один и
+  // тот же вопрос.
+  it('повторная отправка причины по уже разобранному вопросу не проходит и не переписывает её', () => {
+    const history = makeHistory();
+    const gameId = gameWithQuestion(history);
+    history.recordTag(gameId, TAG);
+
+    const first = history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Слишком сложный',
+      'первая причина',
+    );
+    const second = history.recordTagReason(
+      gameId,
+      TAG.questionId,
+      TAG.participantId,
+      'Спорный ответ',
+      'вторая причина',
+    );
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    const [row] = history.allTags();
+    expect(row.reason).toBe('Слишком сложный');
+    expect(row.reasonText).toBe('первая причина');
+  });
+});
+
+describe('GameHistory.complaintContext', () => {
+  it('отдаёт вопрос таким, каким его видели в СЫГРАННОЙ партии', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    history.recordQuestion(gameId, QUESTION);
+
+    expect(history.complaintContext(gameId, QUESTION.questionId)).toEqual({
+      packFilename: 'p.json',
+      packTitle: 'Пак',
+      themeName: QUESTION.themeName,
+      price: QUESTION.price,
+      text: QUESTION.text,
+      answer: QUESTION.answer,
+    });
+  });
+
+  it('неизвестный в этой партии вопрос — null', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'Пак',
+      participants: [],
+    })!;
+    history.recordQuestion(gameId, QUESTION);
+
+    expect(history.complaintContext(gameId, 'ghost')).toBeNull();
+  });
+
+  it('не роняет вызов, когда база недоступна', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'Пак',
+      participants: [],
+    })!;
+    history.close();
+    expect(() =>
+      history.complaintContext(gameId, QUESTION.questionId),
+    ).not.toThrow();
+    expect(history.complaintContext(gameId, QUESTION.questionId)).toBeNull();
   });
 });
 

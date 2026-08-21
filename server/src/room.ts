@@ -29,7 +29,12 @@ import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
-import type { HistoryRecorder, PlayedQuestionInput, Thumb } from './history.js';
+import type {
+  HistoryRecorder,
+  PlayedQuestionInput,
+  TagComplaintContext,
+  Thumb,
+} from './history.js';
 
 export interface Participant {
   id: string;
@@ -132,6 +137,7 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     clearTag: () => {},
     recordTagReason: () => false,
     downTagsForReview: () => [],
+    complaintContext: () => null,
   };
   // Аннотация типа на самом литерале (не только на возврате функции) —
   // без неё пропущенный метод интерфейса не ловится `tsc`, потому что
@@ -218,6 +224,17 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
           err,
         );
         return [];
+      }
+    },
+    complaintContext(gameId, questionId) {
+      try {
+        return target.complaintContext(gameId, questionId);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (complaintContext) —',
+          err,
+        );
+        return null;
       }
     },
   };
@@ -834,10 +851,16 @@ export class Room {
    * Причина, по которой игрок пометил вопрос пальцем вниз. Приходит с экрана
    * разбора в конце партии.
    *
-   * Возвращает true, только если строка в истории реально обновилась —
-   * то есть разбор идёт на экране game-end (сам экран существует только
-   * там) И этот участник действительно ставил палец ВНИЗ именно по этому
-   * вопросу (это проверяет history.recordTagReason своим `AND thumb = 0`).
+   * Возвращает контекст вопроса ТОЙ ПАРТИИ, В КОТОРОЙ ЕГО РЕАЛЬНО ИГРАЛИ
+   * (history.complaintContext, читает played_questions/games, а не текущий
+   * активный пакет — финальное ревью ветки, п. 2), только если строка в
+   * истории реально обновилась: разбор идёт на экране game-end (сам экран
+   * существует только там) И этот участник действительно ставил палец ВНИЗ
+   * именно по этому вопросу И ещё не разбирал его (это проверяет
+   * history.recordTagReason своим `AND thumb = 0 AND reason IS NULL AND
+   * reason_text IS NULL`). null — ничего не обновилось и записывать в
+   * профиль генератора нечего.
+   *
    * Вызывающий (server.ts) обязан смотреть на возврат перед тем, как
    * дописывать претензию в профиль генератора — иначе устаревший или
    * подложный questionId от клиента превращался бы в выдуманную жалобу на
@@ -848,9 +871,9 @@ export class Room {
     questionId: string,
     reason: string | null,
     text: string,
-  ): boolean {
-    if (this.game?.phase !== 'game-end') return false;
-    if (this.historyGameId === null) return false;
+  ): TagComplaintContext | null {
+    if (this.game?.phase !== 'game-end') return null;
+    if (this.historyGameId === null) return null;
     const updated = this.history.recordTagReason(
       this.historyGameId,
       questionId,
@@ -858,8 +881,9 @@ export class Room {
       reason,
       text,
     );
-    if (updated) this.notify();
-    return updated;
+    if (!updated) return null;
+    this.notify();
+    return this.history.complaintContext(this.historyGameId, questionId);
   }
 
   getState(): RoomState {
@@ -1363,6 +1387,24 @@ export class Room {
     // вехе, и перечисление молча теряло бы окно (design.md,
     // 2026-08-21-question-tags-design.md, «Где и как долго»).
     if (questionBefore === null && state.currentQuestion !== null) {
+      this.taggableQuestionId = null;
+      this.currentTags.clear();
+    }
+    // Партия уходит в финал или в конец: окно оценки обязано закрыться и
+    // здесь, а не только «выбрали следующий вопрос» — финальный вопрос не
+    // оценивается вовсе (design.md, «Финальный вопрос не оценивается»), и
+    // после последнего вопроса основных раундов currentQuestion следующим
+    // событием не станет ни разу за весь финал: он обнуляется сразу
+    // (afterReveal → base с currentQuestion: null) и остаётся null через
+    // final-elim/…/final-reveal/game-end. Без этой ветки условие выше
+    // «questionBefore === null && currentQuestion !== null» никогда не
+    // срабатывает на этом пути, и taggableQuestionId (а с ним счёт на
+    // табло) доживает через весь финал до game-end включительно (финальное
+    // ревью ветки, п. 4).
+    if (
+      (phaseBefore !== 'final-elim' && state.phase === 'final-elim') ||
+      (phaseBefore !== 'game-end' && state.phase === 'game-end')
+    ) {
       this.taggableQuestionId = null;
       this.currentTags.clear();
     }

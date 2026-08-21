@@ -21,6 +21,7 @@ import { loadPack } from './pack.js';
 import type { Question } from './pack.js';
 import { appendComplaint, type ComplaintEntry } from './generatorProfile.js';
 import { TAG_REASONS } from './protocol.js';
+import type { TagComplaintContext } from './history.js';
 
 export interface CreateServerOptions {
   room: Room;
@@ -238,24 +239,39 @@ export function createServer(options: CreateServerOptions): GameServer {
   // неизвестно чем» — генератору нечего с этим делать (design.md,
   // 2026-08-21-question-tags-design.md, «Куда уходит собранное»). Такая
   // оценка остаётся в базе цифрой и дождётся агрегации слайса B.
+  //
+  // context приходит от room.submitTagReason() — это вопрос ТОЙ ПАРТИИ, В
+  // КОТОРОЙ ЕГО РЕАЛЬНО ИГРАЛИ (history.complaintContext), а не текущий
+  // активный пакет: до этой правки жалоба собиралась через
+  // room.getPackInfo().activeFilename и loadPack(), а на game-end ведущий
+  // волен уже переключить пакет к следующей партии, пока остальные ещё
+  // дописывают разбор — questionId искался бы в чужом пакете (финальное
+  // ревью ветки, п. 2).
   async function appendTagReasonToProfile(
-    questionId: string,
+    context: TagComplaintContext,
     reason: string | null,
     text: string,
   ): Promise<void> {
     if (!profilePath) return;
     const trimmed = text.trim();
     if (reason === null && trimmed === '') return;
-    const filename = room.getPackInfo().activeFilename;
-    if (!filename) return;
     const complaint =
       reason === null
         ? `оценка игрока после партии: ${trimmed}`
         : trimmed === ''
           ? `${reason.toLowerCase()} (оценка игрока после партии)`
           : `${reason.toLowerCase()} (оценка игрока после партии): ${trimmed}`;
+    const entry: ComplaintEntry = {
+      date: new Date().toISOString().slice(0, 10),
+      packFilename: context.packFilename,
+      packTitle: context.packTitle,
+      themeName: context.themeName,
+      price: context.price,
+      questionText: context.text,
+      answer: context.answer,
+      complaint,
+    };
     try {
-      const entry = await buildComplaintEntry(filename, questionId, complaint);
       await withProfileWriteLock(() => appendComplaint(profilePath, entry));
     } catch (err) {
       // Проглатываем: партия уже кончилась, показывать игроку ошибку
@@ -422,20 +438,25 @@ export function createServer(options: CreateServerOptions): GameServer {
         const participantId = connections.get(ws);
         if (participantId) {
           // room.submitTagReason сама проверяет фазу game-end и что
-          // participantId реально ставил палец вниз по этому questionId —
-          // в профиль генератора уходит только реально существовавшая
-          // оценка, а не любой присланный клиентом id (ревью задачи 4,
-          // Important 1: устаревший/подложный questionId раньше долетал до
-          // appendTagReasonToProfile безусловно).
-          const updated = room.submitTagReason(
+          // participantId реально ставил палец вниз по этому questionId, ещё
+          // не разобранному — в профиль генератора уходит только реально
+          // существовавшая, ещё не записанная оценка, а не любой присланный
+          // клиентом id (ревью задачи 4, Important 1: устаревший/подложный
+          // questionId раньше долетал до appendTagReasonToProfile
+          // безусловно) и не повторная отправка той же оценки (финальное
+          // ревью ветки, п. 3: WHERE-условие recordTagReason теперь includes
+          // reason IS NULL AND reason_text IS NULL). Возвращённый контекст —
+          // вопрос той партии, в которой его реально играли, а не текущий
+          // активный пакет (финальное ревью ветки, п. 2).
+          const context = room.submitTagReason(
             participantId,
             message.questionId,
             message.reason,
             message.text,
           );
-          if (updated) {
+          if (context) {
             await appendTagReasonToProfile(
-              message.questionId,
+              context,
               message.reason,
               message.text,
             );

@@ -2681,6 +2681,24 @@ function fakeHistory(): FakeHistory {
           };
         });
     },
+    // Тот же материал, что и настоящий GameHistory.complaintContext — вопрос
+    // ЭТОЙ партии (fake.questions), не привязанный к текущему активному
+    // пакету.
+    complaintContext(gameId, questionId) {
+      const question = fake.questions.find(
+        (q) => q.gameId === gameId && q.row.questionId === questionId,
+      );
+      if (!question) return null;
+      const game = fake.games[gameId - 1];
+      return {
+        packFilename: game.packFilename,
+        packTitle: game.packTitle,
+        themeName: question.row.themeName,
+        price: question.row.price,
+        text: question.row.text,
+        answer: question.row.answer,
+      };
+    },
   };
   return fake;
 }
@@ -2926,6 +2944,9 @@ describe('Room: история партий', () => {
       recordTagReason: () => false,
       downTagsForReview: () => {
         throw new Error('boom: downTagsForReview');
+      },
+      complaintContext: () => {
+        throw new Error('boom: complaintContext');
       },
     };
     const room = roomWithHistory(throwingHistory);
@@ -3322,12 +3343,69 @@ describe('Room: оценки вопросов', () => {
       room.tagQuestion(picker, 'down');
       vi.advanceTimersByTime(REVEAL_TIMER_MS); // reveal -> selecting
 
+      // Главное поведение всей механики — окно продлевается на время выбора
+      // следующего вопроса, а не закрывается вместе с фазой reveal (design.md,
+      // 2026-08-21-question-tags-design.md, «Где и как долго»). Без этой
+      // проверки продление держалось бы только на комментарии — ревьюер не
+      // может увидеть, что оно реально работает, только прочитать, что так
+      // задумано (финальное ревью ветки, п. 6).
+      expect(room.toGameStateView(picker)?.phase).toBe('selecting');
+      expect(room.toGameStateView(picker)?.questionTags).toEqual({
+        up: 0,
+        down: 1,
+        mine: 'down',
+      });
+
       room.selectQuestion(pickerOf(room), 0, 'q2');
     } finally {
       vi.useRealTimers();
     }
 
     expect(room.toGameStateView(picker)?.questionTags).toBeNull();
+  });
+
+  it('окно оценки закрывается при входе в финал, даже если вопрос был последним в раунде', () => {
+    // Тот же дефект, что и «выбор следующего вопроса закрывает окно» выше
+    // призван предотвратить, но с другой стороны: FINAL_PACK — один вопрос в
+    // единственном раунде, и после его ответа afterReveal уводит партию
+    // прямо в final-elim, минуя round-end и selecting. currentQuestion при
+    // этом остаётся null всю дорогу через финал — «выбрали следующий
+    // вопрос» (questionBefore === null && currentQuestion !== null) на этом
+    // пути ни разу не срабатывает, и без отдельного закрытия на переходе в
+    // final-elim/game-end taggableQuestionId дожил бы до самого конца партии
+    // (финальное ревью ветки, п. 4).
+    vi.useFakeTimers();
+    try {
+      const room = new Room(
+        undefined,
+        FINAL_PACK,
+        undefined,
+        'final-test.json',
+        fakeHistory(),
+      );
+      room.join('A');
+      room.join('B');
+      room.join('C');
+      const [a, b, host] = room.getState().participants.map((p) => p.id);
+      room.toggleHost(host);
+      room.startGame(host);
+      const picker = room.getState().game?.turnCounterId === a ? a : b;
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      room.vote(host, true); // судейство с ведущим — решает сразу, окно открывается
+
+      expect(room.toGameStateView(picker)?.questionTags).not.toBeNull();
+      room.tagQuestion(picker, 'down');
+
+      vi.advanceTimersByTime(REVEAL_TIMER_MS); // reveal -> final-elim (напрямую)
+
+      expect(room.toGameStateView(picker)?.phase).toBe('final-elim');
+      expect(room.toGameStateView(picker)?.questionTags).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('при выключенном тумблере оценка работает, но не пишется', () => {
@@ -3406,9 +3484,9 @@ describe('Room: оценки вопросов', () => {
 
     // picker поставил палец вниз только по q1 (см. выше) — q2 он никогда не
     // тегал, значит причина по q2 не должна ни на что повлиять.
-    const updated = room.submitTagReason(picker, 'q2', 'Слишком сложный', '');
+    const context = room.submitTagReason(picker, 'q2', 'Слишком сложный', '');
 
-    expect(updated).toBe(false);
+    expect(context).toBeNull();
     expect(history.reasons).toEqual([]);
     expect(room.toGameStateView(picker)?.tagReview).toHaveLength(1);
   });
@@ -3423,9 +3501,48 @@ describe('Room: оценки вопросов', () => {
 
     // Фаза здесь 'reveal', не 'game-end' — экран разбора существует только
     // на game-end (см. тест выше «до конца партии разбор пуст»).
-    const updated = room.submitTagReason(picker, 'q1', 'Слишком сложный', '');
+    const context = room.submitTagReason(picker, 'q1', 'Слишком сложный', '');
 
-    expect(updated).toBe(false);
+    expect(context).toBeNull();
     expect(history.reasons).toEqual([]);
+  });
+
+  // Финальное ревью ветки, п. 2: контекст жалобы приходит из истории (вопрос
+  // ТОЙ партии, в которой его реально играли), а не из текущего активного
+  // пакета — submitTagReason обязан вернуть его целиком, чтобы server.ts
+  // мог собрать запись в docs/pack-generator-profile.md без обращения к
+  // room.getPackInfo()/файлу пакета.
+  it('успешная запись причины возвращает контекст вопроса из истории', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
+      room.tagQuestion(picker, 'down');
+      vi.advanceTimersByTime(REVEAL_TIMER_MS);
+      driveToGameEnd(room, ['q2']);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const context = room.submitTagReason(
+      picker,
+      'q1',
+      'Слишком сложный',
+      'вообще не знал',
+    );
+
+    expect(context).toEqual({
+      packFilename: 'test.json',
+      packTitle: 'Тест',
+      themeName: 'Тема',
+      price: 100,
+      text: 'Вопрос 1?',
+      answer: 'ответ 1',
+    });
   });
 });
