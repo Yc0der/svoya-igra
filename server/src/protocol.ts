@@ -65,6 +65,17 @@ export interface GameStateView {
     // Оценка самого смотрящего; null — не оценивал.
     mine: 'up' | 'down' | null;
   } | null;
+  // Помеченные вниз и ещё не разобранные вопросы САМОГО смотрящего — материал
+  // экрана в конце партии (design.md, 2026-08-21-question-tags-design.md).
+  // Пустой массив, пока партия не кончилась, а также когда запись истории
+  // выключена тумблером: строк в базе нет, значит и разбирать нечего.
+  tagReview: {
+    questionId: string;
+    themeName: string;
+    price: number;
+    text: string;
+    answer: string;
+  }[];
   buzzedParticipantId: string | null;
   // Не null только пока фаза — question-open/buzzed/judging для вопроса,
   // требующего эксклюзивного права ответа («кот» или «аукцион») —
@@ -132,6 +143,18 @@ export type ClientMessage =
   // 2026-08-21-question-tags-design.md). Сервер сам сверяет фазу/окно через
   // Room.tagQuestion — здесь только форма сообщения.
   | { type: 'tag-question'; thumb: 'up' | 'down' }
+  // Причина, по которой игрок пометил вопрос пальцем вниз — экран разбора в
+  // конце партии (design.md, 2026-08-21-question-tags-design.md). Сервер сам
+  // сверяет фазу и что участник действительно ставил палец вниз именно по
+  // этому вопросу через Room.submitTagReason.
+  | {
+      type: 'tag-reason';
+      questionId: string;
+      // Один из TAG_REASONS либо null, если игрок написал только текст.
+      reason: string | null;
+      // Свободный текст; пустая строка — не писал.
+      text: string;
+    }
   // Панель ведущего — сервер сам проверяет, что отправитель и есть hostId,
   // клиентскому participantId в поле не доверяет.
   | { type: 'adjust-score'; participantId: string; delta: number }

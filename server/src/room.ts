@@ -131,6 +131,7 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     recordTag: () => {},
     clearTag: () => {},
     recordTagReason: () => {},
+    downTagsForReview: () => [],
   };
   return {
     startGame(input) {
@@ -201,6 +202,17 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
         );
       }
     },
+    downTagsForReview(gameId, participantId, limit) {
+      try {
+        return target.downTagsForReview(gameId, participantId, limit);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (downTagsForReview) —',
+          err,
+        );
+        return [];
+      }
+    },
   };
 }
 
@@ -211,6 +223,12 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
 // возобновившимся отсчётом вопроса, а не перед ним — общее время на вопрос
 // от этого не растёт.
 const GRACE_EXCLUSION_MS = 5_000;
+
+// Потолок разбора: больше пяти вопросов подряд гарантированно бросят на
+// третьем, и не будет разобрано ни одного. Число условное, подлежит
+// калибровке на живых партиях (design.md,
+// 2026-08-21-question-tags-design.md, «Потолок в пять вопросов»).
+const TAG_REVIEW_LIMIT = 5;
 
 export class Room {
   private participants: Participant[];
@@ -804,6 +822,27 @@ export class Room {
     this.notify();
   }
 
+  /**
+   * Причина, по которой игрок пометил вопрос пальцем вниз. Приходит с экрана
+   * разбора в конце партии.
+   */
+  submitTagReason(
+    participantId: string,
+    questionId: string,
+    reason: string | null,
+    text: string,
+  ): void {
+    if (this.historyGameId === null) return;
+    this.history.recordTagReason(
+      this.historyGameId,
+      questionId,
+      participantId,
+      reason,
+      text,
+    );
+    this.notify();
+  }
+
   getState(): RoomState {
     return {
       participants: this.participants.map((p) => ({ ...p })),
@@ -1073,6 +1112,16 @@ export class Room {
                   ? null
                   : (this.currentTags.get(viewerId) ?? null),
             },
+      tagReview:
+        game.phase === 'game-end' &&
+        viewerId !== null &&
+        this.historyGameId !== null
+          ? this.history.downTagsForReview(
+              this.historyGameId,
+              viewerId,
+              TAG_REVIEW_LIMIT,
+            )
+          : [],
       buzzedParticipantId: game.buzzedCounterId,
       exclusiveAnswererParticipantId: game.exclusiveAnswererCounterId,
       auctionTurnParticipantId: game.auctionTurnCounterId,

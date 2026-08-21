@@ -7,6 +7,13 @@ import type { GameStateView, RoomConnection } from './useRoomConnection';
 
 vi.mock('./useRoomConnection', () => ({
   useRoomConnection: vi.fn(),
+  TAG_REASONS: [
+    'Слишком сложный',
+    'Слишком лёгкий',
+    'Непонятная формулировка',
+    'Спорный ответ',
+    'Неинтересная тема',
+  ],
 }));
 
 const mockedUseRoomConnection = vi.mocked(useRoomConnection);
@@ -20,6 +27,7 @@ function baseGame(overrides: Partial<GameStateView> = {}): GameStateView {
     turnParticipantId: '',
     currentQuestion: null,
     questionTags: null,
+    tagReview: [],
     buzzedParticipantId: null,
     exclusiveAnswererParticipantId: null,
     auctionTurnParticipantId: null,
@@ -63,6 +71,7 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     assignCat: vi.fn(),
     buzz: vi.fn(),
     tagQuestion: vi.fn(),
+    submitTagReason: vi.fn(),
     mediaFinished: vi.fn(),
     saidAnswer: vi.fn(),
     vote: vi.fn(),
@@ -1970,5 +1979,56 @@ describe('Player — уведомление о перебитой ставке',
     );
     rerender(<Player />);
     expect(screen.queryByText(/вашу ставку перебили/i)).not.toBeInTheDocument();
+  });
+
+  it('на конце игры показывает разбор помеченных вниз вопросов', () => {
+    renderPlayer({
+      phase: 'game-end',
+      tagReview: [
+        {
+          questionId: 'q1',
+          themeName: 'География',
+          price: 100,
+          text: 'Столица Австралии?',
+          answer: 'Канберра',
+        },
+      ],
+    });
+
+    expect(screen.getByText('Столица Австралии?')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Слишком сложный' }),
+    ).toBeInTheDocument();
+  });
+
+  it('шлёт выбранную причину', async () => {
+    const submitTagReason = vi.fn();
+    renderPlayer(
+      {
+        phase: 'game-end',
+        tagReview: [
+          {
+            questionId: 'q1',
+            themeName: 'География',
+            price: 100,
+            text: 'Столица Австралии?',
+            answer: 'Канберра',
+          },
+        ],
+      },
+      { submitTagReason },
+    );
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Слишком сложный' }),
+    );
+
+    expect(submitTagReason).toHaveBeenCalledWith('q1', 'Слишком сложный', '');
+  });
+
+  it('без помеченных вниз вопросов разбора нет', () => {
+    renderPlayer({ phase: 'game-end', tagReview: [] });
+
+    expect(screen.queryByText(/что было не так/i)).not.toBeInTheDocument();
   });
 });

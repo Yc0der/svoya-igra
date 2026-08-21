@@ -6,7 +6,11 @@ import {
   type CSSProperties,
   type FormEvent,
 } from 'react';
-import { useRoomConnection, type GameStateView } from './useRoomConnection';
+import {
+  useRoomConnection,
+  TAG_REASONS,
+  type GameStateView,
+} from './useRoomConnection';
 import { useCountdown } from './useCountdown';
 import { SELECT_QUESTION_ERROR_TEXT, START_GAME_ERROR_TEXT } from './errorText';
 
@@ -30,6 +34,7 @@ export function Player() {
     assignCat,
     buzz,
     tagQuestion,
+    submitTagReason,
     saidAnswer,
     vote,
     adjustScore,
@@ -56,6 +61,9 @@ export function Player() {
   const [wagerInput, setWagerInput] = useState('');
   const [answerInput, setAnswerInput] = useState('');
   const [bidInput, setBidInput] = useState('');
+  // Текст разбора помеченных вниз вопросов, по questionId — экран
+  // game-end (design.md, 2026-08-21-question-tags-design.md).
+  const [reviewText, setReviewText] = useState<Record<string, string>>({});
   // Один раз за подключение ведущий решает, продолжать ли партию, найденную
   // на сервере при заходе (например, восстановленную из снапшота после
   // перезапуска), или отбросить её и начать заново — см. блок ниже
@@ -800,6 +808,52 @@ export function Player() {
         return (
           <div className="player">
             <h2>Итог</h2>
+            {game.tagReview.length > 0 && (
+              <div className="player-review">
+                <h3>Что было не так?</h3>
+                {game.tagReview.map((item) => (
+                  <div key={item.questionId} className="player-review-item">
+                    <p className="player-review-question">{item.text}</p>
+                    <p className="player-review-answer">Ответ: {item.answer}</p>
+                    <div className="player-review-reasons">
+                      {TAG_REASONS.map((reason) => (
+                        <button
+                          key={reason}
+                          className="button"
+                          onClick={() =>
+                            submitTagReason(item.questionId, reason, '')
+                          }
+                        >
+                          {reason}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      value={reviewText[item.questionId] ?? ''}
+                      onChange={(e) =>
+                        setReviewText((prev) => ({
+                          ...prev,
+                          [item.questionId]: e.target.value,
+                        }))
+                      }
+                      placeholder="или своими словами"
+                    />
+                    <button
+                      className="button"
+                      onClick={() =>
+                        submitTagReason(
+                          item.questionId,
+                          null,
+                          reviewText[item.questionId] ?? '',
+                        )
+                      }
+                    >
+                      Отправить
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             {scoreboard(game.scores)}
             {canRestart && (
               <button className="button button--primary" onClick={startGame}>

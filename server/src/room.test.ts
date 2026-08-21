@@ -11,6 +11,7 @@ import {
   TEXT_REVEAL_MIN_MS,
   VOTE_TIMER_MS,
   FINAL_REVEAL_TIMER_MS,
+  ROUND_END_TIMER_MS,
 } from './engine.js';
 import type {
   HistoryRecorder,
@@ -2639,6 +2640,34 @@ function fakeHistory(): FakeHistory {
         reasonText,
       });
     },
+    downTagsForReview(gameId, participantId, limit) {
+      return fake.tags
+        .filter(
+          (t) =>
+            t.gameId === gameId &&
+            t.tag.participantId === participantId &&
+            t.tag.thumb === 'down' &&
+            !fake.reasons.some(
+              (r) =>
+                r.gameId === gameId &&
+                r.questionId === t.tag.questionId &&
+                r.participantId === participantId,
+            ),
+        )
+        .slice(0, limit)
+        .map((t) => {
+          const question = fake.questions.find(
+            (q) => q.gameId === gameId && q.row.questionId === t.tag.questionId,
+          )!.row;
+          return {
+            questionId: t.tag.questionId,
+            themeName: question.themeName,
+            price: question.price,
+            text: question.text,
+            answer: question.answer,
+          };
+        });
+    },
   };
   return fake;
 }
@@ -2662,6 +2691,24 @@ function playQuestionToTimeout(room: Room): void {
     room.selectQuestion(pickerOf(room), 0, 'q1');
     vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
     vi.advanceTimersByTime(QUESTION_TIMER_MS);
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+// remaining — какие вопросы ещё не сыграны. Список принимается параметром,
+// а не зашит: тест выше играет q1 отдельно (чтобы успеть поставить палец в
+// открытое окно) и досылает сюда только остаток.
+function driveToGameEnd(room: Room, remaining: string[]): void {
+  vi.useFakeTimers();
+  try {
+    for (const questionId of remaining) {
+      room.selectQuestion(pickerOf(room), 0, questionId);
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
+      vi.advanceTimersByTime(REVEAL_TIMER_MS);
+    }
+    vi.advanceTimersByTime(ROUND_END_TIMER_MS);
   } finally {
     vi.useRealTimers();
   }
@@ -2864,6 +2911,9 @@ describe('Room: история партий', () => {
       recordTag: () => {},
       clearTag: () => {},
       recordTagReason: () => {},
+      downTagsForReview: () => {
+        throw new Error('boom: downTagsForReview');
+      },
     };
     const room = roomWithHistory(throwingHistory);
     room.startGame('requester');
@@ -3283,5 +3333,39 @@ describe('Room: оценки вопросов', () => {
       mine: 'down',
     });
     expect(history.tags).toEqual([]);
+  });
+
+  it('на game-end отдаёт разбор только тому, кто ставил пальцы вниз', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    // Первый вопрос играется здесь, чтобы успеть поставить палец в открытое
+    // окно; остаток партии доигрывает driveToGameEnd.
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS); // question-reveal -> question-open
+      vi.advanceTimersByTime(QUESTION_TIMER_MS); // question timer -> reveal
+      room.tagQuestion(picker, 'down');
+      vi.advanceTimersByTime(REVEAL_TIMER_MS); // reveal -> selecting
+      driveToGameEnd(room, ['q2']);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(room.toGameStateView(picker)?.tagReview).toHaveLength(1);
+    expect(room.toGameStateView('someone-else')?.tagReview).toEqual([]);
+  });
+
+  it('до конца партии разбор пуст', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    playQuestionToTimeout(room);
+    room.tagQuestion(picker, 'down');
+
+    expect(room.toGameStateView(picker)?.tagReview).toEqual([]);
   });
 });

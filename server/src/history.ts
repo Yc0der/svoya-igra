@@ -99,6 +99,14 @@ export interface QuestionTagRow extends QuestionTagInput {
   reasonText: string | null;
 }
 
+export interface ReviewItem {
+  questionId: string;
+  themeName: string;
+  price: number;
+  text: string;
+  answer: string;
+}
+
 export interface GameRow {
   id: number;
   startedAt: string;
@@ -126,6 +134,11 @@ export interface HistoryRecorder {
     reason: string | null,
     reasonText: string | null,
   ): void;
+  downTagsForReview(
+    gameId: number,
+    participantId: string,
+    limit: number,
+  ): ReviewItem[];
 }
 
 /**
@@ -399,6 +412,45 @@ export class GameHistory implements HistoryRecorder {
         );
     } catch (err) {
       console.error('История: не удалось записать причину оценки —', err);
+    }
+  }
+
+  /**
+   * Помеченные вниз и ещё не разобранные вопросы одного игрока — материал
+   * экрана разбора в конце партии.
+   *
+   * Условие «reason IS NULL AND reason_text IS NULL» и есть правило «разобрал
+   * — больше не спрашиваем»: заполненная причина убирает вопрос из списка, и
+   * второй раз то же самое человеку не покажут.
+   */
+  downTagsForReview(
+    gameId: number,
+    participantId: string,
+    limit: number,
+  ): ReviewItem[] {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT q.question_id, q.theme_name, q.price, q.text, q.answer
+           FROM question_tags t
+           JOIN played_questions q
+             ON q.game_id = t.game_id AND q.question_id = t.question_id
+           WHERE t.game_id = ? AND t.participant_id = ? AND t.thumb = 0
+             AND t.reason IS NULL AND t.reason_text IS NULL
+           ORDER BY q.id
+           LIMIT ?`,
+        )
+        .all(gameId, participantId, limit) as Record<string, unknown>[];
+      return rows.map((row) => ({
+        questionId: row.question_id as string,
+        themeName: row.theme_name as string,
+        price: Number(row.price),
+        text: row.text as string,
+        answer: row.answer as string,
+      }));
+    } catch (err) {
+      console.error('История: не удалось прочитать оценки для разбора —', err);
+      return [];
     }
   }
 

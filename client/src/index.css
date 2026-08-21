@@ -382,6 +382,35 @@ code {
   opacity: 0.75;
 }
 
+.player-review {
+  margin-bottom: 1.5rem;
+  text-align: left;
+}
+
+.player-review-item {
+  margin-bottom: 1.25rem;
+}
+
+.player-review-question {
+  font-weight: 600;
+}
+
+.player-review-answer {
+  opacity: 0.75;
+}
+
+.player-review-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.player-review-item textarea {
+  width: 100%;
+  min-height: 3rem;
+}
+
 .button--yes {
   background: #1f9d55;
   color: white;

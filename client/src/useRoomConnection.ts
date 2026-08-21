@@ -77,6 +77,15 @@ export interface GameStateView {
     down: number;
     mine: 'up' | 'down' | null;
   } | null;
+  // Помеченные вниз и ещё не разобранные вопросы САМОГО смотрящего — материал
+  // экрана в конце партии (design.md, 2026-08-21-question-tags-design.md).
+  tagReview: {
+    questionId: string;
+    themeName: string;
+    price: number;
+    text: string;
+    answer: string;
+  }[];
   buzzedParticipantId: string | null;
   exclusiveAnswererParticipantId: string | null;
   auctionTurnParticipantId: string | null;
@@ -114,6 +123,17 @@ export interface PackSummary {
   description: string | null;
 }
 
+// Готовые варианты причины для разбора в конце партии (server/src/protocol.ts,
+// TAG_REASONS). Клиент не импортирует из server/ — типы и константы в этом
+// проекте дублируются вручную, поэтому копия должна дословно совпадать.
+export const TAG_REASONS = [
+  'Слишком сложный',
+  'Слишком лёгкий',
+  'Непонятная формулировка',
+  'Спорный ответ',
+  'Неинтересная тема',
+] as const;
+
 type ServerMessage =
   | { type: 'joined'; participantId: string; token: string; name: string }
   | { type: 'name-taken' }
@@ -143,6 +163,12 @@ type ClientMessage =
   | { type: 'assign-cat'; recipientParticipantId: string }
   | { type: 'buzz' }
   | { type: 'tag-question'; thumb: 'up' | 'down' }
+  | {
+      type: 'tag-reason';
+      questionId: string;
+      reason: string | null;
+      text: string;
+    }
   | { type: 'media-finished'; questionId: string }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
@@ -183,6 +209,11 @@ export interface RoomConnection {
   assignCat(recipientParticipantId: string): void;
   buzz(): void;
   tagQuestion(thumb: 'up' | 'down'): void;
+  submitTagReason(
+    questionId: string,
+    reason: string | null,
+    text: string,
+  ): void;
   mediaFinished(questionId: string): void;
   saidAnswer(): void;
   vote(correct: boolean): void;
@@ -383,6 +414,11 @@ export function useRoomConnection(
       send({ type: 'assign-cat', recipientParticipantId }),
     buzz: () => send({ type: 'buzz' }),
     tagQuestion: (thumb) => send({ type: 'tag-question', thumb }),
+    submitTagReason: (
+      questionId: string,
+      reason: string | null,
+      text: string,
+    ) => send({ type: 'tag-reason', questionId, reason, text }),
     // Шлёт только табло, доиграв клип: по этому сигналу сервер запускает
     // таймер вопроса (design.md, 2026-08-18-video-questions-design.md,
     // «Фаза проигрывания медиа»).

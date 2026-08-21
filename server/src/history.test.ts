@@ -555,3 +555,94 @@ describe('GameHistory: оценки вопросов', () => {
     expect(row.reasonText).toBe('знал с детства');
   });
 });
+
+describe('GameHistory.downTagsForReview', () => {
+  function gameWithTwoQuestions(history: GameHistory): number {
+    const id = history.startGame({
+      startedAt: '2026-08-21T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [],
+    })!;
+    history.recordQuestion(id, { ...QUESTION, questionId: 'q1' });
+    history.recordQuestion(id, {
+      ...QUESTION,
+      questionId: 'q2',
+      text: 'Второй вопрос?',
+      answer: 'Второй ответ',
+    });
+    return id;
+  }
+
+  it('возвращает только пальцы вниз этого игрока, с текстом и ответом', () => {
+    const history = makeHistory();
+    const gameId = gameWithTwoQuestions(history);
+    history.recordTag(gameId, {
+      questionId: 'q1',
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'down',
+    });
+    history.recordTag(gameId, {
+      questionId: 'q2',
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'up',
+    });
+    history.recordTag(gameId, {
+      questionId: 'q2',
+      participantId: 'p2',
+      participantName: 'Катя',
+      thumb: 'down',
+    });
+
+    const items = history.downTagsForReview(gameId, 'p1', 5);
+
+    expect(items).toEqual([
+      {
+        questionId: 'q1',
+        themeName: 'География',
+        price: 100,
+        text: 'Столица Австралии?',
+        answer: 'Канберра',
+      },
+    ]);
+  });
+
+  it('уже разобранный вопрос из списка уходит', () => {
+    const history = makeHistory();
+    const gameId = gameWithTwoQuestions(history);
+    history.recordTag(gameId, {
+      questionId: 'q1',
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'down',
+    });
+    history.recordTagReason(gameId, 'q1', 'p1', 'Слишком сложный', null);
+
+    expect(history.downTagsForReview(gameId, 'p1', 5)).toEqual([]);
+  });
+
+  it('соблюдает потолок', () => {
+    const history = makeHistory();
+    const gameId = gameWithTwoQuestions(history);
+    for (const questionId of ['q1', 'q2']) {
+      history.recordTag(gameId, {
+        questionId,
+        participantId: 'p1',
+        participantName: 'Ваня',
+        thumb: 'down',
+      });
+    }
+
+    expect(history.downTagsForReview(gameId, 'p1', 1)).toHaveLength(1);
+  });
+
+  it('не роняет вызов, когда база недоступна', () => {
+    const history = makeHistory();
+    const gameId = gameWithTwoQuestions(history);
+    history.close();
+    expect(() => history.downTagsForReview(gameId, 'p1', 5)).not.toThrow();
+    expect(history.downTagsForReview(gameId, 'p1', 5)).toEqual([]);
+  });
+});
