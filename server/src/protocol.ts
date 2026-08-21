@@ -55,6 +55,16 @@ export interface GameStateView {
     // своего независимого отсчёта.
     revealMs: number | null;
   } | null;
+  // Оценки вопроса, который только что доиграли (design.md,
+  // 2026-08-21-question-tags-design.md). null — окно оценки закрыто: либо
+  // вопрос ещё идёт, либо уже выбрали следующий. Счёт анонимный: имён нет
+  // намеренно, на табло видно только сколько.
+  questionTags: {
+    up: number;
+    down: number;
+    // Оценка самого смотрящего; null — не оценивал.
+    mine: 'up' | 'down' | null;
+  } | null;
   buzzedParticipantId: string | null;
   // Не null только пока фаза — question-open/buzzed/judging для вопроса,
   // требующего эксклюзивного права ответа («кот» или «аукцион») —

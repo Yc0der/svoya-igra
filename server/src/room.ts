@@ -29,7 +29,7 @@ import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
-import type { HistoryRecorder, PlayedQuestionInput } from './history.js';
+import type { HistoryRecorder, PlayedQuestionInput, Thumb } from './history.js';
 
 export interface Participant {
   id: string;
@@ -292,6 +292,16 @@ export class Room {
   // this.history.* напрямую, без `?.`.
   private history: HistoryRecorder;
   private historyGameId: number | null;
+  // Вопрос, который только что доиграли, и оценки по нему. Эфемерные: окно
+  // оценки живёт секунды и переживать перезапуск сервера не обязано (design.md,
+  // 2026-08-21-question-tags-design.md, «Движок не трогаем»). null — окно
+  // закрыто.
+  private taggableQuestionId: string | null = null;
+  // participantId -> палец. Из неё считается счёт для табло и работает
+  // «передумал». В базу пишется отдельно, сквозняком: при выключенном
+  // тумблере остаётся только эта память, и всё видимое ведёт себя как в
+  // настоящей партии, просто не оставляет следа.
+  private currentTags = new Map<string, Thumb>();
 
   constructor(
     initial?: RoomState,
@@ -434,6 +444,8 @@ export class Room {
     // и в applyEffects.
     this.clearGameTimer();
     this.clearGraceExclusion();
+    this.taggableQuestionId = null;
+    this.currentTags.clear();
     const counterIds = counters.map((p) => p.id);
     this.game = createInitialState(this.pack, counterIds, hostId);
     this.historyGameId = this.historyEnabled
@@ -469,6 +481,8 @@ export class Room {
     this.clearGameTimer();
     this.clearGraceExclusion();
     this.game = null;
+    this.taggableQuestionId = null;
+    this.currentTags.clear();
     // Партия брошена, но её вопросы игроки видели — из истории они не
     // удаляются. Обнуляем только ссылку, чтобы следующая партия завела свою
     // строку, а не дописывалась в брошенную.
@@ -490,6 +504,8 @@ export class Room {
     this.participants = [];
     this.hostParticipantId = null;
     this.game = null;
+    this.taggableQuestionId = null;
+    this.currentTags.clear();
     // Партия брошена, но её вопросы игроки видели — из истории они не
     // удаляются. Обнуляем только ссылку, чтобы следующая партия завела свою
     // строку, а не дописывалась в брошенную.
@@ -759,6 +775,35 @@ export class Room {
     });
   }
 
+  /**
+   * Оценка только что сыгранного вопроса. Не правило игры: ничего не решает,
+   * ни на что не влияет, фазу не меняет — поэтому живёт здесь, а не в движке.
+   *
+   * Повторный тап по тому же пальцу снимает оценку, тап по другому — меняет.
+   */
+  tagQuestion(participantId: string, thumb: Thumb): void {
+    if (this.taggableQuestionId === null) return;
+    if (!this.participants.some((p) => p.id === participantId)) return;
+    const questionId = this.taggableQuestionId;
+    if (this.currentTags.get(participantId) === thumb) {
+      this.currentTags.delete(participantId);
+      if (this.historyGameId !== null) {
+        this.history.clearTag(this.historyGameId, questionId, participantId);
+      }
+    } else {
+      this.currentTags.set(participantId, thumb);
+      if (this.historyGameId !== null) {
+        this.history.recordTag(this.historyGameId, {
+          questionId,
+          participantId,
+          participantName: this.nameOf(participantId) ?? '',
+          thumb,
+        });
+      }
+    }
+    this.notify();
+  }
+
   getState(): RoomState {
     return {
       participants: this.participants.map((p) => ({ ...p })),
@@ -1015,6 +1060,19 @@ export class Room {
             revealMs: this.currentTextRevealMs,
           }
         : null,
+      questionTags:
+        this.taggableQuestionId === null
+          ? null
+          : {
+              up: [...this.currentTags.values()].filter((t) => t === 'up')
+                .length,
+              down: [...this.currentTags.values()].filter((t) => t === 'down')
+                .length,
+              mine:
+                viewerId === null
+                  ? null
+                  : (this.currentTags.get(viewerId) ?? null),
+            },
       buzzedParticipantId: game.buzzedCounterId,
       exclusiveAnswererParticipantId: game.exclusiveAnswererCounterId,
       auctionTurnParticipantId: game.auctionTurnCounterId,
@@ -1224,6 +1282,21 @@ export class Room {
         buzzedBefore,
         auctionHighestBidBefore,
       );
+      // Окно оценки открывается ровно здесь: вопрос доиграли, его текст и
+      // ответ сейчас на экране.
+      this.taggableQuestionId = questionBefore?.questionId ?? null;
+      this.currentTags.clear();
+    }
+    // Окно закрывается, когда выбрали следующий вопрос. Именно переход
+    // «было null, стало не-null», а не список фаз: revealQuestion оставляет
+    // currentQuestion заполненным на время фазы reveal и обнуляет его только
+    // переход в selecting, так что этот переход однозначно означает выбор
+    // нового вопроса. Список фаз перечислять нельзя — он растёт от вехи к
+    // вехе, и перечисление молча теряло бы окно (design.md,
+    // 2026-08-21-question-tags-design.md, «Где и как долго»).
+    if (questionBefore === null && state.currentQuestion !== null) {
+      this.taggableQuestionId = null;
+      this.currentTags.clear();
     }
     if (phaseBefore !== 'final-reveal' && state.phase === 'final-reveal') {
       this.recordFinalQuestion(state);

@@ -15,6 +15,7 @@ import {
 import type {
   HistoryRecorder,
   PlayedQuestionInput,
+  QuestionTagInput,
   StartGameInput,
 } from './history.js';
 
@@ -2583,6 +2584,22 @@ interface FakeHistory extends HistoryRecorder {
   questions: { gameId: number; row: PlayedQuestionInput }[];
   finished: { gameId: number; scores: Record<string, number> }[];
   discarded: number[];
+  tags: {
+    gameId: number;
+    tag: QuestionTagInput;
+  }[];
+  clearedTags: {
+    gameId: number;
+    questionId: string;
+    participantId: string;
+  }[];
+  reasons: {
+    gameId: number;
+    questionId: string;
+    participantId: string;
+    reason: string | null;
+    reasonText: string | null;
+  }[];
 }
 
 function fakeHistory(): FakeHistory {
@@ -2591,6 +2608,9 @@ function fakeHistory(): FakeHistory {
     questions: [],
     finished: [],
     discarded: [],
+    tags: [],
+    clearedTags: [],
+    reasons: [],
     startGame(input) {
       fake.games.push(input);
       return fake.games.length;
@@ -2604,9 +2624,21 @@ function fakeHistory(): FakeHistory {
     discardGame(gameId) {
       fake.discarded.push(gameId);
     },
-    recordTag() {},
-    clearTag() {},
-    recordTagReason() {},
+    recordTag(gameId, tag) {
+      fake.tags.push({ gameId, tag });
+    },
+    clearTag(gameId, questionId, participantId) {
+      fake.clearedTags.push({ gameId, questionId, participantId });
+    },
+    recordTagReason(gameId, questionId, participantId, reason, reasonText) {
+      fake.reasons.push({
+        gameId,
+        questionId,
+        participantId,
+        reason,
+        reasonText,
+      });
+    },
   };
   return fake;
 }
@@ -3128,5 +3160,128 @@ describe('Room: история финала и итога партии', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('Room: оценки вопросов', () => {
+  it('окно закрыто, пока вопрос не сыгран', () => {
+    const room = roomWithHistory(fakeHistory());
+    room.startGame('requester');
+    expect(room.toGameStateView()?.questionTags).toBeNull();
+  });
+
+  it('после закрытия вопроса окно открыто и оценка считается', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    playQuestionToTimeout(room);
+
+    room.tagQuestion(picker, 'down');
+
+    expect(room.toGameStateView(picker)?.questionTags).toEqual({
+      up: 0,
+      down: 1,
+      mine: 'down',
+    });
+    expect(history.tags).toHaveLength(1);
+  });
+
+  it('чужая оценка видна в счёте, но не как своя', () => {
+    const room = roomWithHistory(fakeHistory());
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    const other = room
+      .getState()
+      .participants.map((p) => p.id)
+      .find((id) => id !== picker)!;
+    playQuestionToTimeout(room);
+
+    room.tagQuestion(other, 'up');
+
+    expect(room.toGameStateView(picker)?.questionTags).toEqual({
+      up: 1,
+      down: 0,
+      mine: null,
+    });
+  });
+
+  it('повторный тап по тому же пальцу снимает оценку', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    playQuestionToTimeout(room);
+
+    room.tagQuestion(picker, 'up');
+    room.tagQuestion(picker, 'up');
+
+    expect(room.toGameStateView(picker)?.questionTags).toEqual({
+      up: 0,
+      down: 0,
+      mine: null,
+    });
+    expect(history.clearedTags).toHaveLength(1);
+  });
+
+  it('тап по другому пальцу меняет оценку, а не добавляет вторую', () => {
+    const room = roomWithHistory(fakeHistory());
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    playQuestionToTimeout(room);
+
+    room.tagQuestion(picker, 'up');
+    room.tagQuestion(picker, 'down');
+
+    expect(room.toGameStateView(picker)?.questionTags).toEqual({
+      up: 0,
+      down: 1,
+      mine: 'down',
+    });
+  });
+
+  it('выбор следующего вопроса закрывает окно и обнуляет счёт', () => {
+    const room = roomWithHistory(fakeHistory());
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    // Не playQuestionToTimeout(): тот сам переключается на реальные таймеры в
+    // finally, и заведённый им таймер фазы reveal → selecting теряется
+    // безвозвратно (vitest не переносит фейковые таймеры между сессиями
+    // fake/real). Чтобы реально дойти до 'selecting' и получить возможность
+    // выбрать q2, весь путь вопроса нужно провести в одной непрерывной
+    // fake-таймерной сессии — тем же паттерном, что и в остальных тестах
+    // этого файла, продвигающих партию через несколько фаз подряд.
+    vi.useFakeTimers();
+    try {
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS); // question-reveal -> question-open
+      vi.advanceTimersByTime(QUESTION_TIMER_MS); // question-open -> reveal
+      room.tagQuestion(picker, 'down');
+      vi.advanceTimersByTime(REVEAL_TIMER_MS); // reveal -> selecting
+
+      room.selectQuestion(pickerOf(room), 0, 'q2');
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(room.toGameStateView(picker)?.questionTags).toBeNull();
+  });
+
+  it('при выключенном тумблере оценка работает, но не пишется', () => {
+    const history = fakeHistory();
+    const room = roomWithHistory(history);
+    room.setHistoryEnabled(false);
+    room.startGame('requester');
+    const picker = pickerOf(room);
+    playQuestionToTimeout(room);
+
+    room.tagQuestion(picker, 'down');
+
+    expect(room.toGameStateView(picker)?.questionTags).toEqual({
+      up: 0,
+      down: 1,
+      mine: 'down',
+    });
+    expect(history.tags).toEqual([]);
   });
 });
