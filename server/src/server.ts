@@ -20,6 +20,8 @@ import {
 import { loadPack } from './pack.js';
 import type { Question } from './pack.js';
 import { appendComplaint, type ComplaintEntry } from './generatorProfile.js';
+import { TAG_REASONS } from './protocol.js';
+import type { TagComplaintContext } from './history.js';
 
 export interface CreateServerOptions {
   room: Room;
@@ -207,6 +209,78 @@ export function createServer(options: CreateServerOptions): GameServer {
   const withPackWriteLock = createWriteLock();
   const withProfileWriteLock = createWriteLock();
 
+  // Общая сборка записи жалобы: используется и кнопкой «Пожаловаться» в
+  // редакторе пакетов, и разбором в конце партии — материал у них
+  // одинаковый (вопрос, ответ, тема, цена), различается только текст
+  // претензии и то, кому отвечать об успехе.
+  async function buildComplaintEntry(
+    filename: string,
+    questionId: string,
+    complaint: string,
+  ): Promise<ComplaintEntry> {
+    const pack = await loadPack(join(packsDir, filename));
+    const location = findQuestionLocation(pack, questionId);
+    if (!location) {
+      throw new Error(`вопрос с id "${questionId}" не найден в пакете`);
+    }
+    return {
+      date: new Date().toISOString().slice(0, 10),
+      packFilename: filename,
+      packTitle: pack.title,
+      themeName: location.themeName,
+      price: location.question.price,
+      questionText: location.question.text,
+      answer: location.question.answer,
+      complaint,
+    };
+  }
+
+  // Палец вниз БЕЗ причины в профиль не идёт: «кому-то не понравилось,
+  // неизвестно чем» — генератору нечего с этим делать (design.md,
+  // 2026-08-21-question-tags-design.md, «Куда уходит собранное»). Такая
+  // оценка остаётся в базе цифрой и дождётся агрегации слайса B.
+  //
+  // context приходит от room.submitTagReason() — это вопрос ТОЙ ПАРТИИ, В
+  // КОТОРОЙ ЕГО РЕАЛЬНО ИГРАЛИ (history.complaintContext), а не текущий
+  // активный пакет: до этой правки жалоба собиралась через
+  // room.getPackInfo().activeFilename и loadPack(), а на game-end ведущий
+  // волен уже переключить пакет к следующей партии, пока остальные ещё
+  // дописывают разбор — questionId искался бы в чужом пакете (финальное
+  // ревью ветки, п. 2).
+  async function appendTagReasonToProfile(
+    context: TagComplaintContext,
+    reason: string | null,
+    text: string,
+  ): Promise<void> {
+    if (!profilePath) return;
+    const trimmed = text.trim();
+    if (reason === null && trimmed === '') return;
+    const complaint =
+      reason === null
+        ? `оценка игрока после партии: ${trimmed}`
+        : trimmed === ''
+          ? `${reason.toLowerCase()} (оценка игрока после партии)`
+          : `${reason.toLowerCase()} (оценка игрока после партии): ${trimmed}`;
+    const entry: ComplaintEntry = {
+      date: new Date().toISOString().slice(0, 10),
+      packFilename: context.packFilename,
+      packTitle: context.packTitle,
+      themeName: context.themeName,
+      price: context.price,
+      questionText: context.text,
+      answer: context.answer,
+      complaint,
+    };
+    try {
+      await withProfileWriteLock(() => appendComplaint(profilePath, entry));
+    } catch (err) {
+      // Проглатываем: партия уже кончилась, показывать игроку ошибку
+      // записи в файл профиля бессмысленно, а ронять сервер из-за неё
+      // тем более. Цифра в базе при этом уже сохранена.
+      console.error('Не удалось дописать оценку в профиль генератора:', err);
+    }
+  }
+
   wss.on('connection', (ws) => {
     alive.add(ws);
     ws.on('pong', () => alive.add(ws));
@@ -341,6 +415,52 @@ export function createServer(options: CreateServerOptions): GameServer {
         const participantId = connections.get(ws);
         if (participantId && typeof message.correct === 'boolean') {
           room.vote(participantId, message.correct);
+        }
+      }
+
+      if (
+        message.type === 'tag-question' &&
+        (message.thumb === 'up' || message.thumb === 'down')
+      ) {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          room.tagQuestion(participantId, message.thumb);
+        }
+      }
+
+      if (
+        message.type === 'tag-reason' &&
+        typeof message.questionId === 'string' &&
+        (message.reason === null ||
+          (TAG_REASONS as readonly string[]).includes(message.reason)) &&
+        typeof message.text === 'string'
+      ) {
+        const participantId = connections.get(ws);
+        if (participantId) {
+          // room.submitTagReason сама проверяет фазу game-end и что
+          // participantId реально ставил палец вниз по этому questionId, ещё
+          // не разобранному — в профиль генератора уходит только реально
+          // существовавшая, ещё не записанная оценка, а не любой присланный
+          // клиентом id (ревью задачи 4, Important 1: устаревший/подложный
+          // questionId раньше долетал до appendTagReasonToProfile
+          // безусловно) и не повторная отправка той же оценки (финальное
+          // ревью ветки, п. 3: WHERE-условие recordTagReason теперь includes
+          // reason IS NULL AND reason_text IS NULL). Возвращённый контекст —
+          // вопрос той партии, в которой его реально играли, а не текущий
+          // активный пакет (финальное ревью ветки, п. 2).
+          const context = room.submitTagReason(
+            participantId,
+            message.questionId,
+            message.reason,
+            message.text,
+          );
+          if (context) {
+            await appendTagReasonToProfile(
+              context,
+              message.reason,
+              message.text,
+            );
+          }
         }
       }
 
@@ -650,21 +770,7 @@ export function createServer(options: CreateServerOptions): GameServer {
         // try/catch держат сообщения однозначными.
         let entry: ComplaintEntry;
         try {
-          const pack = await loadPack(join(packsDir, filename));
-          const location = findQuestionLocation(pack, questionId);
-          if (!location) {
-            throw new Error(`вопрос с id "${questionId}" не найден в пакете`);
-          }
-          entry = {
-            date: new Date().toISOString().slice(0, 10),
-            packFilename: filename,
-            packTitle: pack.title,
-            themeName: location.themeName,
-            price: location.question.price,
-            questionText: location.question.text,
-            answer: location.question.answer,
-            complaint,
-          };
+          entry = await buildComplaintEntry(filename, questionId, complaint);
         } catch (err) {
           send(ws, {
             type: 'admin-report-error',

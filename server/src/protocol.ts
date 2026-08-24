@@ -55,6 +55,27 @@ export interface GameStateView {
     // своего независимого отсчёта.
     revealMs: number | null;
   } | null;
+  // Оценки вопроса, который только что доиграли (design.md,
+  // 2026-08-21-question-tags-design.md). null — окно оценки закрыто: либо
+  // вопрос ещё идёт, либо уже выбрали следующий. Счёт анонимный: имён нет
+  // намеренно, на табло видно только сколько.
+  questionTags: {
+    up: number;
+    down: number;
+    // Оценка самого смотрящего; null — не оценивал.
+    mine: 'up' | 'down' | null;
+  } | null;
+  // Помеченные вниз и ещё не разобранные вопросы САМОГО смотрящего — материал
+  // экрана в конце партии (design.md, 2026-08-21-question-tags-design.md).
+  // Пустой массив, пока партия не кончилась, а также когда запись истории
+  // выключена тумблером: строк в базе нет, значит и разбирать нечего.
+  tagReview: {
+    questionId: string;
+    themeName: string;
+    price: number;
+    text: string;
+    answer: string;
+  }[];
   buzzedParticipantId: string | null;
   // Не null только пока фаза — question-open/buzzed/judging для вопроса,
   // требующего эксклюзивного права ответа («кот» или «аукцион») —
@@ -118,6 +139,27 @@ export type ClientMessage =
   | { type: 'media-finished'; questionId: string }
   | { type: 'said-answer' }
   | { type: 'vote'; correct: boolean }
+  // Пальцы вверх/вниз по только что доигранному вопросу (design.md,
+  // 2026-08-21-question-tags-design.md). Сервер сам сверяет фазу/окно через
+  // Room.tagQuestion — здесь только форма сообщения.
+  | { type: 'tag-question'; thumb: 'up' | 'down' }
+  // Причина, по которой игрок пометил вопрос пальцем вниз — экран разбора в
+  // конце партии (design.md, 2026-08-21-question-tags-design.md).
+  // Room.submitTagReason сверяет фазу (game-end) и — через
+  // history.recordTagReason (`AND thumb = 0` в WHERE) — что участник
+  // действительно ставил палец вниз именно по этому вопросу; при отказе
+  // любой из проверок возвращает false. Сервер обязан смотреть на этот
+  // возврат: запись в docs/pack-generator-profile.md уходит, только если
+  // он true (ревью задачи 4, Important 1) — устаревший/подложный questionId
+  // не должен превращаться в выдуманную жалобу на долгоживущем артефакте.
+  | {
+      type: 'tag-reason';
+      questionId: string;
+      // Один из TAG_REASONS либо null, если игрок написал только текст.
+      reason: string | null;
+      // Свободный текст; пустая строка — не писал.
+      text: string;
+    }
   // Панель ведущего — сервер сам проверяет, что отправитель и есть hostId,
   // клиентскому participantId в поле не доверяет.
   | { type: 'adjust-score'; participantId: string; delta: number }
@@ -201,6 +243,20 @@ export type StartGameErrorReason =
 // StartGameErrorReason — по смыслу это разные отказы, и раздельные типы не
 // дадут по ошибке присвоить одно на месте другого.
 export type SelectQuestionErrorReason = 'no-recipient';
+
+/**
+ * Готовые варианты причины для разбора в конце партии. Пять, и они не
+ * случайны: это ровно те разделы, из которых уже состоит
+ * docs/pack-generator-profile.md — «Калибровка сложности», «Брак», «Вкус».
+ * Клиент рисует их кнопками, сервер принимает только их.
+ */
+export const TAG_REASONS = [
+  'Слишком сложный',
+  'Слишком лёгкий',
+  'Непонятная формулировка',
+  'Спорный ответ',
+  'Неинтересная тема',
+] as const;
 
 export type ServerMessage =
   | { type: 'joined'; participantId: string; token: string; name: string }

@@ -12,11 +12,12 @@ import {
 } from './server.js';
 import type { ServerMessage } from './protocol.js';
 import type { Pack } from './pack.js';
-import type { HistoryRecorder } from './history.js';
+import { GameHistory, type HistoryRecorder } from './history.js';
 import {
   REVEAL_TIMER_MS,
   VOTE_TIMER_MS,
   TEXT_REVEAL_MIN_MS,
+  QUESTION_TIMER_MS,
 } from './engine.js';
 
 // Attaches a persistent 'message' listener synchronously at socket creation
@@ -533,6 +534,11 @@ describe('createServer history recording honesty', () => {
       recordQuestion: () => {},
       finishGame: () => {},
       discardGame: () => {},
+      recordTag: () => {},
+      clearTag: () => {},
+      recordTagReason: () => false,
+      downTagsForReview: () => [],
+      complaintContext: () => null,
     };
     const room = new Room(
       undefined,
@@ -768,6 +774,24 @@ async function settle(
   return interested === a ? aMsg : bMsg;
 }
 
+// tag-reason не отвечает подтверждением (в отличие от admin-report-question,
+// у которого клиент дожидается admin-report-ack и ТЕМ САМЫМ знает, что запись
+// в файл уже случилась) — рассылка state после room.submitTagReason()
+// уходит независимо от асинхронной записи appendTagReasonToProfile() в файл,
+// и settle() на неё никакой гарантии не даёт. Поэтому здесь опрашиваем сам
+// файл, а не полагаемся на порядок доставки двух независимых async-цепочек.
+async function waitForFileContent(
+  path: string,
+  substring: string,
+): Promise<string> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const content = await readFile(path, 'utf8');
+    if (content.includes(substring)) return content;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`"${path}" never contained: ${substring}`);
+}
+
 describe('createServer media-finished', () => {
   // Табло — не участник партии: оно никогда не шлёт 'join', поэтому сигнал об
   // окончании клипа проходит тем же путём, что админские сообщения, без
@@ -939,6 +963,216 @@ describe('createServer game flow', () => {
 
       a.ws.close();
       b.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tag-question доносит оценку игрока до комнаты', async () => {
+    // Тем же способом, каким соседний тест выше доводит партию до 'reveal',
+    // но проще: вопрос доигрывается до таймаута (никто не нажал), а не через
+    // buzz/said-answer/vote — questionTags открывается в reveal независимо
+    // от того, как вопрос туда пришёл.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-tag-question-'));
+      const room = new Room(undefined, TEST_PACK);
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        port: 8080,
+        packsDir: dir,
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } =
+        server.httpServer.address() as import('node:net').AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const first = await joinPlayer(url, 'Ваня');
+      const second = await joinPlayer(url, 'Катя');
+      await first.nextMessage(); // трансляция лобби после join второго
+
+      first.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(first, second, first)) as {
+        game: { phase: string; turnParticipantId: string };
+      };
+      expect(aState.game.phase).toBe('selecting');
+
+      const picker =
+        aState.game.turnParticipantId === first.participantId ? first : second;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(first, second, picker);
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      const afterSelect = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterSelect.game.phase).toBe('question-open');
+
+      // Никто не жмёт — таймер вопроса истекает сам, той же гранулярностью
+      // HEARTBEAT_INTERVAL_MS-шагов, что и соседний тест выше (см. его
+      // комментарий про живые пинги/понги во время advanceTimersByTimeAsync).
+      let remaining = QUESTION_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterTimeout = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterTimeout.game.phase).toBe('reveal');
+
+      first.ws.send(JSON.stringify({ type: 'tag-question', thumb: 'down' }));
+      await settle(first, second, picker);
+
+      expect(room.toGameStateView(first.participantId)?.questionTags).toEqual({
+        up: 0,
+        down: 1,
+        mine: 'down',
+      });
+
+      first.ws.close();
+      second.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Финальное ревью ветки, п. 5: единственное непокрытое звено на пути,
+  // который мутирует долгоживущий артефакт — docs/pack-generator-profile.md.
+  // Проводит tag-reason через настоящий websocket-сервер (не напрямую через
+  // Room, как в room.test.ts) и проверяет, что запись реально доезжает до
+  // профиля генератора, а не только до памяти комнаты.
+  it('tag-reason доносит причину до комнаты и дописывает её в профиль генератора', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-tag-reason-'));
+      const profilePath = join(dir, 'profile.md');
+      await writeFile(
+        profilePath,
+        '# Профиль компании\n\nВступление.\n',
+        'utf8',
+      );
+      // Настоящая история (не фейк) — appendTagReasonToProfile теперь
+      // собирает запись из history.complaintContext, а не из текущего
+      // активного пакета (финальное ревью ветки, п. 2), так что тест обязан
+      // пройти через настоящую запись/чтение, а не через заглушку, которая
+      // повторяла бы ту же логику своими руками.
+      const history = new GameHistory(':memory:');
+      const room = new Room(
+        undefined,
+        TEST_PACK,
+        undefined,
+        'test.json',
+        history,
+      );
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        port: 8080,
+        packsDir: dir,
+        profilePath,
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } =
+        server.httpServer.address() as import('node:net').AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const first = await joinPlayer(url, 'Ваня');
+      const second = await joinPlayer(url, 'Катя');
+      await first.nextMessage(); // трансляция лобби после join второго
+
+      first.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(first, second, first)) as {
+        game: { phase: string; turnParticipantId: string };
+      };
+      expect(aState.game.phase).toBe('selecting');
+
+      const picker =
+        aState.game.turnParticipantId === first.participantId ? first : second;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(first, second, picker);
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      const afterSelect = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterSelect.game.phase).toBe('question-open');
+
+      let remaining = QUESTION_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterTimeout = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterTimeout.game.phase).toBe('reveal');
+
+      first.ws.send(JSON.stringify({ type: 'tag-question', thumb: 'down' }));
+      await settle(first, second, picker);
+
+      // TEST_PACK — единственный раунд с единственным вопросом, без финала:
+      // reveal доигрывает прямо в game-end, минуя round-end/selecting.
+      remaining = REVEAL_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterReveal = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterReveal.game.phase).toBe('game-end');
+
+      first.ws.send(
+        JSON.stringify({
+          type: 'tag-reason',
+          questionId: 'q1',
+          reason: 'Слишком сложный',
+          text: 'вообще не слышал про такое',
+        }),
+      );
+      await settle(first, second, first);
+
+      // Сообщение доехало до комнаты: разбор по этому вопросу для first
+      // пуст (единственная запись только что разобрана).
+      expect(room.toGameStateView(first.participantId)?.tagReview).toEqual([]);
+
+      // И приводит к записи — на долгоживущем артефакте, ради проверки
+      // которого этот тест и существует.
+      const profileContent = await waitForFileContent(
+        profilePath,
+        'вообще не слышал про такое',
+      );
+      expect(profileContent).toContain('## Жалобы и оценки игроков');
+      expect(profileContent).toContain('«Тест» (test.json)');
+      expect(profileContent).toContain('тема «Тема», вопрос за 100');
+      expect(profileContent).toContain('«Вопрос?» (ответ: «Ответ»)');
+      expect(profileContent).toContain('слишком сложный');
+
+      first.ws.close();
+      second.ws.close();
       await server.close();
       await rm(dir, { recursive: true, force: true });
     } finally {
@@ -2658,7 +2892,7 @@ describe('createServer pack editor', () => {
     });
 
     const profileContent = await readFile(profilePath, 'utf8');
-    expect(profileContent).toContain('## Жалобы из ручного редактора');
+    expect(profileContent).toContain('## Жалобы и оценки игроков');
     expect(profileContent).toContain('«Пак А» (a.json)');
     expect(profileContent).toContain('тема «Тема», вопрос за 100');
     expect(profileContent).toContain(
@@ -2685,7 +2919,7 @@ describe('createServer pack editor', () => {
     });
 
     const profileContent = await readFile(profilePath, 'utf8');
-    expect(profileContent).not.toContain('## Жалобы из ручного редактора');
+    expect(profileContent).not.toContain('## Жалобы и оценки игроков');
     admin.ws.close();
   });
 
@@ -2732,7 +2966,7 @@ describe('createServer pack editor', () => {
     expect(profileContent).toContain('первая жалоба');
     expect(profileContent).toContain('вторая жалоба');
     const headingCount =
-      profileContent.split('## Жалобы из ручного редактора').length - 1;
+      profileContent.split('## Жалобы и оценки игроков').length - 1;
     expect(headingCount).toBe(1);
     admin.ws.close();
   });

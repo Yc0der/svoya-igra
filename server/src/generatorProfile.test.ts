@@ -34,7 +34,7 @@ describe('appendComplaint', () => {
     await appendComplaint(profilePath, ENTRY);
 
     const content = await readFile(profilePath, 'utf8');
-    expect(content).toContain('## Жалобы из ручного редактора');
+    expect(content).toContain('## Жалобы и оценки игроков');
     expect(content).toContain(
       '- **2026-08-15, «Общая эрудиция» (sport.json), тема «Спорт», вопрос за 300:**',
     );
@@ -54,8 +54,7 @@ describe('appendComplaint', () => {
     });
 
     const content = await readFile(profilePath, 'utf8');
-    const headingCount =
-      content.split('## Жалобы из ручного редактора').length - 1;
+    const headingCount = content.split('## Жалобы и оценки игроков').length - 1;
     expect(headingCount).toBe(1);
     expect(content).toContain('вопрос за 300');
     expect(content).toContain('вопрос за 400');
@@ -74,10 +73,10 @@ describe('appendComplaint', () => {
 
   it('starts the new bullet on its own line even if the file was missing a trailing newline', async () => {
     // Fix 6 (финальное ревью) — файл без хвостового \n перед разделом
-    // «Жалобы из ручного редактора» не должен склеивать новый буллет с
+    // «Жалобы и оценки игроков» не должен склеивать новый буллет с
     // последней существующей строкой.
     const withoutTrailingNewline =
-      '# Профиль компании\n\nВступление.\n\n---\n\n## Жалобы из ручного редактора\n\n' +
+      '# Профиль компании\n\nВступление.\n\n---\n\n## Жалобы и оценки игроков\n\n' +
       '- **2026-08-14, «Старый пак» (old.json), тема «Старое», вопрос за 100:**\n' +
       '  «Старый вопрос?» (ответ: «Старый ответ») — старая жалоба без переноса в конце';
     await writeFile(profilePath, withoutTrailingNewline, 'utf8');
@@ -114,8 +113,7 @@ describe('appendComplaint', () => {
     expect(content).not.toMatch(/^## Что-то постороннее/m);
     expect(content).toContain('плохо сформулировано\n  ## Что-то постороннее');
     // Ровно один заголовок раздела «Жалобы» — инъекция не создала второй.
-    const headingCount =
-      content.split('## Жалобы из ручного редактора').length - 1;
+    const headingCount = content.split('## Жалобы и оценки игроков').length - 1;
     expect(headingCount).toBe(1);
   });
 });
