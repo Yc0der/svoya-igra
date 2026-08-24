@@ -50,19 +50,30 @@ export function useTextReveal(
     const revealStartedAt = deadline - revealMs;
     const now = Date.now();
 
-    // Считаем позицию каждого символа в исходном тексте (index), включая
-    // пробелы — тот же счётчик, что раньше использовался для text.length в
-    // формуле среза. Разбиваем на слова и пробельные промежутки между ними
-    // регуляркой с сохранением разделителя: чередование «слово, пробел,
-    // слово, …».
+    // Считаем позицию каждого символа в исходном тексте (index) в code
+    // point'ах — той же единице, в которой ниже идёт перебор [...token].
+    // text.length и token.length дают длину в code unit'ах (UTF-16): для
+    // большинства кириллических/латинских символов один code point — один
+    // code unit, и разница не видна, но символ вне BMP (например, эмодзи в
+    // тексте вопроса) — это суррогатная пара из двух code unit'ов, и
+    // счётчик в code unit'ах отсчитал бы такой символ за два, разойдясь с
+    // [...token], который считает его за один. Дальше по тексту это тихо
+    // сдвигает charIndex всех последующих букв, и они проявляются не в
+    // такт серверному таймеру, без единой видимой ошибки (см.
+    // useTextReveal.test.ts на символ вне BMP).
+    const totalCodePoints = [...text].length;
+    // Разбиваем на слова и пробельные промежутки между ними регуляркой с
+    // сохранением разделителя: чередование «слово, пробел, слово, …».
     const tokens = text.split(/(\s+)/).filter((token) => token !== '');
     let index = 0;
 
     const nodes: ReactNode[] = tokens.map((token, tokenIndex) => {
       if (/^\s+$/.test(token)) {
         // Пробел — обычный текстовый узел: именно на нём браузеру разрешено
-        // переносить строку.
-        index += token.length;
+        // переносить строку. Считаем длину в code point'ах, как и везде
+        // здесь, хотя для пробельных символов расхождения с code unit'ами
+        // на практике не бывает.
+        index += [...token].length;
         return token;
       }
 
@@ -72,7 +83,7 @@ export function useTextReveal(
         // позиции в тексте, та же пропорция, что раньше давал
         // text.slice(0, count) на каждом кадре.
         const letterStartsAt =
-          revealStartedAt + (charIndex * revealMs) / text.length;
+          revealStartedAt + (charIndex * revealMs) / totalCodePoints;
         return (
           <span
             key={i}
@@ -86,7 +97,7 @@ export function useTextReveal(
           </span>
         );
       });
-      index += token.length;
+      index += letters.length; // = [...token].length, число code point'ов
 
       // Слово — неразрывный блок: без этого браузер вправе разорвать строку
       // между соседними инлайн-элементами (буквами), и перенос может

@@ -113,6 +113,57 @@ describe('useTextReveal', () => {
     }
   });
 
+  it('keeps the delay proportion correct for letters after a character outside the BMP (surrogate pair), e.g. an emoji in the question text', () => {
+    // Регрессия на баг из код-ревью: перебор букв идёт через [...token]
+    // (code point'ы — суррогатная пара это один элемент), а счётчик
+    // позиции раньше сдвигался через token.length (code unit'ы —
+    // суррогатная пара это два). Пока текст только из кириллицы/латиницы,
+    // оба счёта совпадают, но эмодзи (символ вне BMP) их разводит: всё,
+    // что после него, получает сдвинутый charIndex и, как следствие,
+    // неверную задержку — без видимой ошибки, просто не в такт таймеру.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const revealMs = 500;
+      // Code point'ов — 5 ('A', '😀', ' ', 'B', 'C'); code unit'ов — 6
+      // (у '😀' их два). Пробел разделяет текст на два слова, чтобы счётчик
+      // позиции успел накопить расхождение к моменту, когда до него
+      // доходит второе слово.
+      const text = 'A😀 BC';
+      const deadline = revealMs; // revealStartedAt = deadline - revealMs = 0 = now.
+      const { result } = renderHook(() =>
+        useTextReveal(deadline, revealMs, text),
+      );
+      const nodes = result.current as unknown as (WordElement | string)[];
+      expect(nodes).toHaveLength(3); // word('A😀'), ' ', word('BC')
+      const [word1, space, word2] = nodes;
+      expect(space).toBe(' ');
+
+      // delay(i) = i * revealMs / totalCodePoints = i * 500 / 5 = i * 100.
+      const lettersBeforeSpace = (word1 as WordElement).props.children;
+      expect(lettersBeforeSpace.map((letter) => letter.props.children)).toEqual(
+        ['A', '😀'],
+      );
+      expect(lettersBeforeSpace[0].props.style.animationDelay).toBe('0ms');
+      expect(lettersBeforeSpace[1].props.style.animationDelay).toBe('100ms');
+
+      // 'B' и 'C' — третий и четвёртый code point текста (после 'A', '😀',
+      // ' '), их charIndex должен быть 3 и 4, а не 4 и 5 (что дала бы
+      // ошибочная длина в code unit'ах — на два больше из-за суррогатной
+      // пары). Без правки здесь получились бы 333.33мс/416.67мс вместо
+      // ровных 300/400.
+      const lettersAfterSpace = (word2 as WordElement).props.children;
+      expect(lettersAfterSpace.map((letter) => letter.props.children)).toEqual([
+        'B',
+        'C',
+      ]);
+      expect(lettersAfterSpace[0].props.style.animationDelay).toBe('300ms');
+      expect(lettersAfterSpace[1].props.style.animationDelay).toBe('400ms');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps the whole text available as text content in the DOM regardless of the CSS fade animation state', () => {
     vi.useFakeTimers();
     try {
