@@ -196,6 +196,30 @@ code {
   line-height: 130%;
 }
 
+/* Постепенный показ текста вопроса (useTextReveal.ts): слово — неразрывный
+   блок, буквы внутри него проявляются по отдельности через animation-delay,
+   выставленный в JS под каждую букву. */
+.text-reveal-word {
+  white-space: nowrap;
+}
+
+.text-reveal-letter {
+  display: inline-block;
+  opacity: 0;
+  animation-name: text-reveal-fade-in;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes text-reveal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 .board-question-image {
   max-width: min(95vw, 1100px);
   max-height: 65vh;

@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { Board } from './Board';
 import { useRoomConnection } from './useRoomConnection';
@@ -372,12 +372,19 @@ describe('Board', () => {
     expect(document.querySelector('.board-timer')).not.toBeInTheDocument();
   });
 
-  it('shows only the characters revealed so far during question-reveal, synced to timerDeadline/revealMs', () => {
+  it('renders the question text letter-by-letter (CSS reveal) during question-reveal, keeping the full text in the DOM', () => {
+    // useTextReveal больше не отдаёт срез строки на момент времени —
+    // проявление ведёт CSS-анимация браузера (design.md,
+    // 2026-08-19-gradual-text-reveal-design.md, «Буква проявляется, а не
+    // возникает»). Табло здесь проверяется на то, что оно действительно
+    // передаёт в DOM разметку по словам/буквам и не теряет доступность
+    // текста, а не на то, что видно в конкретный момент — это уже покрыто
+    // useTextReveal.test.ts.
     vi.useFakeTimers();
     try {
       const now = Date.now();
       vi.setSystemTime(now);
-      const text = 'Первое второе третье четвёртое'; // length 30
+      const text = 'Первое второе третье четвёртое'; // 4 слова
       mockedUseRoomConnection.mockReturnValue(
         connection({
           game: baseGame({
@@ -394,20 +401,17 @@ describe('Board', () => {
         }),
       );
       render(<Board />);
-      // count = floor(30 * 0 / 4000) + 1 = 1 — первая буква видна сразу
-      // (useTextReveal.ts), остальной текст — ещё нет.
-      expect(screen.getByText('П')).toBeInTheDocument();
-      expect(screen.queryByText(text)).not.toBeInTheDocument();
 
-      act(() => {
-        // advanceTimersByTime двигает подложные часы вместе с таймером —
-        // реальный elapsed на момент срабатывания интервала 2000+250=2250мс,
-        // не 2000 (см. useTextReveal.test.ts).
-        vi.setSystemTime(now + 2000);
-        vi.advanceTimersByTime(250);
-      });
-      // count = floor(30 * 2250 / 4000) + 1 = 16 + 1 = 17.
-      expect(screen.getByText('Первое второе тре')).toBeInTheDocument();
+      const question = document.querySelector('.board-question');
+      // Весь текст доступен как текст сразу, хотя часть букв визуально ещё
+      // opacity:0 — это чисто CSS-состояние, не отсутствие в DOM.
+      expect(question?.textContent).toBe(text);
+      const nonSpaceLetters = text.replace(/\s+/g, '').length;
+      expect(question?.querySelectorAll('.text-reveal-letter').length).toBe(
+        nonSpaceLetters,
+      );
+      expect(question?.querySelectorAll('.text-reveal-word').length).toBe(4);
+
       // Отсчёт — по question-таймеру, который в question-reveal ещё не идёт
       // (design.md, 2026-08-19-gradual-text-reveal-design.md).
       expect(document.querySelector('.board-timer')).not.toBeInTheDocument();
