@@ -8,10 +8,40 @@ import type {
 // это одна константа на оба места, а не два одинаковых литерала.
 export const AUTO_HEADING = '## Автособранное';
 
+const COMPLAINTS_HEADING = '## Жалобы и оценки игроков';
+
+// Глобальный флаг не ставится: regex с /g несёт состояние lastIndex между
+// вызовами, и второй разбор того же текста начинался бы с середины. Перебор
+// идёт по строкам, поэтому /g не нужен.
+const MARKER = /<!--\s*учтено:([^>]*)-->/;
+
 const INTRO =
   '_Раздел пересчитывается сервером после каждой партии. Правки руками не ' +
   'сохранятся — пиши их в «Ручные заметки». Источник — `game-history.db` ' +
   '(слайсы A и C)._';
+
+/**
+ * Границы заменяемого раздела в списке строк: [start, end). Конец — первая
+ * строка после заголовка, начинающая новый раздел («## ») или разделитель
+ * («---»); сама она в раздел не входит и не трогается.
+ *
+ * Сравнение идёт по началу строки без обрезки отступа — это не небрежность:
+ * многострочный свободный текст игрока вставляется с отступом в два пробела
+ * (indentContinuation), и такая строка не должна считаться границей.
+ */
+function findSectionRange(
+  lines: string[],
+): { start: number; end: number } | null {
+  const start = lines.findIndex((line) => line.startsWith(AUTO_HEADING));
+  if (start === -1) return null;
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (line.startsWith('## ') || line.startsWith('---')) break;
+    end += 1;
+  }
+  return { start, end };
+}
 
 /**
  * Русское склонение числительного: 1 партия, 2 партии, 5 партий. Формы —
@@ -65,6 +95,66 @@ function renderPrice(stats: PriceStats): string {
     `- **${stats.price}** — верно ${stats.correct}, неверно ${stats.wrong}, ` +
     `не взял никто ${stats.untaken}, без вердикта ${stats.noVerdict}`
   );
+}
+
+/**
+ * Идентификаторы записей, которые генератор уже обобщил в «Ручные заметки»,
+ * — из строк вида `<!-- учтено: pack.json#r1-geo-100, other.json#q2 -->`.
+ *
+ * Маркер ищется ВНЕ заменяемого раздела: положенный внутрь него, он был бы
+ * стёрт следующим же пересчётом, и запись вернулась бы (design.md,
+ * 2026-08-25, «Разобранное помечается в файле, не в базе»).
+ */
+export function parseAcknowledged(fileText: string): Set<string> {
+  const lines = fileText.split('\n');
+  const range = findSectionRange(lines);
+  const acknowledged = new Set<string>();
+  lines.forEach((line, index) => {
+    if (range && index >= range.start && index < range.end) return;
+    const match = MARKER.exec(line);
+    if (!match) return;
+    for (const id of match[1].split(',')) {
+      const trimmed = id.trim();
+      if (trimmed !== '') acknowledged.add(trimmed);
+    }
+  });
+  return acknowledged;
+}
+
+/**
+ * Ставит готовый раздел на место старого, не трогая всего остального в файле.
+ *
+ * Раздел «Жалобы и оценки игроков» обязан остаться последним: appendComplaint
+ * дописывает жалобы буквально в конец файла (generatorProfile.ts). Поэтому
+ * отсутствующий раздел вставляется ПЕРЕД жалобами, а не в конец.
+ */
+export function spliceAutoSection(fileText: string, section: string): string {
+  const lines = fileText.split('\n');
+  const sectionLines = section.split('\n');
+  const range = findSectionRange(lines);
+  if (range) {
+    return [
+      ...lines.slice(0, range.start),
+      ...sectionLines,
+      '',
+      ...lines.slice(range.end),
+    ].join('\n');
+  }
+  const complaints = lines.findIndex((line) =>
+    line.startsWith(COMPLAINTS_HEADING),
+  );
+  if (complaints !== -1) {
+    return [
+      ...lines.slice(0, complaints),
+      ...sectionLines,
+      '',
+      '---',
+      '',
+      ...lines.slice(complaints),
+    ].join('\n');
+  }
+  const base = fileText.endsWith('\n') ? fileText : `${fileText}\n`;
+  return `${base}\n---\n\n${section}\n`;
 }
 
 /**

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { renderAutoSection } from './profileSection.js';
+import {
+  renderAutoSection,
+  parseAcknowledged,
+  spliceAutoSection,
+} from './profileSection.js';
 import type { ProfileAggregate } from './history.js';
 
 const EMPTY: ProfileAggregate = {
@@ -156,5 +160,117 @@ describe('renderAutoSection', () => {
     expect(text).toContain('### Вопросы, помеченные пальцем вниз');
     expect(text).not.toContain('### Как берутся вопросы по ценам');
     expect(text).not.toContain('### Темы, названные неинтересными');
+  });
+});
+
+const FILE = [
+  '# Профиль компании',
+  '',
+  '## Ручные заметки (сейчас)',
+  '',
+  '<!-- учтено: photo-test.json#r1-kino-400 -->',
+  '',
+  '- правило про скобки',
+  '',
+  '---',
+  '',
+  '## Автособранное (будет позже)',
+  '',
+  'Пока пусто.',
+  '',
+  '---',
+  '',
+  '## Жалобы и оценки игроков',
+  '',
+  '- старая жалоба',
+  '',
+].join('\n');
+
+describe('parseAcknowledged', () => {
+  it('читает идентификаторы из маркера', () => {
+    expect(parseAcknowledged(FILE)).toEqual(
+      new Set(['photo-test.json#r1-kino-400']),
+    );
+  });
+
+  it('читает несколько идентификаторов и несколько маркеров', () => {
+    const text = [
+      '## Ручные заметки (сейчас)',
+      '<!-- учтено: a.json#q1, b.json#q2 -->',
+      '<!-- учтено: c.json#q3 -->',
+    ].join('\n');
+    expect(parseAcknowledged(text)).toEqual(
+      new Set(['a.json#q1', 'b.json#q2', 'c.json#q3']),
+    );
+  });
+
+  it('не подхватывает маркер, лежащий внутри заменяемого раздела', () => {
+    const text = [
+      '## Ручные заметки (сейчас)',
+      '',
+      '---',
+      '',
+      '## Автособранное',
+      '',
+      '<!-- учтено: a.json#q1 -->',
+      '',
+    ].join('\n');
+    expect(parseAcknowledged(text)).toEqual(new Set());
+  });
+
+  it('на пустом маркере отдаёт пустое множество', () => {
+    expect(parseAcknowledged('<!-- учтено: -->')).toEqual(new Set());
+  });
+});
+
+describe('spliceAutoSection', () => {
+  it('заменяет раздел, не трогая соседние', () => {
+    const updated = spliceAutoSection(FILE, '## Автособранное\n\nновое');
+    expect(updated).toContain('- правило про скобки');
+    expect(updated).toContain('<!-- учтено: photo-test.json#r1-kino-400 -->');
+    expect(updated).toContain('новое');
+    expect(updated).not.toContain('Пока пусто.');
+    expect(updated).not.toContain('(будет позже)');
+  });
+
+  it('оставляет раздел жалоб последним в файле', () => {
+    const updated = spliceAutoSection(FILE, '## Автособранное\n\nновое');
+    const headings = updated
+      .split('\n')
+      .filter((line) => line.startsWith('## '));
+    expect(headings[headings.length - 1]).toBe('## Жалобы и оценки игроков');
+    expect(updated.trimEnd().endsWith('- старая жалоба')).toBe(true);
+  });
+
+  it('идемпотентна: повторная вставка того же раздела ничего не меняет', () => {
+    const once = spliceAutoSection(FILE, '## Автособранное\n\nновое');
+    expect(spliceAutoSection(once, '## Автособранное\n\nновое')).toBe(once);
+  });
+
+  it('вставляет раздел перед жалобами, если его в файле нет', () => {
+    const text = [
+      '# Профиль',
+      '',
+      '---',
+      '',
+      '## Жалобы и оценки игроков',
+      '',
+      '- жалоба',
+      '',
+    ].join('\n');
+    const updated = spliceAutoSection(text, '## Автособранное\n\nновое');
+    expect(updated.indexOf('## Автособранное')).toBeLessThan(
+      updated.indexOf('## Жалобы и оценки игроков'),
+    );
+    expect(updated).toContain('- жалоба');
+  });
+
+  it('дописывает раздел в конец, если нет ни его, ни жалоб', () => {
+    const updated = spliceAutoSection(
+      '# Профиль\n',
+      '## Автособранное\n\nновое',
+    );
+    expect(updated.trimEnd().endsWith('новое')).toBe(true);
+    expect(updated).toContain('# Профиль');
   });
 });
