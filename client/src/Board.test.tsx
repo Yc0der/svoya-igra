@@ -420,7 +420,7 @@ describe('Board', () => {
     }
   });
 
-  it('uses currentQuestion.fadeMs (ВРЕМЕННЫЙ параметр админки, server/src/protocol.ts) as the letter fade animation-duration, falling back to the 200ms default when absent', () => {
+  it('uses currentQuestion.fadeMs (ВРЕМЕННЫЙ параметр админки, server/src/protocol.ts) as the letter fade animation-duration, falling back to the 270ms default when absent', () => {
     vi.useFakeTimers();
     try {
       const now = Date.now();

@@ -217,7 +217,7 @@ export function useAdminConnection(
   // ВРЕМЕННО — см. server/src/protocol.ts.
   const [textRevealEnabled, setTextRevealEnabledState] = useState(true);
   // ВРЕМЕННО — см. server/src/protocol.ts.
-  const [textRevealFadeMs, setTextRevealFadeMsState] = useState(200);
+  const [textRevealFadeMs, setTextRevealFadeMsState] = useState(270);
   const [historyEnabled, setHistoryEnabledState] = useState(true);
   const [historyRecording, setHistoryRecordingState] = useState(true);
   const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(

@@ -64,7 +64,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     setTextRevealWordsPerSecond: vi.fn(),
     textRevealEnabled: true,
     setTextRevealEnabled: vi.fn(),
-    textRevealFadeMs: 200,
+    textRevealFadeMs: 270,
     setTextRevealFadeMs: vi.fn(),
     historyEnabled: true,
     setHistoryEnabled: vi.fn(),
@@ -157,7 +157,7 @@ describe('Admin', () => {
   it('ввод и «Применить» в секции длительности проявления буквы вызывает setTextRevealFadeMs с введённым числом', async () => {
     const setTextRevealFadeMs = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
-      connection({ textRevealFadeMs: 200, setTextRevealFadeMs }),
+      connection({ textRevealFadeMs: 270, setTextRevealFadeMs }),
     );
     render(<Admin />);
 
@@ -179,7 +179,7 @@ describe('Admin', () => {
   it('позволяет применить 0 мс (мгновенное появление буквы)', async () => {
     const setTextRevealFadeMs = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
-      connection({ textRevealFadeMs: 200, setTextRevealFadeMs }),
+      connection({ textRevealFadeMs: 270, setTextRevealFadeMs }),
     );
     render(<Admin />);
 

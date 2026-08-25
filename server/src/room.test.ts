@@ -1400,7 +1400,7 @@ describe('Room game flow', () => {
         image: null,
         video: null,
         revealMs: null,
-        fadeMs: 200,
+        fadeMs: 270,
       });
 
       expect(room.buzz(picker)).toBe('ok');
@@ -2137,7 +2137,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       image: null,
       video: null,
       revealMs: null,
-      fadeMs: 200,
+      fadeMs: 270,
     });
 
     vi.useFakeTimers();
@@ -2157,7 +2157,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
         image: null,
         video: null,
         revealMs: null,
-        fadeMs: 200,
+        fadeMs: 270,
       });
     } finally {
       vi.useRealTimers();
@@ -2336,7 +2336,7 @@ describe('Room — вопрос-аукцион', () => {
       image: null,
       video: null,
       revealMs: null,
-      fadeMs: 200,
+      fadeMs: 270,
     });
 
     room.placeBid(picker, 150);
@@ -2523,9 +2523,9 @@ describe('question-reveal / text reveal speed', () => {
     expect(seen).toEqual([false, true]);
   });
 
-  it('getTextRevealFadeMs/setTextRevealFadeMs/onTextRevealFadeChange: default 200, valid changes (including 0) notify listeners, invalid values are a no-op', () => {
+  it('getTextRevealFadeMs/setTextRevealFadeMs/onTextRevealFadeChange: default 270, valid changes (including 0) notify listeners, invalid values are a no-op', () => {
     const room = new Room();
-    expect(room.getTextRevealFadeMs()).toBe(200);
+    expect(room.getTextRevealFadeMs()).toBe(270);
 
     const seen: number[] = [];
     room.onTextRevealFadeChange((fadeMs) => seen.push(fadeMs));
@@ -2557,7 +2557,7 @@ describe('question-reveal / text reveal speed', () => {
 
       room.selectQuestion(picker, 0, 'q4a');
       expect(room.toGameStateView()?.phase).toBe('question-reveal');
-      expect(room.toGameStateView()?.currentQuestion?.fadeMs).toBe(200);
+      expect(room.toGameStateView()?.currentQuestion?.fadeMs).toBe(270);
 
       // Смена значения посреди уже идущего показа — в отличие от revealMs,
       // это сразу видно в следующей сборке состояния: fadeMs не завязан на

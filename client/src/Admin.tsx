@@ -75,7 +75,7 @@ export function Admin() {
   // ВРЕМЕННО — подбор длительности проявления буквы вживую, см.
   // server/src/protocol.ts, StateMessage.textRevealFadeMs. Убрать вместе с
   // полем, как только число зафиксируется в спеке.
-  const [textRevealFadeInput, setTextRevealFadeInput] = useState('200');
+  const [textRevealFadeInput, setTextRevealFadeInput] = useState('270');
   // Режим редактора: какой файл сейчас открыт (null — обычный список
   // пакетов), какой вопрос открыт формой, и текущие значения формы —
   // отдельные строковые поля, а не готовые number/enum: значение в инпуте
