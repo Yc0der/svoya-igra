@@ -259,6 +259,14 @@ export type StartGameErrorReason =
 export type SelectQuestionErrorReason = 'no-recipient';
 
 /**
+ * Единственная причина с оси «Вкус» (docs/ideas.md, «Две оси, которые нельзя
+ * смешивать»). Вынесена из TAG_REASONS отдельным именем, потому что
+ * history.ts отбирает по ней сводку тем: литерал, повторённый в двух файлах,
+ * разошёлся бы при первой же правке формулировки.
+ */
+export const REASON_BORING_THEME = 'Неинтересная тема' as const;
+
+/**
  * Готовые варианты причины для разбора в конце партии. Пять, и они не
  * случайны: это ровно те разделы, из которых уже состоит
  * docs/pack-generator-profile.md — «Калибровка сложности», «Брак», «Вкус».
@@ -269,7 +277,7 @@ export const TAG_REASONS = [
   'Слишком лёгкий',
   'Непонятная формулировка',
   'Спорный ответ',
-  'Неинтересная тема',
+  REASON_BORING_THEME,
 ] as const;
 
 export type ServerMessage =
