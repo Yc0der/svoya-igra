@@ -67,6 +67,8 @@ type ServerMessage =
       textRevealWordsPerSecond: number;
       // ВРЕМЕННО — см. server/src/protocol.ts.
       textRevealEnabled: boolean;
+      // ВРЕМЕННО — см. server/src/protocol.ts.
+      textRevealFadeMs: number;
       historyEnabled: boolean;
       historyRecording: boolean;
     }
@@ -95,6 +97,8 @@ type ClientMessage =
   | { type: 'admin-set-text-reveal-rate'; wordsPerSecond: number }
   // ВРЕМЕННО — см. server/src/protocol.ts.
   | { type: 'admin-set-text-reveal-enabled'; enabled: boolean }
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  | { type: 'admin-set-text-reveal-fade-ms'; fadeMs: number }
   | { type: 'admin-set-history-enabled'; enabled: boolean }
   | { type: 'admin-refresh-packs' }
   | { type: 'admin-select-pack'; filename: string }
@@ -142,6 +146,9 @@ export interface AdminConnection {
   // ВРЕМЕННО — см. server/src/protocol.ts.
   textRevealEnabled: boolean;
   setTextRevealEnabled(enabled: boolean): void;
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  textRevealFadeMs: number;
+  setTextRevealFadeMs(fadeMs: number): void;
   historyEnabled: boolean;
   setHistoryEnabled(enabled: boolean): void;
   // Правда для чекбокса (server/src/protocol.ts, StateMessage.historyRecording)
@@ -209,6 +216,8 @@ export function useAdminConnection(
     useState(2.5);
   // ВРЕМЕННО — см. server/src/protocol.ts.
   const [textRevealEnabled, setTextRevealEnabledState] = useState(true);
+  // ВРЕМЕННО — см. server/src/protocol.ts.
+  const [textRevealFadeMs, setTextRevealFadeMsState] = useState(270);
   const [historyEnabled, setHistoryEnabledState] = useState(true);
   const [historyRecording, setHistoryRecordingState] = useState(true);
   const [selectPackError, setSelectPackError] = useState<'unknown-file' | null>(
@@ -259,6 +268,7 @@ export function useAdminConnection(
           setActivePackFilename(message.activePackFilename);
           setTextRevealWordsPerSecondState(message.textRevealWordsPerSecond);
           setTextRevealEnabledState(message.textRevealEnabled);
+          setTextRevealFadeMsState(message.textRevealFadeMs);
           setHistoryEnabledState(message.historyEnabled);
           setHistoryRecordingState(message.historyRecording);
           setSelectPackError(null);
@@ -334,6 +344,9 @@ export function useAdminConnection(
     textRevealEnabled,
     setTextRevealEnabled: (enabled) =>
       send({ type: 'admin-set-text-reveal-enabled', enabled }),
+    textRevealFadeMs,
+    setTextRevealFadeMs: (fadeMs) =>
+      send({ type: 'admin-set-text-reveal-fade-ms', fadeMs }),
     historyEnabled,
     setHistoryEnabled: (enabled) =>
       send({ type: 'admin-set-history-enabled', enabled }),

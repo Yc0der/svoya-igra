@@ -12,6 +12,7 @@ export function Board() {
     game?.phase === 'question-reveal' ? (game.timerDeadline ?? null) : null,
     game?.currentQuestion?.revealMs ?? null,
     game?.currentQuestion?.text ?? '',
+    game?.currentQuestion?.fadeMs,
   );
 
   function nameOf(participantId: string): string {

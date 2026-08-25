@@ -1400,6 +1400,7 @@ describe('Room game flow', () => {
         image: null,
         video: null,
         revealMs: null,
+        fadeMs: 270,
       });
 
       expect(room.buzz(picker)).toBe('ok');
@@ -2136,6 +2137,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
       image: null,
       video: null,
       revealMs: null,
+      fadeMs: 270,
     });
 
     vi.useFakeTimers();
@@ -2155,6 +2157,7 @@ describe('Room — вопрос-«кот» (онлайн-проверки)', () 
         image: null,
         video: null,
         revealMs: null,
+        fadeMs: 270,
       });
     } finally {
       vi.useRealTimers();
@@ -2333,6 +2336,7 @@ describe('Room — вопрос-аукцион', () => {
       image: null,
       video: null,
       revealMs: null,
+      fadeMs: 270,
     });
 
     room.placeBid(picker, 150);
@@ -2517,6 +2521,62 @@ describe('question-reveal / text reveal speed', () => {
     room.setTextRevealEnabled(true);
     expect(room.getTextRevealEnabled()).toBe(true);
     expect(seen).toEqual([false, true]);
+  });
+
+  it('getTextRevealFadeMs/setTextRevealFadeMs/onTextRevealFadeChange: default 270, valid changes (including 0) notify listeners, invalid values are a no-op', () => {
+    const room = new Room();
+    expect(room.getTextRevealFadeMs()).toBe(270);
+
+    const seen: number[] = [];
+    room.onTextRevealFadeChange((fadeMs) => seen.push(fadeMs));
+
+    room.setTextRevealFadeMs(400);
+    expect(room.getTextRevealFadeMs()).toBe(400);
+    expect(seen).toEqual([400]);
+
+    // 0 — валидное значение (буква возникает мгновенно), в отличие от
+    // скорости показа, где 0 отклоняется — там это был бы делитель.
+    room.setTextRevealFadeMs(0);
+    expect(room.getTextRevealFadeMs()).toBe(0);
+    expect(seen).toEqual([400, 0]);
+
+    room.setTextRevealFadeMs(-1);
+    room.setTextRevealFadeMs(NaN);
+    expect(room.getTextRevealFadeMs()).toBe(0);
+    expect(seen).toEqual([400, 0]);
+  });
+
+  it('currentQuestion.fadeMs reflects the current setting live, unlike revealMs it is not frozen at question-reveal entry and stays present outside that phase', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, REVEAL_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = room.toGameStateView()!.turnParticipantId;
+
+      room.selectQuestion(picker, 0, 'q4a');
+      expect(room.toGameStateView()?.phase).toBe('question-reveal');
+      expect(room.toGameStateView()?.currentQuestion?.fadeMs).toBe(270);
+
+      // Смена значения посреди уже идущего показа — в отличие от revealMs,
+      // это сразу видно в следующей сборке состояния: fadeMs не завязан на
+      // конкретный вопрос, это просто текущая настройка длительности CSS-
+      // анимации (design.md, «Длительность проявления настраивается в
+      // админке»).
+      room.setTextRevealFadeMs(500);
+      expect(room.toGameStateView()?.currentQuestion?.fadeMs).toBe(500);
+
+      // Остаётся присутствующим и вне question-reveal (revealMs в этот
+      // момент уже null — см. тест выше 'revealMs is null before a
+      // question is selected...').
+      vi.advanceTimersByTime(1600);
+      expect(room.toGameStateView()?.phase).toBe('question-open');
+      expect(room.toGameStateView()?.currentQuestion?.revealMs).toBeNull();
+      expect(room.toGameStateView()?.currentQuestion?.fadeMs).toBe(500);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('textRevealEnabled: false makes the question open immediately, revealMs 0, ignoring TEXT_REVEAL_MIN_MS', () => {

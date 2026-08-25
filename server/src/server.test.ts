@@ -103,6 +103,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealFadeMs: 270,
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
@@ -144,6 +145,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealFadeMs: 270,
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
@@ -204,6 +206,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealFadeMs: 270,
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
@@ -237,6 +240,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealFadeMs: 270,
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
@@ -356,6 +360,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealFadeMs: 270,
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
@@ -411,6 +416,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealFadeMs: 270,
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
@@ -450,6 +456,7 @@ describe('createServer', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealFadeMs: 270,
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
@@ -496,6 +503,26 @@ describe('createServer', () => {
     ])) as { textRevealEnabled: boolean }[];
     expect(adminState.textRevealEnabled).toBe(false);
     expect(boardState.textRevealEnabled).toBe(false);
+
+    admin.ws.close();
+    board.ws.close();
+  });
+
+  // ВРЕМЕННО — см. Room.textRevealFadeMs. Тот же паттерн, что и тест выше
+  // для textRevealWordsPerSecond.
+  it('admin-set-text-reveal-fade-ms changes the broadcast value for everyone connected', async () => {
+    const admin = await connectAdmin(url);
+    const board = await connectAdmin(url);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-set-text-reveal-fade-ms', fadeMs: 500 }),
+    );
+    const [adminState, boardState] = (await Promise.all([
+      admin.nextMessage(),
+      board.nextMessage(),
+    ])) as { textRevealFadeMs: number }[];
+    expect(adminState.textRevealFadeMs).toBe(500);
+    expect(boardState.textRevealFadeMs).toBe(500);
 
     admin.ws.close();
     board.ws.close();
@@ -679,6 +706,7 @@ describe('createServer heartbeat', () => {
       availablePacks: [],
       activePackFilename: null,
       textRevealWordsPerSecond: 2.5,
+      textRevealFadeMs: 270,
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
@@ -1400,6 +1428,7 @@ describe('createServer cat-in-the-bag', () => {
       image: null,
       video: null,
       revealMs: null,
+      fadeMs: 270,
     });
 
     picker.ws.send(
@@ -1434,6 +1463,7 @@ describe('createServer cat-in-the-bag', () => {
       image: null,
       video: null,
       revealMs: null,
+      fadeMs: 270,
     });
     expect(afterAssign.game.exclusiveAnswererParticipantId).toBe(
       other.participantId,

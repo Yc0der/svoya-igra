@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Admin } from './Admin';
@@ -64,6 +64,8 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     setTextRevealWordsPerSecond: vi.fn(),
     textRevealEnabled: true,
     setTextRevealEnabled: vi.fn(),
+    textRevealFadeMs: 270,
+    setTextRevealFadeMs: vi.fn(),
     historyEnabled: true,
     setHistoryEnabled: vi.fn(),
     historyRecording: true,
@@ -149,6 +151,47 @@ describe('Admin', () => {
       screen.getByRole('button', { name: /192\.168\.31\.179/ }),
     );
     expect(setLanAddress).toHaveBeenCalledWith('192.168.31.179');
+  });
+
+  // ВРЕМЕННО — см. server/src/protocol.ts, StateMessage.textRevealFadeMs.
+  it('ввод и «Применить» в секции длительности проявления буквы вызывает setTextRevealFadeMs с введённым числом', async () => {
+    const setTextRevealFadeMs = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ textRevealFadeMs: 270, setTextRevealFadeMs }),
+    );
+    render(<Admin />);
+
+    const input = screen.getByLabelText('Длительность проявления буквы, мс');
+    const section = input.closest('section')!;
+    await userEvent.clear(input);
+    await userEvent.type(input, '350');
+    await userEvent.click(
+      within(section).getByRole('button', { name: 'Применить' }),
+    );
+
+    expect(setTextRevealFadeMs).toHaveBeenCalledWith(350);
+  });
+
+  // ВРЕМЕННО — см. server/src/protocol.ts, StateMessage.textRevealFadeMs. 0
+  // должно оставаться допустимым: возврат к мгновенному появлению буквы —
+  // сознательная точка сравнения, не ошибка ввода (design.md,
+  // 2026-08-19-gradual-text-reveal-design.md).
+  it('позволяет применить 0 мс (мгновенное появление буквы)', async () => {
+    const setTextRevealFadeMs = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ textRevealFadeMs: 270, setTextRevealFadeMs }),
+    );
+    render(<Admin />);
+
+    const input = screen.getByLabelText('Длительность проявления буквы, мс');
+    const section = input.closest('section')!;
+    await userEvent.clear(input);
+    await userEvent.type(input, '0');
+    await userEvent.click(
+      within(section).getByRole('button', { name: 'Применить' }),
+    );
+
+    expect(setTextRevealFadeMs).toHaveBeenCalledWith(0);
   });
 
   it('переключение записи истории вызывает setHistoryEnabled', async () => {
