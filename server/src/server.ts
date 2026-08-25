@@ -176,9 +176,9 @@ export function createServer(options: CreateServerOptions): GameServer {
 
   room.onChange(broadcastState);
   // Разбор идёт УЖЕ ПОСЛЕ game-end, поэтому одного этого пересчёта мало —
-  // причины он не увидит (их ловит точка в обработчике tag-reason выше).
-  // Нужен он ради чисел по ценам: они обновятся, даже если разбирать никто
-  // ничего не станет.
+  // причины он не увидит (их ловит точка в обработчике tag-reason ниже, в
+  // handleMessage). Нужен он ради чисел по ценам: они обновятся, даже если
+  // разбирать никто ничего не станет.
   let previousPhase: string | null = null;
   room.onChange((state) => {
     const phase = state.game?.phase ?? null;
@@ -213,7 +213,9 @@ export function createServer(options: CreateServerOptions): GameServer {
 
   // Сериализует конкурентные записи в один и тот же файл между собой — общий
   // паттерн для обоих ресурсов, которые сервер пишет: файлы пакетов
-  // (updateQuestion/deleteQuestion) и profile.md (appendComplaint). Без
+  // (updateQuestion/deleteQuestion) и profile.md (appendComplaint и
+  // rewriteAutoSection — двое писателей с появлением пересчёта
+  // «Автособранного», design.md, 2026-08-25). Без
   // этого два запроса подряд читают файл до того, как предыдущий успел его
   // перезаписать, и один результат теряет правку другого (см. комментарий у
   // исходного withPackWriteLock, Веха A) — тот же баг возможен и для
@@ -247,10 +249,11 @@ export function createServer(options: CreateServerOptions): GameServer {
     }
   }
 
-  // Общая сборка записи жалобы: используется и кнопкой «Пожаловаться» в
-  // редакторе пакетов, и разбором в конце партии — материал у них
-  // одинаковый (вопрос, ответ, тема, цена), различается только текст
-  // претензии и то, кому отвечать об успехе.
+  // Сборка записи жалобы для handleReportQuestion — единственного
+  // вызывающего: кнопки «Пожаловаться» в редакторе пакетов. Разбор в конце
+  // партии сюда не заходит (финальное ревью ветки, п. 4) — его оценки
+  // попадают в файл через refreshAutoSection выше, из истории, а не из
+  // текущего содержимого файла пакета.
   async function buildComplaintEntry(
     filename: string,
     questionId: string,
@@ -437,17 +440,18 @@ export function createServer(options: CreateServerOptions): GameServer {
           // оценки (финальное ревью ветки, п. 3: WHERE-условие
           // recordTagReason теперь includes reason IS NULL AND reason_text
           // IS NULL).
-          const context = room.submitTagReason(
+          const recorded = room.submitTagReason(
             participantId,
             message.questionId,
             message.reason,
             message.text,
           );
-          // context !== null означает, что оценка реально записалась в базу —
+          // recorded === true означает, что оценка реально записалась в базу
+          // (гейт — возврат recordTagReason, финальное ревью ветки, п. 2) —
           // только тогда есть что пересчитывать. Дописывания буллета в
           // «Жалобы и оценки игроков» здесь больше нет: то же самое теперь
           // приходит пересчётом, в схлопнутом виде (design.md, 2026-08-25).
-          if (context) await refreshAutoSection();
+          if (recorded) await refreshAutoSection();
         }
       }
 
