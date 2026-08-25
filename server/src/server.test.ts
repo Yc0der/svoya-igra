@@ -1083,14 +1083,14 @@ describe('createServer game flow', () => {
   // Проводит tag-reason через настоящий websocket-сервер (не напрямую через
   // Room, как в room.test.ts) и проверяет, что запись реально доезжает до
   // профиля генератора, а не только до памяти комнаты.
-  it('tag-reason доносит причину до комнаты и дописывает её в профиль генератора', async () => {
+  it('tag-reason доносит причину до комнаты и пересчитывает «Автособранное»', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-tag-reason-'));
       const profilePath = join(dir, 'profile.md');
       await writeFile(
         profilePath,
-        '# Профиль компании\n\nВступление.\n',
+        '# Профиль компании\n\nВступление.\n\n---\n\n## Автособранное\n\nПока пусто.\n',
         'utf8',
       );
       // Настоящая история (не фейк) — appendTagReasonToProfile теперь
@@ -1112,6 +1112,7 @@ describe('createServer game flow', () => {
         port: 8080,
         packsDir: dir,
         profilePath,
+        history,
       });
       await new Promise<void>((resolve) =>
         server.httpServer.listen(0, resolve),
@@ -1187,17 +1188,21 @@ describe('createServer game flow', () => {
       // пуст (единственная запись только что разобрана).
       expect(room.toGameStateView(first.participantId)?.tagReview).toEqual([]);
 
-      // И приводит к записи — на долгоживущем артефакте, ради проверки
-      // которого этот тест и существует.
+      // Оценка доезжает до долгоживущего артефакта — ради этого тест и
+      // существует. Но теперь пересчётом, а не дописыванием: то же самое от
+      // шестерых игроков даст одну запись «×6», а не шесть буллетов (живая
+      // партия 2026-08-21).
       const profileContent = await waitForFileContent(
         profilePath,
         'вообще не слышал про такое',
       );
-      expect(profileContent).toContain('## Жалобы и оценки игроков');
-      expect(profileContent).toContain('«Тест» (test.json)');
-      expect(profileContent).toContain('тема «Тема», вопрос за 100');
+      expect(profileContent).toContain('## Автособранное');
+      expect(profileContent).toContain('### Вопросы, помеченные пальцем вниз');
+      expect(profileContent).toContain('- **test.json · «Тема» · 100** —');
       expect(profileContent).toContain('«Вопрос?» (ответ: «Ответ»)');
-      expect(profileContent).toContain('слишком сложный');
+      expect(profileContent).toContain('👎 1 · причины: «Слишком сложный» ×1');
+      // Раздела жалоб разбор больше не касается вовсе.
+      expect(profileContent).not.toContain('## Жалобы и оценки игроков');
 
       first.ws.close();
       second.ws.close();

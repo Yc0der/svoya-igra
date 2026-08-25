@@ -1,4 +1,10 @@
 import { readFile, rename, writeFile } from 'node:fs/promises';
+import type { ProfileAggregate } from './history.js';
+import {
+  parseAcknowledged,
+  renderAutoSection,
+  spliceAutoSection,
+} from './profileSection.js';
 
 export interface ComplaintEntry {
   date: string;
@@ -59,6 +65,34 @@ export async function appendComplaint(
   const updated = base.includes(HEADING)
     ? `${base}${bullet}\n`
     : `${base}\n---\n\n${HEADING}\n\n${bullet}\n`;
+  const tmpPath = `${profilePath}.tmp`;
+  await writeFile(tmpPath, updated, 'utf8');
+  await rename(tmpPath, profilePath);
+}
+
+/**
+ * Пересчитывает раздел «Автособранное» целиком (design.md, 2026-08-25).
+ * Дописывания здесь нет намеренно: раздел — чистая проекция базы, и именно
+ * поэтому одна претензия от шестерых игроков даёт одну запись «×6», а не
+ * шесть одинаковых буллетов (живая партия 2026-08-21).
+ *
+ * Порядок обязателен: список «учтено» читается из СТАРОГО текста файла, до
+ * того как раздел заменён, — иначе маркер, стоящий рядом с разделом, уже
+ * потерян.
+ *
+ * Тот же атомарный приём записи, что и в appendComplaint: temp + rename.
+ */
+export async function rewriteAutoSection(
+  profilePath: string,
+  aggregate: ProfileAggregate,
+): Promise<void> {
+  const current = await readFile(profilePath, 'utf8');
+  const section = renderAutoSection(aggregate, parseAcknowledged(current));
+  const updated = spliceAutoSection(current, section);
+  // Пересчёт идёт на каждое объяснение причины, то есть несколько раз подряд,
+  // пока игроки заполняют экран разбора. Без этой проверки файл переписывался
+  // бы и когда в нём нечего менять.
+  if (updated === current) return;
   const tmpPath = `${profilePath}.tmp`;
   await writeFile(tmpPath, updated, 'utf8');
   await rename(tmpPath, profilePath);

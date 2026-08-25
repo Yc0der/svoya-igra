@@ -19,9 +19,13 @@ import {
 } from './packs.js';
 import { loadPack } from './pack.js';
 import type { Question } from './pack.js';
-import { appendComplaint, type ComplaintEntry } from './generatorProfile.js';
+import {
+  appendComplaint,
+  rewriteAutoSection,
+  type ComplaintEntry,
+} from './generatorProfile.js';
 import { TAG_REASONS } from './protocol.js';
-import type { TagComplaintContext } from './history.js';
+import type { ProfileAggregateSource } from './history.js';
 
 export interface CreateServerOptions {
   room: Room;
@@ -33,6 +37,8 @@ export interface CreateServerOptions {
   // путь не нужен вовсе — сервер без него просто не может принимать жалобы
   // (тихий no-op, см. handleReportQuestion).
   profilePath?: string;
+  // Только чтение сводки — записывать в историю может лишь Room.
+  history?: ProfileAggregateSource;
 }
 
 export interface GameServer {
@@ -73,7 +79,8 @@ function lanUrlFor(address: string | null, port: number): string {
 }
 
 export function createServer(options: CreateServerOptions): GameServer {
-  const { room, clientDistPath, port, packsDir, profilePath } = options;
+  const { room, clientDistPath, port, packsDir, profilePath, history } =
+    options;
   const assets = sirv(clientDistPath, { single: true });
   // Раздаёт packsDir/media/... под префиксом /media/ — БЕЗ single:true:
   // отсутствующая картинка обязана дать настоящий 404, а не откат на
@@ -168,6 +175,18 @@ export function createServer(options: CreateServerOptions): GameServer {
   };
 
   room.onChange(broadcastState);
+  // Разбор идёт УЖЕ ПОСЛЕ game-end, поэтому одного этого пересчёта мало —
+  // причины он не увидит (их ловит точка в обработчике tag-reason выше).
+  // Нужен он ради чисел по ценам: они обновятся, даже если разбирать никто
+  // ничего не станет.
+  let previousPhase: string | null = null;
+  room.onChange((state) => {
+    const phase = state.game?.phase ?? null;
+    if (phase === 'game-end' && previousPhase !== 'game-end') {
+      void refreshAutoSection();
+    }
+    previousPhase = phase;
+  });
   room.onLanChange(broadcastState);
   room.onPackChange(broadcastState);
   // ВРЕМЕННО — см. Room.textRevealWordsPerSecond.
@@ -213,6 +232,21 @@ export function createServer(options: CreateServerOptions): GameServer {
   const withPackWriteLock = createWriteLock();
   const withProfileWriteLock = createWriteLock();
 
+  // Пересчёт раздела «Автособранное» (design.md, 2026-08-25). Ошибки
+  // проглатываются с записью в лог по тому же правилу, что и остальная
+  // работа с профилем: партия важнее файла для генератора.
+  async function refreshAutoSection(): Promise<void> {
+    if (!profilePath || !history) return;
+    try {
+      const aggregate = history.profileAggregate();
+      await withProfileWriteLock(() =>
+        rewriteAutoSection(profilePath, aggregate),
+      );
+    } catch (err) {
+      console.error('Не удалось пересчитать «Автособранное» в профиле:', err);
+    }
+  }
+
   // Общая сборка записи жалобы: используется и кнопкой «Пожаловаться» в
   // редакторе пакетов, и разбором в конце партии — материал у них
   // одинаковый (вопрос, ответ, тема, цена), различается только текст
@@ -237,52 +271,6 @@ export function createServer(options: CreateServerOptions): GameServer {
       answer: location.question.answer,
       complaint,
     };
-  }
-
-  // Палец вниз БЕЗ причины в профиль не идёт: «кому-то не понравилось,
-  // неизвестно чем» — генератору нечего с этим делать (design.md,
-  // 2026-08-21-question-tags-design.md, «Куда уходит собранное»). Такая
-  // оценка остаётся в базе цифрой и дождётся агрегации слайса B.
-  //
-  // context приходит от room.submitTagReason() — это вопрос ТОЙ ПАРТИИ, В
-  // КОТОРОЙ ЕГО РЕАЛЬНО ИГРАЛИ (history.complaintContext), а не текущий
-  // активный пакет: до этой правки жалоба собиралась через
-  // room.getPackInfo().activeFilename и loadPack(), а на game-end ведущий
-  // волен уже переключить пакет к следующей партии, пока остальные ещё
-  // дописывают разбор — questionId искался бы в чужом пакете (финальное
-  // ревью ветки, п. 2).
-  async function appendTagReasonToProfile(
-    context: TagComplaintContext,
-    reason: string | null,
-    text: string,
-  ): Promise<void> {
-    if (!profilePath) return;
-    const trimmed = text.trim();
-    if (reason === null && trimmed === '') return;
-    const complaint =
-      reason === null
-        ? `оценка игрока после партии: ${trimmed}`
-        : trimmed === ''
-          ? `${reason.toLowerCase()} (оценка игрока после партии)`
-          : `${reason.toLowerCase()} (оценка игрока после партии): ${trimmed}`;
-    const entry: ComplaintEntry = {
-      date: new Date().toISOString().slice(0, 10),
-      packFilename: context.packFilename,
-      packTitle: context.packTitle,
-      themeName: context.themeName,
-      price: context.price,
-      questionText: context.text,
-      answer: context.answer,
-      complaint,
-    };
-    try {
-      await withProfileWriteLock(() => appendComplaint(profilePath, entry));
-    } catch (err) {
-      // Проглатываем: партия уже кончилась, показывать игроку ошибку
-      // записи в файл профиля бессмысленно, а ронять сервер из-за неё
-      // тем более. Цифра в базе при этом уже сохранена.
-      console.error('Не удалось дописать оценку в профиль генератора:', err);
-    }
   }
 
   wss.on('connection', (ws) => {
@@ -443,28 +431,23 @@ export function createServer(options: CreateServerOptions): GameServer {
         if (participantId) {
           // room.submitTagReason сама проверяет фазу game-end и что
           // participantId реально ставил палец вниз по этому questionId, ещё
-          // не разобранному — в профиль генератора уходит только реально
-          // существовавшая, ещё не записанная оценка, а не любой присланный
-          // клиентом id (ревью задачи 4, Important 1: устаревший/подложный
-          // questionId раньше долетал до appendTagReasonToProfile
-          // безусловно) и не повторная отправка той же оценки (финальное
-          // ревью ветки, п. 3: WHERE-условие recordTagReason теперь includes
-          // reason IS NULL AND reason_text IS NULL). Возвращённый контекст —
-          // вопрос той партии, в которой его реально играли, а не текущий
-          // активный пакет (финальное ревью ветки, п. 2).
+          // не разобранному — в базу уходит только реально существовавшая,
+          // ещё не записанная оценка, а не любой присланный клиентом id
+          // (ревью задачи 4, Important 1) и не повторная отправка той же
+          // оценки (финальное ревью ветки, п. 3: WHERE-условие
+          // recordTagReason теперь includes reason IS NULL AND reason_text
+          // IS NULL).
           const context = room.submitTagReason(
             participantId,
             message.questionId,
             message.reason,
             message.text,
           );
-          if (context) {
-            await appendTagReasonToProfile(
-              context,
-              message.reason,
-              message.text,
-            );
-          }
+          // context !== null означает, что оценка реально записалась в базу —
+          // только тогда есть что пересчитывать. Дописывания буллета в
+          // «Жалобы и оценки игроков» здесь больше нет: то же самое теперь
+          // приходит пересчётом, в схлопнутом виде (design.md, 2026-08-25).
+          if (context) await refreshAutoSection();
         }
       }
 
