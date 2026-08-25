@@ -45,21 +45,20 @@ describe('renderAutoSection', () => {
       { ...EMPTY, games: 1, questions: 1, tags: 1 },
       new Set(),
     );
-    expect(one).toContain('1 партия, 1 сыгранный вопрос, 1 оценка от игроков');
+    expect(one).toContain('1 партия, 1 сыгранный вопрос');
+    expect(one).toContain(', 1 оценка от игроков');
     const few = renderAutoSection(
       { ...EMPTY, games: 3, questions: 22, tags: 12 },
       new Set(),
     );
-    expect(few).toContain(
-      '3 партии, 22 сыгранных вопроса, 12 оценок от игроков',
-    );
+    expect(few).toContain('3 партии, 22 сыгранных вопроса');
+    expect(few).toContain(', 12 оценок от игроков');
     const many = renderAutoSection(
       { ...EMPTY, games: 5, questions: 147, tags: 25 },
       new Set(),
     );
-    expect(many).toContain(
-      '5 партий, 147 сыгранных вопросов, 25 оценок от игроков',
-    );
+    expect(many).toContain('5 партий, 147 сыгранных вопросов');
+    expect(many).toContain(', 25 оценок от игроков');
   });
 
   it('печатает запись вопроса с пальцами, причинами и текстом', () => {
@@ -68,7 +67,9 @@ describe('renderAutoSection', () => {
       new Set(),
     );
     expect(text).toContain('### Вопросы, помеченные пальцем вниз');
-    expect(text).toContain('- **photo-test.json · «Кино» · 400** —');
+    expect(text).toContain(
+      '- **photo-test.json#r1-kino-400 · «Кино» · 400** —',
+    );
     expect(text).toContain('(ответ: «Жорж Бизе»)');
     expect(text).toContain(
       '👎 3 · 👍 1 · причины: «Неинтересная тема» ×2, «Слишком сложный» ×1',
@@ -106,6 +107,32 @@ describe('renderAutoSection', () => {
         ...EMPTY,
         games: 1,
         downTagged: [{ ...QUESTION, texts: ['плохо\n## Заголовок\n---\nещё'] }],
+      },
+      new Set(),
+    );
+    for (const line of text.split('\n')) {
+      expect(line.startsWith('## ')).toBe(line === '## Автособранное');
+      expect(line.startsWith('---')).toBe(false);
+    }
+  });
+
+  // Финальное ревью ветки, п. 1 (CRITICAL) — indentContinuation() раньше
+  // применялась только к entry.text и entry.texts, но не к entry.answer и
+  // entry.themeName: перенос строки в любом из них (поле «Ответ» в редакторе
+  // пакетов — обычный <textarea>, где Enter ничем не запрещён) пробивал
+  // раздел ровно так же, как перенос в тексте вопроса.
+  it('не даёт переносу строки в ответе или названии темы разорвать раздел', () => {
+    const text = renderAutoSection(
+      {
+        ...EMPTY,
+        games: 1,
+        downTagged: [
+          {
+            ...QUESTION,
+            answer: 'Жорж Бизе\n---\nвторая строка',
+            themeName: 'Кино\n## Подложный заголовок',
+          },
+        ],
       },
       new Set(),
     );
@@ -245,6 +272,46 @@ describe('spliceAutoSection', () => {
   it('идемпотентна: повторная вставка того же раздела ничего не меняет', () => {
     const once = spliceAutoSection(FILE, '## Автособранное\n\nновое');
     expect(spliceAutoSection(once, '## Автособранное\n\nновое')).toBe(once);
+  });
+
+  // Финальное ревью ветки, п. 1 (CRITICAL) — регрессионный тест на весь
+  // конвейер (renderAutoSection + spliceAutoSection), не на статичную
+  // строку раздела, как тест идемпотентности выше: тот прогоняет один и тот
+  // же ГОТОВЫЙ текст раздела и не ловит дыру, потому что дыра — в том, КАК
+  // раздел строится из данных с переносом строки, а не в самой вставке.
+  // Здесь ответ в данных содержит `\n---\n` — без фикса indentContinuation()
+  // в renderQuestion() эта строка не получает отступа, findSectionRange()
+  // принимает её за границу раздела, и раздел на каждом пересчёте обрезается
+  // на середине, а хвост дублируется рядом (проверено на настоящем файле
+  // профиля: 8213 → 8269 → 8325 → 8381 байт, без предела). Пять пересчётов
+  // подряд на реалистичном тексте файла — и текст обязан перестать расти уже
+  // после второго прохода.
+  it('устойчива к повторению даже с переносом строки в ответе: после второго прохода текст перестаёт меняться', () => {
+    const poisonedAggregate: ProfileAggregate = {
+      ...EMPTY,
+      games: 1,
+      questions: 5,
+      tags: 3,
+      downTagged: [{ ...QUESTION, answer: 'Жорж Бизе\n---\nвторая строка' }],
+    };
+    const section = renderAutoSection(poisonedAggregate, new Set());
+
+    let fileText = FILE;
+    const sizes: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      fileText = spliceAutoSection(fileText, section);
+      sizes.push(fileText.length);
+    }
+
+    expect(sizes[2]).toBe(sizes[1]);
+    expect(sizes[3]).toBe(sizes[2]);
+    expect(sizes[4]).toBe(sizes[3]);
+    // Раздел жалоб остаётся последним даже после пяти пересчётов подряд с
+    // ядовитым значением в данных.
+    expect(fileText.trimEnd().endsWith('- старая жалоба')).toBe(true);
+    // Заголовок раздела встречается ровно один раз — ни одной осиротевшей
+    // копии рядом.
+    expect(fileText.split('## Автособранное').length - 1).toBe(1);
   });
 
   it('вставляет раздел перед жалобами, если его в файле нет', () => {
