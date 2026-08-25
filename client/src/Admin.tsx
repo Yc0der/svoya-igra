@@ -344,6 +344,7 @@ export function Admin() {
         </p>
         <input
           type="number"
+          aria-label="Скорость показа текста, слов в секунду"
           min={0.1}
           step={0.1}
           value={textRevealRateInput}
