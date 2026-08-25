@@ -611,56 +611,6 @@ describe('GameHistory: оценки вопросов', () => {
   });
 });
 
-describe('GameHistory.complaintContext', () => {
-  it('отдаёт вопрос таким, каким его видели в СЫГРАННОЙ партии', () => {
-    const history = makeHistory();
-    const gameId = history.startGame({
-      startedAt: '2026-08-21T18:00:00.000Z',
-      packFilename: 'p.json',
-      packTitle: 'Пак',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
-    })!;
-    history.recordQuestion(gameId, QUESTION);
-
-    expect(history.complaintContext(gameId, QUESTION.questionId)).toEqual({
-      packFilename: 'p.json',
-      packTitle: 'Пак',
-      themeName: QUESTION.themeName,
-      price: QUESTION.price,
-      text: QUESTION.text,
-      answer: QUESTION.answer,
-    });
-  });
-
-  it('неизвестный в этой партии вопрос — null', () => {
-    const history = makeHistory();
-    const gameId = history.startGame({
-      startedAt: '2026-08-21T18:00:00.000Z',
-      packFilename: 'p.json',
-      packTitle: 'Пак',
-      participants: [],
-    })!;
-    history.recordQuestion(gameId, QUESTION);
-
-    expect(history.complaintContext(gameId, 'ghost')).toBeNull();
-  });
-
-  it('не роняет вызов, когда база недоступна', () => {
-    const history = makeHistory();
-    const gameId = history.startGame({
-      startedAt: '2026-08-21T18:00:00.000Z',
-      packFilename: 'p.json',
-      packTitle: 'Пак',
-      participants: [],
-    })!;
-    history.close();
-    expect(() =>
-      history.complaintContext(gameId, QUESTION.questionId),
-    ).not.toThrow();
-    expect(history.complaintContext(gameId, QUESTION.questionId)).toBeNull();
-  });
-});
-
 describe('GameHistory.downTagsForReview', () => {
   function gameWithTwoQuestions(history: GameHistory): number {
     const id = history.startGame({

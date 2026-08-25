@@ -2741,24 +2741,6 @@ function fakeHistory(): FakeHistory {
           };
         });
     },
-    // Тот же материал, что и настоящий GameHistory.complaintContext — вопрос
-    // ЭТОЙ партии (fake.questions), не привязанный к текущему активному
-    // пакету.
-    complaintContext(gameId, questionId) {
-      const question = fake.questions.find(
-        (q) => q.gameId === gameId && q.row.questionId === questionId,
-      );
-      if (!question) return null;
-      const game = fake.games[gameId - 1];
-      return {
-        packFilename: game.packFilename,
-        packTitle: game.packTitle,
-        themeName: question.row.themeName,
-        price: question.row.price,
-        text: question.row.text,
-        answer: question.row.answer,
-      };
-    },
   };
   return fake;
 }
@@ -3004,9 +2986,6 @@ describe('Room: история партий', () => {
       recordTagReason: () => false,
       downTagsForReview: () => {
         throw new Error('boom: downTagsForReview');
-      },
-      complaintContext: () => {
-        throw new Error('boom: complaintContext');
       },
     };
     const room = roomWithHistory(throwingHistory);
@@ -3544,9 +3523,9 @@ describe('Room: оценки вопросов', () => {
 
     // picker поставил палец вниз только по q1 (см. выше) — q2 он никогда не
     // тегал, значит причина по q2 не должна ни на что повлиять.
-    const context = room.submitTagReason(picker, 'q2', 'Слишком сложный', '');
+    const recorded = room.submitTagReason(picker, 'q2', 'Слишком сложный', '');
 
-    expect(context).toBeNull();
+    expect(recorded).toBe(false);
     expect(history.reasons).toEqual([]);
     expect(room.toGameStateView(picker)?.tagReview).toHaveLength(1);
   });
@@ -3561,18 +3540,19 @@ describe('Room: оценки вопросов', () => {
 
     // Фаза здесь 'reveal', не 'game-end' — экран разбора существует только
     // на game-end (см. тест выше «до конца партии разбор пуст»).
-    const context = room.submitTagReason(picker, 'q1', 'Слишком сложный', '');
+    const recorded = room.submitTagReason(picker, 'q1', 'Слишком сложный', '');
 
-    expect(context).toBeNull();
+    expect(recorded).toBe(false);
     expect(history.reasons).toEqual([]);
   });
 
-  // Финальное ревью ветки, п. 2: контекст жалобы приходит из истории (вопрос
-  // ТОЙ партии, в которой его реально играли), а не из текущего активного
-  // пакета — submitTagReason обязан вернуть его целиком, чтобы server.ts
-  // мог собрать запись в docs/pack-generator-profile.md без обращения к
-  // room.getPackInfo()/файлу пакета.
-  it('успешная запись причины возвращает контекст вопроса из истории', () => {
+  // Финальное ревью ветки, п. 2: submitTagReason больше не возвращает
+  // контекст вопроса (тип сужен до boolean) — гейтом для пересчёта
+  // «Автособранного» служит возврат recordTagReason. Разбор сейчас попадает
+  // в профиль генератора через пересчёт всего раздела (design.md,
+  // 2026-08-25), которому не нужен контекст конкретного вопроса, только сам
+  // факт «что-то обновилось».
+  it('успешная запись причины возвращает true и реально записывает её в историю', () => {
     const history = fakeHistory();
     const room = roomWithHistory(history);
     room.startGame('requester');
@@ -3589,20 +3569,22 @@ describe('Room: оценки вопросов', () => {
       vi.useRealTimers();
     }
 
-    const context = room.submitTagReason(
+    const recorded = room.submitTagReason(
       picker,
       'q1',
       'Слишком сложный',
       'вообще не знал',
     );
 
-    expect(context).toEqual({
-      packFilename: 'test.json',
-      packTitle: 'Тест',
-      themeName: 'Тема',
-      price: 100,
-      text: 'Вопрос 1?',
-      answer: 'ответ 1',
-    });
+    expect(recorded).toBe(true);
+    expect(history.reasons).toEqual([
+      {
+        gameId: 1,
+        questionId: 'q1',
+        participantId: picker,
+        reason: 'Слишком сложный',
+        reasonText: 'вообще не знал',
+      },
+    ]);
   });
 });
