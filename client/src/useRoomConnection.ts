@@ -69,6 +69,12 @@ export interface GameStateView {
     // локальном типе ради тестовых фикстур. Реальные сообщения с сервера
     // всегда содержат revealMs (server/src/protocol.ts).
     revealMs?: number | null;
+    // ВРЕМЕННЫЙ параметр — длительность проявления одной буквы, мс
+    // (server/src/protocol.ts, Room.textRevealFadeMs). Тот же приём, что и
+    // у revealMs выше — необязательное поле ради тестовых фикстур; Board.tsx
+    // передаёт его в useTextReveal, который сам подставляет дефолт (200мс),
+    // если поле отсутствует.
+    fadeMs?: number;
   } | null;
   // Оценки вопроса, который только что доиграли (design.md,
   // 2026-08-21-question-tags-design.md). null — окно оценки закрыто.

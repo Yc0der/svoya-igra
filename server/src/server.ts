@@ -133,6 +133,8 @@ export function createServer(options: CreateServerOptions): GameServer {
       textRevealWordsPerSecond: room.getTextRevealWordsPerSecond(),
       // ВРЕМЕННО — см. Room.textRevealEnabled.
       textRevealEnabled: room.getTextRevealEnabled(),
+      // ВРЕМЕННО — см. Room.textRevealFadeMs.
+      textRevealFadeMs: room.getTextRevealFadeMs(),
       historyEnabled: room.getHistoryEnabled(),
       historyRecording: room.isHistoryRecording(),
     };
@@ -172,6 +174,8 @@ export function createServer(options: CreateServerOptions): GameServer {
   room.onTextRevealRateChange(broadcastState);
   // ВРЕМЕННО — см. Room.textRevealEnabled.
   room.onTextRevealEnabledChange(broadcastState);
+  // ВРЕМЕННО — см. Room.textRevealFadeMs.
+  room.onTextRevealFadeChange(broadcastState);
   room.onHistoryEnabledChange(broadcastState);
 
   // `ws`, будучи прицепленным к готовому httpServer, переподписывает его
@@ -591,6 +595,14 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.enabled === 'boolean'
       ) {
         room.setTextRevealEnabled(message.enabled);
+      }
+
+      // ВРЕМЕННО — см. Room.textRevealFadeMs.
+      if (
+        message.type === 'admin-set-text-reveal-fade-ms' &&
+        typeof message.fadeMs === 'number'
+      ) {
+        room.setTextRevealFadeMs(message.fadeMs);
       }
 
       if (

@@ -316,6 +316,21 @@ export class Room {
   // ниже возвращает 0, вопрос открывается сразу.
   private textRevealEnabled = true;
   private textRevealEnabledListeners = new Set<(enabled: boolean) => void>();
+  // Длительность проявления одной буквы, мс — ВРЕМЕННЫЙ настраиваемый
+  // параметр, тот же принцип и статус, что у textRevealWordsPerSecond выше
+  // (design.md, 2026-08-19-gradual-text-reveal-design.md, «Буква
+  // проявляется, а не возникает», раздел про настраиваемость от
+  // 2026-08-21): 200мс подобраны на мониторе разработчика, а смотреть
+  // предстоит на телевизоре с трёх метров, где другие контраст и угловой
+  // размер букв — то самое число, которое нельзя подобрать иначе, чем
+  // глядя на настоящее табло. Не часть RoomState, сбрасывается при
+  // перезапуске сервера в дефолт. 200 — то же значение, что
+  // TEXT_REVEAL_FADE_MS в client/src/useTextReveal.tsx (дублируется, а не
+  // импортируется — сервер и клиент разные пакеты, тот же случай, что и у
+  // textRevealWordsPerSecond/2.5 выше и Admin.tsx). Убрать вместе с полем и
+  // UI в админке, как только число зафиксируется в спеке.
+  private textRevealFadeMs = 200;
+  private textRevealFadeListeners = new Set<(fadeMs: number) => void>();
   // Настоящая длительность показа текущего вопроса — то самое число, которое
   // applyEffects только что подставило в таймер (Step 3 ниже). Не null,
   // только пока идёт question-reveal; отдаётся в toGameStateView, чтобы
@@ -951,6 +966,24 @@ export class Room {
     }
   }
 
+  // ВРЕМЕННО — см. Room.textRevealFadeMs.
+  getTextRevealFadeMs(): number {
+    return this.textRevealFadeMs;
+  }
+
+  // ВРЕМЕННО — см. Room.textRevealFadeMs. Без проверки отправителя, тем же
+  // паттерном, что setTextRevealWordsPerSecond/setTextRevealEnabled выше.
+  // 0 — валидное значение (буква возникает мгновенно, без проявления,
+  // удобная точка сравнения «до/после»), поэтому проверка мягче, чем у
+  // скорости показа: отклоняется только отрицательное и нечисловое.
+  setTextRevealFadeMs(fadeMs: number): void {
+    if (!Number.isFinite(fadeMs) || fadeMs < 0) return;
+    this.textRevealFadeMs = fadeMs;
+    for (const listener of this.textRevealFadeListeners) {
+      listener(this.textRevealFadeMs);
+    }
+  }
+
   getHistoryEnabled(): boolean {
     return this.historyEnabled;
   }
@@ -1140,6 +1173,15 @@ export class Room {
             // (Step 3 выше). Не null только в question-reveal (design.md,
             // 2026-08-19-gradual-text-reveal-design.md, «Сервер и клиент»).
             revealMs: this.currentTextRevealMs,
+            // Длительность проявления одной буквы, мс — текущее значение
+            // ВРЕМЕННОЙ настройки (Room.textRevealFadeMs), не секрет и не
+            // привязано к конкретному вопросу (в отличие от revealMs выше),
+            // поэтому читается вживую при каждой сборке состояния, а не
+            // замораживается на входе в question-reveal: табло использует
+            // его только как animation-duration отдельной буквы, менять
+            // которую посреди уже идущего показа безопасно (design.md,
+            // «Длительность проявления настраивается в админке»).
+            fadeMs: this.textRevealFadeMs,
           }
         : null,
       questionTags:
@@ -1282,6 +1324,12 @@ export class Room {
   onTextRevealEnabledChange(listener: (enabled: boolean) => void): () => void {
     this.textRevealEnabledListeners.add(listener);
     return () => this.textRevealEnabledListeners.delete(listener);
+  }
+
+  // ВРЕМЕННО — см. Room.textRevealFadeMs.
+  onTextRevealFadeChange(listener: (fadeMs: number) => void): () => void {
+    this.textRevealFadeListeners.add(listener);
+    return () => this.textRevealFadeListeners.delete(listener);
   }
 
   private stillGraceExcluded(): boolean {

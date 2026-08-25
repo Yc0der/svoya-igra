@@ -54,6 +54,13 @@ export interface GameStateView {
     // считает по нему и timerDeadline, сколько слов уже показывать, без
     // своего независимого отсчёта.
     revealMs: number | null;
+    // Длительность проявления одной буквы, мс — ВРЕМЕННАЯ настройка
+    // (design.md, 2026-08-19-gradual-text-reveal-design.md, «Длительность
+    // проявления настраивается в админке»). В отличие от revealMs — не
+    // null вне question-reveal: это не секрет и не зависит от текущего
+    // вопроса, просто текущее значение Room.textRevealFadeMs, отдаваемое
+    // рядом с revealMs, чтобы табло не нуждалось в отдельной проводке.
+    fadeMs: number;
   } | null;
   // Оценки вопроса, который только что доиграли (design.md,
   // 2026-08-21-question-tags-design.md). null — окно оценки закрыто: либо
@@ -194,6 +201,13 @@ export type ClientMessage =
   // тот же принцип, что admin-set-text-reveal-rate выше. false — вопрос
   // открывается сразу целиком, без ожидания (Room.computeTextRevealMs).
   | { type: 'admin-set-text-reveal-enabled'; enabled: boolean }
+  // ВРЕМЕННЫЙ параметр — длительность проявления одной буквы, мс
+  // (design.md, 2026-08-19-gradual-text-reveal-design.md, «Длительность
+  // проявления настраивается в админке»). Тот же принцип, что
+  // admin-set-text-reveal-rate выше: без авторизации, доступно только
+  // через /admin, убрать вместе с полем и UI, как только число
+  // зафиксируется в спеке.
+  | { type: 'admin-set-text-reveal-fade-ms'; fadeMs: number }
   // Тумблер записи текущей партии в историю (room.ts, Room.historyEnabled) —
   // тот же паттерн, что и admin-set-text-reveal-enabled выше, но постоянная
   // функция, не временная.
@@ -286,6 +300,10 @@ export type ServerMessage =
       // ВРЕМЕННЫЙ, как textRevealWordsPerSecond — вкл/выкл постепенного
       // показа целиком, меняется через admin-set-text-reveal-enabled.
       textRevealEnabled: boolean;
+      // ВРЕМЕННЫЙ, как textRevealWordsPerSecond — длительность проявления
+      // одной буквы, мс, меняется через admin-set-text-reveal-fade-ms без
+      // реконнекта (design.md, 2026-08-19-gradual-text-reveal-design.md).
+      textRevealFadeMs: number;
       // Намерение писать историю — для партии, которая начнётся дальше
       // (room.ts, Room.historyEnabled). Не то же самое, что «пишется ли
       // прямо сейчас конкретно идущая партия», см. historyRecording ниже.

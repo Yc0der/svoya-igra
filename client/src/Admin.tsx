@@ -37,6 +37,8 @@ export function Admin() {
     setTextRevealWordsPerSecond,
     textRevealEnabled,
     setTextRevealEnabled,
+    textRevealFadeMs,
+    setTextRevealFadeMs,
     historyEnabled,
     setHistoryEnabled,
     historyRecording,
@@ -70,6 +72,10 @@ export function Admin() {
   // server/src/protocol.ts, StateMessage.textRevealWordsPerSecond. Убрать
   // вместе с полем, как только число зафиксируется в спеке.
   const [textRevealRateInput, setTextRevealRateInput] = useState('2.5');
+  // ВРЕМЕННО — подбор длительности проявления буквы вживую, см.
+  // server/src/protocol.ts, StateMessage.textRevealFadeMs. Убрать вместе с
+  // полем, как только число зафиксируется в спеке.
+  const [textRevealFadeInput, setTextRevealFadeInput] = useState('200');
   // Режим редактора: какой файл сейчас открыт (null — обычный список
   // пакетов), какой вопрос открыт формой, и текущие значения формы —
   // отдельные строковые поля, а не готовые number/enum: значение в инпуте
@@ -349,6 +355,42 @@ export function Admin() {
             const rate = Number(textRevealRateInput);
             if (Number.isFinite(rate) && rate > 0) {
               setTextRevealWordsPerSecond(rate);
+            }
+          }}
+        >
+          Применить
+        </button>
+      </section>
+
+      {/* ВРЕМЕННО — подбор длительности проявления буквы вживую, см.
+        server/src/protocol.ts, StateMessage.textRevealFadeMs.
+        Убрать секцию целиком, как только число зафиксируется в спеке. */}
+      <section className="admin-section">
+        <h2>Проявление буквы на табло (временно)</h2>
+        <p>
+          Каждая буква вопроса на табло не возникает мгновенно, а плавно
+          проявляется — это время одного такого проявления, в миллисекундах. Чем
+          меньше число, тем резче видна буква; 0 — буква возникает мгновенно,
+          без проявления. Судить о значении стоит по настоящему табло, а не по
+          этому экрану: с телевизора за несколько метров резкость видна иначе,
+          чем на мониторе рядом.
+        </p>
+        <p>Сейчас: {textRevealFadeMs} мс.</p>
+        <input
+          type="number"
+          aria-label="Длительность проявления буквы, мс"
+          min={0}
+          max={1000}
+          step={10}
+          value={textRevealFadeInput}
+          onChange={(e) => setTextRevealFadeInput(e.target.value)}
+        />
+        <button
+          className="button"
+          onClick={() => {
+            const fadeMs = Number(textRevealFadeInput);
+            if (Number.isFinite(fadeMs) && fadeMs >= 0) {
+              setTextRevealFadeMs(fadeMs);
             }
           }}
         >

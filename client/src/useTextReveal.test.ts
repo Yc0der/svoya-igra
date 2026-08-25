@@ -83,6 +83,23 @@ describe('useTextReveal', () => {
     }
   });
 
+  it('uses the fadeMs parameter as animation-duration when given, instead of the TEXT_REVEAL_FADE_MS default (server/src/protocol.ts, currentQuestion.fadeMs — ВРЕМЕННЫЙ параметр админки)', () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      vi.setSystemTime(now);
+      const { result } = renderHook(() =>
+        useTextReveal(now + 1000, 1000, 'Кто', 500),
+      );
+      const [word] = result.current as unknown as [WordElement];
+      for (const letter of word.props.children) {
+        expect(letter.props.style.animationDuration).toBe('500ms');
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('delays each letter proportionally to its position, counted from the real reveal start (timerDeadline - revealMs)', () => {
     vi.useFakeTimers();
     try {

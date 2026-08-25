@@ -420,6 +420,39 @@ describe('Board', () => {
     }
   });
 
+  it('uses currentQuestion.fadeMs (ВРЕМЕННЫЙ параметр админки, server/src/protocol.ts) as the letter fade animation-duration, falling back to the 200ms default when absent', () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      vi.setSystemTime(now);
+      mockedUseRoomConnection.mockReturnValue(
+        connection({
+          game: baseGame({
+            phase: 'question-reveal',
+            currentQuestion: {
+              id: 'q1',
+              text: 'Кто',
+              price: 100,
+              themeName: 'Тема',
+              revealMs: 1000,
+              fadeMs: 500,
+            },
+            timerDeadline: now + 1000,
+          }),
+        }),
+      );
+      render(<Board />);
+
+      const letters = document.querySelectorAll('.text-reveal-letter');
+      expect(letters.length).toBeGreaterThan(0);
+      for (const letter of letters) {
+        expect((letter as HTMLElement).style.animationDuration).toBe('500ms');
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows the full question text once question-open, even if it was revealed only partially before', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({

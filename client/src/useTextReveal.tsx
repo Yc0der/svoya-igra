@@ -1,10 +1,15 @@
 import { useMemo, type ReactNode } from 'react';
 
-// Буквы проявляются за это время (design.md,
+// Буквы проявляются за это время по умолчанию (design.md,
 // 2026-08-19-gradual-text-reveal-design.md, «Буква проявляется, а не
-// возникает»). Константа, не настраиваемый параметр — 200мс подобраны
-// сравнением на живом примере 2026-08-21, отдельной крутилки в админке не
-// заводится (в отличие от скорости чтения, см. Admin.tsx).
+// возникает»). 200мс подобраны сравнением на мониторе разработчика
+// 2026-08-21 — начальное значение, не жёсткая константа: смотреть темп
+// предстоит на телевизоре с трёх метров, где контраст и угловой размер
+// букв другие, поэтому число ВРЕМЕННО настраивается из админки (раздел
+// «Длительность проявления настраивается в админке», 2026-08-21) и
+// приходит четвёртым параметром useTextReveal ниже — этот экспорт остаётся
+// значением по умолчанию, когда параметр не передан (тесты, старые
+// вызовы).
 export const TEXT_REVEAL_FADE_MS = 200;
 
 // Табло показывает вопрос по буквам, пока идёт постепенный показ — темп
@@ -35,6 +40,11 @@ export function useTextReveal(
   deadline: number | null,
   revealMs: number | null,
   text: string,
+  // ВРЕМЕННЫЙ параметр — currentQuestion.fadeMs с сервера (Room.textRevealFadeMs,
+  // server/src/protocol.ts). Значение по умолчанию — на случай, если вызывающий
+  // код (или старая тестовая фикстура) его не передаёт: сервер всегда шлёт
+  // fadeMs вместе с revealMs, так что на проде параметр отсутствующим не бывает.
+  fadeMs: number = TEXT_REVEAL_FADE_MS,
 ): ReactNode {
   return useMemo(() => {
     if (deadline === null || revealMs === null || revealMs <= 0) return text;
@@ -90,7 +100,7 @@ export function useTextReveal(
             className="text-reveal-letter"
             style={{
               animationDelay: `${letterStartsAt - now}ms`,
-              animationDuration: `${TEXT_REVEAL_FADE_MS}ms`,
+              animationDuration: `${fadeMs}ms`,
             }}
           >
             {char}
@@ -110,5 +120,5 @@ export function useTextReveal(
     });
 
     return nodes;
-  }, [deadline, revealMs, text]);
+  }, [deadline, revealMs, text, fadeMs]);
 }
