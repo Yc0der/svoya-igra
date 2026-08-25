@@ -142,6 +142,31 @@ describe('renderAutoSection', () => {
     }
   });
 
+  // Третье место того же дефекта, оставшееся без прицельного теста при
+  // починке (точечное ревью волны правок): в блоке тем имя темы приходит из
+  // отдельного поля boringThemes, а не из downTagged, поэтому тест выше его
+  // не задевает — там защиту сняли бы, а он остался бы зелёным.
+  it('не даёт переносу строки в названии темы разорвать блок тем', () => {
+    const text = renderAutoSection(
+      {
+        ...EMPTY,
+        games: 1,
+        boringThemes: [
+          {
+            themeName: 'Спорт\n## Подложный заголовок\n---',
+            count: 4,
+            games: 2,
+          },
+        ],
+      },
+      new Set(),
+    );
+    for (const line of text.split('\n')) {
+      expect(line.startsWith('## ')).toBe(line === '## Автособранное');
+      expect(line.startsWith('---')).toBe(false);
+    }
+  });
+
   it('печатает цены списком по возрастанию', () => {
     const text = renderAutoSection(
       {
