@@ -61,4 +61,32 @@ describe('docs/anketa.html', () => {
   it('объявляет ту же версию формата, что разбирает сервер', () => {
     expect(SOURCE).toContain('version: 1');
   });
+
+  // textarea многострочный по своей природе, а разбор режет строку по
+  // запятой. Если подсказка не говорит явно «через запятую», перенос
+  // строки между примерами тихо склеится в один пример при разборе на
+  // сервере (oneLine схлопывает переносы в пробелы) — и ни игрок, ни
+  // ведущий об этом не узнают.
+  it('подсказка каждого поля-области явно просит примеры через запятую', () => {
+    const cardBlocks = SOURCE.match(/<div class="card">[\s\S]*?<\/div>/g) ?? [];
+    const areaBlocks = cardBlocks.filter((block) => /id="area-/.test(block));
+    expect(areaBlocks.length).toBe(7);
+    for (const block of areaBlocks) {
+      expect(block).toContain('через запятую');
+    }
+  });
+
+  // Один IIFE без try/catch: любое исключение внутри делает страницу молча
+  // неинтерактивной — кнопки нарисованы, обработчики не навешаны, ошибки
+  // не видно, а до консоли на телефоне никто не дойдёт. Сообщение об
+  // ошибке обязано быть в разметке.
+  it('ошибка внутри скрипта не остаётся незамеченной', () => {
+    const scriptMatch = SOURCE.match(/<script>([\s\S]*?)<\/script>/);
+    expect(scriptMatch).not.toBeNull();
+    const script = scriptMatch ? scriptMatch[1] : '';
+    expect(script).toMatch(/try\s*\{/);
+    expect(script).toMatch(/catch\s*\(/);
+    expect(SOURCE).toMatch(/id="scriptError"/);
+    expect(SOURCE).toContain('напиши ведущему');
+  });
 });

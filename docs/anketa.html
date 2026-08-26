@@ -147,6 +147,15 @@
     color: var(--muted);
     min-height: 1.2em;
   }
+  #scriptError {
+    background: #fbe4de;
+    border: 1px solid var(--accent);
+    color: var(--accent-dark);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 16px;
+    font-weight: 600;
+  }
   .instructions {
     margin-top: 10px;
     font-size: 0.9rem;
@@ -155,6 +164,11 @@
 </style>
 </head>
 <body>
+
+  <div id="scriptError" hidden>
+    Страница не заработала в этом браузере — напиши ведущему, он спросит
+    тебя голосом.
+  </div>
 
   <h1>Анкета интересов</h1>
   <p class="lead">
@@ -172,43 +186,43 @@
 
   <div class="card">
     <label for="area-cinema">Кино и сериалы</label>
-    <p class="hint">Назови 2–3 фильма или сериала, которые пересматривал(а) или ждал(а) больше всего.</p>
+    <p class="hint">Назови 2–3 фильма или сериала, которые пересматривал(а) или ждал(а) больше всего, через запятую.</p>
     <textarea id="area-cinema" placeholder="Интерстеллар, Твин Пикс, Один дома"></textarea>
   </div>
 
   <div class="card">
     <label for="area-music">Музыка</label>
-    <p class="hint">2–3 исполнителя или трека, которые сейчас крутятся в плеере.</p>
+    <p class="hint">2–3 исполнителя или трека, которые сейчас крутятся в плеере, через запятую.</p>
     <textarea id="area-music" placeholder="Земфира, Nirvana, песня Кино — Пачка сигарет"></textarea>
   </div>
 
   <div class="card">
     <label for="area-sport">Спорт</label>
-    <p class="hint">2–3 команды, спортсмена или матча, за который болеешь.</p>
+    <p class="hint">2–3 команды, спортсмена или матча, за который болеешь, через запятую.</p>
     <textarea id="area-sport" placeholder="Зенит, финал ЧМ 2018, Федерер"></textarea>
   </div>
 
   <div class="card">
     <label for="area-books">Книги</label>
-    <p class="hint">2–3 книги, которые запомнились или перечитывались.</p>
+    <p class="hint">2–3 книги, которые запомнились или перечитывались, через запятую.</p>
     <textarea id="area-books" placeholder="Мастер и Маргарита, Дюна, Гарри Поттер"></textarea>
   </div>
 
   <div class="card">
     <label for="area-games">Игры</label>
-    <p class="hint">2–3 игры, в которые играешь или играл(а) больше всего.</p>
+    <p class="hint">2–3 игры, в которые играешь или играл(а) больше всего, через запятую.</p>
     <textarea id="area-games" placeholder="Ведьмак 3, Тетрис, Дота"></textarea>
   </div>
 
   <div class="card">
     <label for="area-food">Еда и путешествия</label>
-    <p class="hint">2–3 блюда или места, куда хочется вернуться.</p>
+    <p class="hint">2–3 блюда или места, куда хочется вернуться, через запятую.</p>
     <textarea id="area-food" placeholder="плов, Грузия, кофе с корицей"></textarea>
   </div>
 
   <div class="card">
     <label for="area-hobbies">Увлечения и работа</label>
-    <p class="hint">2–3 вещи, которыми занимаешься помимо основного — работа, хобби, всё что угодно.</p>
+    <p class="hint">2–3 вещи, которыми занимаешься помимо основного — работа, хобби, всё что угодно, через запятую.</p>
     <textarea id="area-hobbies" placeholder="вышивка, программирование на Python, разведение орхидей"></textarea>
   </div>
 
@@ -239,6 +253,8 @@
 <script>
 (function () {
   'use strict';
+
+  try {
 
   var AREAS = [
     { id: 'area-cinema', label: 'Кино и сериалы' },
@@ -310,7 +326,7 @@
       .map(function (area) {
         var input = document.getElementById(area.id);
         var examples = input.value
-          .split(',')
+          .split(/[,;\n]/)
           .map(function (s) { return s.trim(); })
           .filter(function (s) { return s !== ''; });
         return { area: area.label, examples: examples };
@@ -372,6 +388,20 @@
       selectManually('Автокопирование недоступно — код выделен, скопируй вручную.');
     }
   });
+
+  } catch (err) {
+    // Любое исключение здесь молча оставляет страницу нарисованной, но
+    // неинтерактивной: кнопки видны, обработчики не навешаны, а до
+    // консоли на телефоне никто не дойдёт — сообщение обязано быть в
+    // разметке, а не там.
+    var fallback = document.getElementById('scriptError');
+    if (fallback) {
+      fallback.hidden = false;
+    }
+    if (window.console && window.console.error) {
+      window.console.error(err);
+    }
+  }
 })();
 </script>
 </body>
