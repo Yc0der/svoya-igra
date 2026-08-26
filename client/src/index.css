@@ -795,6 +795,52 @@ code {
   color: var(--text);
 }
 
+.admin-hint {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.admin-error {
+  color: #d64545;
+}
+
+.admin-player-code {
+  display: block;
+  width: 100%;
+  max-width: 500px;
+  font: inherit;
+  margin-bottom: 12px;
+}
+
+.admin-player-conflict {
+  max-width: 500px;
+  margin-top: 12px;
+}
+
+.admin-players {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-players li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-player-name {
+  font-weight: 600;
+}
+
+.admin-player-date {
+  font-size: 14px;
+  color: var(--text);
+}
+
 .pack-editor {
   display: flex;
   flex-direction: column;

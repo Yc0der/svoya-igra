@@ -82,7 +82,10 @@ type ServerMessage =
       filename: string;
       questionId: string;
       reason: string;
-    };
+    }
+  | { type: 'admin-players'; players: { name: string; date: string }[] }
+  | { type: 'admin-player-exists'; name: string }
+  | { type: 'admin-player-error'; reason: string };
 
 type ClientMessage =
   | { type: 'admin-start-game' }
@@ -119,7 +122,9 @@ type ClientMessage =
       filename: string;
       questionId: string;
       complaint: string;
-    };
+    }
+  | { type: 'admin-get-players' }
+  | { type: 'admin-save-player'; code: string; replace: boolean };
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -193,6 +198,18 @@ export interface AdminConnection {
   reportAckVersion: number;
   clearReportError(): void;
   reportQuestion(filename: string, questionId: string, complaint: string): void;
+  // Анкеты игроков (задача 3, sdd/2026-08-26-player-questionnaire) — список
+  // уже заведённых игроков и обратная связь по последней попытке вставить
+  // код. Отдельного «ок» на успешную запись сервер не шлёт — успех виден по
+  // приходу нового admin-players (см. players ниже).
+  players: { name: string; date: string }[];
+  playerError: string | null;
+  // Имя игрока, чья анкета уже есть — сервер ничего не записал и ждёт
+  // повторной отправки того же кода с replace: true.
+  playerConflictName: string | null;
+  clearPlayerFeedback(): void;
+  refreshPlayers(): void;
+  savePlayer(code: string, replace: boolean): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -238,6 +255,11 @@ export function useAdminConnection(
     useState<StartGameErrorReason | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportAckVersion, setReportAckVersion] = useState(0);
+  const [players, setPlayers] = useState<{ name: string; date: string }[]>([]);
+  const [playerError, setPlayerError] = useState<string | null>(null);
+  const [playerConflictName, setPlayerConflictName] = useState<string | null>(
+    null,
+  );
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -251,6 +273,9 @@ export function useAdminConnection(
 
       ws.addEventListener('open', () => {
         setConnected(true);
+        // Анкеты не приходят с широковещательным 'state' — список нужно
+        // запросить явно, как только сокет открылся.
+        send({ type: 'admin-get-players' });
       });
 
       ws.addEventListener('message', (event) => {
@@ -296,6 +321,21 @@ export function useAdminConnection(
         }
         if (message.type === 'admin-report-error') {
           setReportError(message.reason);
+        }
+        if (message.type === 'admin-players') {
+          setPlayers(message.players);
+          // Успешная запись гасит и ошибку, и вопрос про замену: список
+          // пришёл — значит всё сохранилось.
+          setPlayerError(null);
+          setPlayerConflictName(null);
+        }
+        if (message.type === 'admin-player-exists') {
+          setPlayerConflictName(message.name);
+          setPlayerError(null);
+        }
+        if (message.type === 'admin-player-error') {
+          setPlayerError(message.reason);
+          setPlayerConflictName(null);
         }
       });
 
@@ -381,5 +421,15 @@ export function useAdminConnection(
     clearReportError: () => setReportError(null),
     reportQuestion: (filename, questionId, complaint) =>
       send({ type: 'admin-report-question', filename, questionId, complaint }),
+    players,
+    playerError,
+    playerConflictName,
+    clearPlayerFeedback: () => {
+      setPlayerError(null);
+      setPlayerConflictName(null);
+    },
+    refreshPlayers: () => send({ type: 'admin-get-players' }),
+    savePlayer: (code, replace) =>
+      send({ type: 'admin-save-player', code, replace }),
   };
 }

@@ -60,6 +60,11 @@ export function Admin() {
     reportAckVersion,
     clearReportError,
     reportQuestion,
+    players,
+    playerError,
+    playerConflictName,
+    clearPlayerFeedback,
+    savePlayer,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -68,6 +73,10 @@ export function Admin() {
   // (design.md), лишняя защита на каждой кнопке не соответствовала бы этому
   // выбору.
   const [confirmingWipe, setConfirmingWipe] = useState(false);
+  // Поле с кодом анкеты — успешное сохранение его намеренно не чистит:
+  // ведущий вставляет анкеты подряд и сам видит, что список пополнился
+  // (задача 3, sdd/2026-08-26-player-questionnaire).
+  const [playerCode, setPlayerCode] = useState('');
   // ВРЕМЕННО — подбор скорости показа текста вопроса вживую, см.
   // server/src/protocol.ts, StateMessage.textRevealWordsPerSecond. Убрать
   // вместе с полем, как только число зафиксируется в спеке.
@@ -431,6 +440,75 @@ export function Admin() {
             пишется. Обратно её не вернуть; следующая партия начнёт писаться
             заново.
           </p>
+        )}
+      </section>
+
+      <section className="admin-section">
+        <h2>Анкеты игроков</h2>
+        <p className="admin-hint">
+          Отправь друзьям <code>docs/anketa.html</code>, а присланный код вставь
+          сюда. Заполнять необязательно — пришедший без анкеты играет наравне со
+          всеми.
+        </p>
+        <textarea
+          className="admin-player-code"
+          rows={4}
+          value={playerCode}
+          onChange={(e) => {
+            setPlayerCode(e.target.value);
+            clearPlayerFeedback();
+          }}
+          placeholder="Вставь код анкеты"
+        />
+        <div className="admin-actions">
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => savePlayer(playerCode, false)}
+            disabled={playerCode.trim() === ''}
+          >
+            Сохранить анкету
+          </button>
+        </div>
+        {playerConflictName && (
+          <div className="admin-player-conflict">
+            <p>Игрок «{playerConflictName}» уже есть. Заменить его анкету?</p>
+            <div className="admin-actions">
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => savePlayer(playerCode, true)}
+              >
+                Заменить
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={clearPlayerFeedback}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
+        {playerError && (
+          <p className="admin-error" role="alert">
+            {playerError}
+          </p>
+        )}
+        {players.length === 0 ? (
+          <p className="admin-hint">Анкет пока нет.</p>
+        ) : (
+          <ul className="admin-players">
+            {players.map((player) => (
+              <li key={player.name}>
+                <span className="admin-player-name">{player.name}</span>
+                {player.date && (
+                  <span className="admin-player-date">от {player.date}</span>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 
