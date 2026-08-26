@@ -348,6 +348,7 @@ export class GameHistory
   }
 
   startGame(input: StartGameInput): number | null {
+    let gameId: number;
     try {
       const result = this.db
         .prepare(
@@ -360,10 +361,21 @@ export class GameHistory
           input.packTitle,
           JSON.stringify(input.participants),
         );
-      const gameId = Number(result.lastInsertRowid);
-      // OR IGNORE — на случай повторной записи того же счётчика: партия
-      // заводится один раз, но глотать вместо падения здесь дешевле, чем
-      // ронять запись партии из-за состава.
+      gameId = Number(result.lastInsertRowid);
+    } catch (err) {
+      console.error('История: не удалось начать запись партии —', err);
+      return null;
+    }
+    // Отдельный try/catch от вставки games — намеренно (ревью задачи 1,
+    // Important 1). Запись строки games уже состоялась, gameId существует, и
+    // партия обязана вернуть его вызывающему коду в любом случае: иначе
+    // Room получит historyGameId = null, решит, что партия не пишется, и
+    // перестанет записывать вопросы, оценки и итог УЖЕ заведённой партии —
+    // при живой строке games в базе. OR IGNORE гасит только дублирующийся
+    // ключ (game_id, counter_id); любая другая ошибка (например устаревший
+    // personId уже слитого и удалённого человека, задача 2) не должна ронять
+    // запись партии целиком.
+    try {
       const insertPerson = this.db.prepare(
         `INSERT OR IGNORE INTO game_people (game_id, person_id, counter_id)
          VALUES (?, ?, ?)`,
@@ -372,11 +384,10 @@ export class GameHistory
         if (participant.personId === null) continue;
         insertPerson.run(gameId, participant.personId, participant.counterId);
       }
-      return gameId;
     } catch (err) {
-      console.error('История: не удалось начать запись партии —', err);
-      return null;
+      console.error('История: не удалось записать состав партии —', err);
     }
+    return gameId;
   }
 
   recordQuestion(gameId: number, row: PlayedQuestionInput): void {
@@ -852,8 +863,8 @@ export class GameHistory
 
   /**
    * Сливает двух людей в одного: перепривязывает состав партий и удаляет
-   * лишнюю запись. Возвращает false, если слить нечего или что-то пошло не
-   * так.
+   * лишнюю запись. Возвращает false, если слить нечего (fromId и intoId
+   * совпадают, либо fromId не существует) или что-то пошло не так.
    *
    * Порядок обязателен: сначала перепривязка, потом удаление. Внешние ключи
    * в SQLite включены (слайс A), и удаление человека, на которого ещё
@@ -864,18 +875,24 @@ export class GameHistory
     try {
       this.db.exec('BEGIN');
       try {
-        // OR REPLACE, а не просто UPDATE: если оба «человека» сидели за одним
-        // столом (следствие ошибки при выборе себя в лобби), у одной партии
-        // окажутся два счётчика одного человека — ключ (game_id, counter_id)
-        // это допускает, а вот совпадения ключа быть не должно.
+        // Обычный UPDATE — конфликт первичного ключа (game_id, counter_id)
+        // здесь в принципе недостижим: SET меняет только person_id, а
+        // counter_id, входящий в ключ, не трогает ни один из перепривязанных
+        // рядов. Ключ (game_id, counter_id), а не (game_id, person_id),
+        // выбран именно затем, чтобы после слияния один человек мог владеть
+        // двумя счётчиками одной партии (случай «оба были за одним столом»)
+        // — и перепривязка проходит без конфликта уже на обычном UPDATE.
         this.db
-          .prepare(
-            `UPDATE OR REPLACE game_people SET person_id = ? WHERE person_id = ?`,
-          )
+          .prepare(`UPDATE game_people SET person_id = ? WHERE person_id = ?`)
           .run(intoId, fromId);
-        this.db.prepare(`DELETE FROM people WHERE id = ?`).run(fromId);
+        const deleted = this.db
+          .prepare(`DELETE FROM people WHERE id = ?`)
+          .run(fromId);
         this.db.exec('COMMIT');
-        return true;
+        // Ноль удалённых строк — fromId не существовал, сливать было нечего:
+        // докстринг обещает false именно для этого случая (ревью задачи 1,
+        // Minor 2).
+        return Number(deleted.changes) > 0;
       } catch (err) {
         this.db.exec('ROLLBACK');
         throw err;

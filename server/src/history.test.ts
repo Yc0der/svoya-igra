@@ -980,6 +980,26 @@ describe('люди и состав партии', () => {
       { id: vanya, name: 'Ваня', games: 1 },
     ]);
   });
+
+  // Ревью задачи 1, Important 1: запись games уже состоялась к моменту
+  // записи состава, и сбой при записи состава (здесь — нарушение внешнего
+  // ключа на несуществующий personId, ровно то, что могло бы случиться со
+  // слитым и удалённым человеком в задаче 2) не должен ронять уже заведённую
+  // партию — иначе Room получила бы null и перестала бы писать в неё вопросы,
+  // оценки и итог, при живой строке games в базе.
+  it('сбой при записи состава не мешает startGame вернуть id партии', () => {
+    const history = makeHistory();
+    const id = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: 999 }],
+    });
+    expect(id).not.toBeNull();
+    expect(history.allGames()).toHaveLength(1);
+    // Состав при этом не записался — personId 999 не существовал.
+    expect(history.listPeople()).toEqual([]);
+  });
 });
 
 describe('GameHistory.playerStats', () => {
@@ -1100,11 +1120,21 @@ describe('GameHistory.mergePeople', () => {
     expect(history.listPeople()).toHaveLength(1);
   });
 
+  // Ревью задачи 1, Minor 3: докстринг обещает false, если сливать нечего —
+  // несуществующий fromId как раз этот случай (DELETE трогает ноль строк,
+  // исключения нет).
+  it('возвращает false, если fromId не существует — сливать нечего', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    expect(history.mergePeople(999, a)).toBe(false);
+    expect(history.listPeople()).toHaveLength(1);
+  });
+
   it('переживает случай, когда оба были за одним столом', () => {
     const history = makeHistory();
     const a = history.createPerson('Ваня', '2026-08-26')!;
     const b = history.createPerson('ваня', '2026-08-26')!;
-    history.startGame({
+    const gameId = history.startGame({
       startedAt: '2026-08-26',
       packFilename: 'pack.json',
       packTitle: 'Пак',
@@ -1112,8 +1142,33 @@ describe('GameHistory.mergePeople', () => {
         { counterId: 'c1', name: 'Ваня', personId: a },
         { counterId: 'c2', name: 'ваня', personId: b },
       ],
+    })!;
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'q1',
+      answeredByCounterId: 'c1',
+      correct: true,
     });
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'q2',
+      answeredByCounterId: 'c2',
+      correct: false,
+    });
+
     expect(history.mergePeople(b, a)).toBe(true);
     expect(history.listPeople()).toEqual([{ id: a, name: 'Ваня', games: 1 }]);
+
+    // Ревью задачи 1, Minor 4: после слияния у человека a — два счётчика
+    // (c1 и c2) одной партии, соединение gp × played_questions выдаёт каждый
+    // вопрос дважды, и без COUNT(DISTINCT ...) числа задвоились бы (played
+    // стал бы 4 вместо 2, buzzes — 4 вместо 2).
+    const stats = history.playerStats().people.find((p) => p.id === a);
+    expect(stats).toMatchObject({
+      games: 1,
+      played: 2,
+      buzzes: 2,
+      correct: 1,
+    });
   });
 });
