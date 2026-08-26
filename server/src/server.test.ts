@@ -3309,6 +3309,46 @@ describe('createServer player questionnaire', () => {
     });
     admin.ws.close();
   });
+
+  // Комментарий у withPlayersWriteLock в server.ts обещает, что проверка
+  // существования и запись идут внутри одной блокировки. Держится это только
+  // на комментарии, пока такой тест не написан. Важно: два РАЗНЫХ имени,
+  // отправленных подряд БЕЗ ожидания ответа между отправками — обе операции
+  // без блокировки читают один и тот же файл, и та, что запишет позже,
+  // затирает результат первой. Одно и то же имя дважды ничего не доказывало
+  // бы: вторая отправка упёрлась бы в конфликт имён и без всякой блокировки.
+  it('две анкеты с разными именами, отправленные подряд без ожидания ответа между отправками, не теряют друг друга', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const katyaCode = JSON.stringify({
+      version: 1,
+      name: 'Катя',
+      interests: [{ area: 'Музыка', examples: ['джаз'] }],
+      boring: [],
+    });
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: katyaCode,
+        replace: false,
+      }),
+    );
+
+    await admin.nextMessage();
+    await admin.nextMessage();
+
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).toContain('## Ваня');
+    expect(content).toContain('## Катя');
+    admin.ws.close();
+  });
 });
 
 describe('createServer media static route', () => {
