@@ -87,6 +87,11 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     reportAckVersion: 0,
     clearReportError: vi.fn(),
     reportQuestion: vi.fn(),
+    players: [],
+    playerError: null,
+    playerConflictName: null,
+    clearPlayerFeedback: vi.fn(),
+    savePlayer: vi.fn(),
     ...overrides,
   };
 }
@@ -671,7 +676,7 @@ describe('Admin — редактор пакета', () => {
     const priceInput = screen.getByDisplayValue('100');
     await userEvent.clear(priceInput);
     await userEvent.type(priceInput, '300');
-    await userEvent.click(screen.getByRole('button', { name: /сохранить/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
     expect(updateQuestion).toHaveBeenCalledWith('a.json', 'q1', {
       price: 300,
@@ -703,7 +708,7 @@ describe('Admin — редактор пакета', () => {
     const priceInput = screen.getByDisplayValue('100');
     await userEvent.clear(priceInput);
     await userEvent.type(priceInput, '0');
-    expect(screen.getByRole('button', { name: /сохранить/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Сохранить' })).toBeDisabled();
   });
 
   it('shows the error from editedPackError and keeps the form open', async () => {
@@ -842,7 +847,7 @@ describe('Admin — редактор пакета', () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue('Вопрос?')).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /сохранить/i }),
+      screen.queryByRole('button', { name: 'Сохранить' }),
     ).not.toBeInTheDocument();
   });
 
@@ -870,7 +875,7 @@ describe('Admin — редактор пакета', () => {
     const priceInput = screen.getByDisplayValue('100');
     await userEvent.clear(priceInput);
     await userEvent.type(priceInput, '300');
-    await userEvent.click(screen.getByRole('button', { name: /сохранить/i }));
+    await userEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
     expect(updateQuestion).toHaveBeenCalledOnce();
 
     // Сервер ответил новым admin-pack с сохранённым вопросом — версия
@@ -905,7 +910,7 @@ describe('Admin — редактор пакета', () => {
     rerender(<Admin />);
 
     expect(
-      screen.queryByRole('button', { name: /сохранить/i }),
+      screen.queryByRole('button', { name: 'Сохранить' }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '300' })).toBeInTheDocument();
   });
@@ -1307,5 +1312,84 @@ describe('Admin — список и жалобы', () => {
     expect(
       screen.queryByLabelText(/что не понравилось/i),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('Admin — анкеты игроков', () => {
+  it('shows "Анкет пока нет." when the list is empty', () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ players: [] }));
+    render(<Admin />);
+    expect(screen.getByText('Анкет пока нет.')).toBeInTheDocument();
+  });
+
+  it('показывает список анкет и отправляет вставленный код', async () => {
+    const savePlayer = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        savePlayer,
+      }),
+    );
+    render(<Admin />);
+    expect(screen.getByText('Ваня')).toBeInTheDocument();
+    expect(screen.getByText('от 2026-08-26')).toBeInTheDocument();
+
+    const textarea = screen.getByPlaceholderText(/вставь код анкеты/i);
+    await userEvent.type(textarea, '{{"version":1}');
+    await userEvent.click(
+      screen.getByRole('button', { name: /сохранить анкету/i }),
+    );
+    expect(savePlayer).toHaveBeenCalledWith('{"version":1}', false);
+  });
+
+  it('кнопка «Сохранить анкету» выключена, пока поле с кодом пустое', () => {
+    mockedUseAdminConnection.mockReturnValue(connection());
+    render(<Admin />);
+    expect(
+      screen.getByRole('button', { name: /сохранить анкету/i }),
+    ).toBeDisabled();
+  });
+
+  it('на конфликт имени показывает вопрос и повторяет отправку с подтверждением', async () => {
+    const savePlayer = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ playerConflictName: 'Ваня', savePlayer }),
+    );
+    render(<Admin />);
+    const textarea = screen.getByPlaceholderText(/вставь код анкеты/i);
+    await userEvent.type(textarea, '{{"version":1}');
+
+    expect(screen.getByText(/уже есть/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /заменить/i }));
+    expect(savePlayer).toHaveBeenLastCalledWith('{"version":1}', true);
+  });
+
+  it('«Отмена» на конфликте вызывает clearPlayerFeedback', async () => {
+    const clearPlayerFeedback = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ playerConflictName: 'Ваня', clearPlayerFeedback }),
+    );
+    render(<Admin />);
+    await userEvent.click(screen.getByRole('button', { name: /отмена/i }));
+    expect(clearPlayerFeedback).toHaveBeenCalled();
+  });
+
+  it('показывает playerError под полем анкеты', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ playerError: 'это не похоже на код анкеты' }),
+    );
+    render(<Admin />);
+    expect(screen.getByText('это не похоже на код анкеты')).toBeInTheDocument();
+  });
+
+  it('ввод в поле кода сбрасывает обратную связь через clearPlayerFeedback', async () => {
+    const clearPlayerFeedback = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ playerError: 'ошибка', clearPlayerFeedback }),
+    );
+    render(<Admin />);
+    const textarea = screen.getByPlaceholderText(/вставь код анкеты/i);
+    await userEvent.type(textarea, 'a');
+    expect(clearPlayerFeedback).toHaveBeenCalled();
   });
 });

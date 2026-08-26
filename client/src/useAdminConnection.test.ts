@@ -71,7 +71,15 @@ describe('useAdminConnection', () => {
     act(() => socket.emitOpen());
 
     expect(result.current.connected).toBe(true);
-    expect(socket.sent).toEqual([]);
+    // Хук шлёт admin-get-players сразу после подключения (запрос анкет —
+    // задача 3), но ни 'join', ни 'reconnect' — единственное, что здесь
+    // проверяется.
+    expect(socket.sent).not.toContainEqual(
+      expect.stringContaining('"type":"join"'),
+    );
+    expect(socket.sent).not.toContainEqual(
+      expect.stringContaining('"type":"reconnect"'),
+    );
     localStorage.clear();
   });
 
@@ -412,9 +420,10 @@ describe('useAdminConnection', () => {
     );
     expect(result.current.editedPackError).toBe('ошибка');
 
+    const sentBefore = socket.sent.length;
     act(() => result.current.clearPackError());
     expect(result.current.editedPackError).toBeNull();
-    expect(socket.sent).toEqual([]);
+    expect(socket.sent).toHaveLength(sentBefore);
   });
 
   it('resetPackEditor clears editedPack, editedPackFilename and editedPackError', () => {
@@ -514,5 +523,100 @@ describe('useAdminConnection', () => {
     );
     act(() => result.current.clearReportError());
     expect(result.current.reportError).toBeNull();
+  });
+
+  it('requests the player list right after connecting', () => {
+    const { result: _result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-get-players' }),
+    );
+  });
+
+  it('savePlayer отправляет код и складывает пришедший список', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.savePlayer('{"...":1}', false));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: '{"...":1}',
+        replace: false,
+      }),
+    );
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-players',
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
+      }),
+    );
+    expect(result.current.players).toEqual([
+      { name: 'Ваня', date: '2026-08-26' },
+    ]);
+  });
+
+  it('admin-players гасит и playerError, и playerConflictName', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({ type: 'admin-player-exists', name: 'Ваня' }),
+    );
+    expect(result.current.playerConflictName).toBe('Ваня');
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-players',
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
+      }),
+    );
+    expect(result.current.playerConflictName).toBeNull();
+    expect(result.current.playerError).toBeNull();
+  });
+
+  it('admin-player-exists кладёт имя в playerConflictName, не трогая ошибку', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({ type: 'admin-player-exists', name: 'Ваня' }),
+    );
+    expect(result.current.playerConflictName).toBe('Ваня');
+    expect(result.current.playerError).toBeNull();
+  });
+
+  it('admin-player-error кладёт причину в playerError', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-player-error',
+        reason: 'это не похоже на код анкеты',
+      }),
+    );
+    expect(result.current.playerError).toContain('не похоже на код анкеты');
+    expect(result.current.playerConflictName).toBeNull();
+  });
+
+  it('clearPlayerFeedback сбрасывает playerError и playerConflictName локально', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({ type: 'admin-player-exists', name: 'Ваня' }),
+    );
+    act(() => result.current.clearPlayerFeedback());
+    expect(result.current.playerConflictName).toBeNull();
+    expect(result.current.playerError).toBeNull();
   });
 });

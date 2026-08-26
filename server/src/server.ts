@@ -26,6 +26,8 @@ import {
 } from './generatorProfile.js';
 import { TAG_REASONS } from './protocol.js';
 import type { ProfileAggregateSource } from './history.js';
+import { parsePlayerCard } from './playerCard.js';
+import { readPlayerList, savePlayerCard } from './playersFile.js';
 
 export interface CreateServerOptions {
   room: Room;
@@ -39,6 +41,8 @@ export interface CreateServerOptions {
   profilePath?: string;
   // Только чтение сводки — записывать в историю может лишь Room.
   history?: ProfileAggregateSource;
+  // docs/players.md — анкеты интересов (design.md, 2026-08-26).
+  playersPath?: string;
 }
 
 export interface GameServer {
@@ -79,8 +83,15 @@ function lanUrlFor(address: string | null, port: number): string {
 }
 
 export function createServer(options: CreateServerOptions): GameServer {
-  const { room, clientDistPath, port, packsDir, profilePath, history } =
-    options;
+  const {
+    room,
+    clientDistPath,
+    port,
+    packsDir,
+    profilePath,
+    history,
+    playersPath,
+  } = options;
   const assets = sirv(clientDistPath, { single: true });
   // Раздаёт packsDir/media/... под префиксом /media/ — БЕЗ single:true:
   // отсутствующая картинка обязана дать настоящий 404, а не откат на
@@ -233,6 +244,9 @@ export function createServer(options: CreateServerOptions): GameServer {
   }
   const withPackWriteLock = createWriteLock();
   const withProfileWriteLock = createWriteLock();
+  // Анкеты игроков живут в своём файле (docs/players.md) — сериализовать
+  // его запись с профилем генератора незачем, файлы разные.
+  const withPlayersWriteLock = createWriteLock();
 
   // Пересчёт раздела «Автособранное» (design.md, 2026-08-25). Ошибки
   // проглатываются с записью в лог по тому же правилу, что и остальная
@@ -677,6 +691,22 @@ export function createServer(options: CreateServerOptions): GameServer {
         );
       }
 
+      if (message.type === 'admin-get-players') {
+        if (!playersPath) return;
+        send(ws, {
+          type: 'admin-players',
+          players: await readPlayerList(playersPath),
+        });
+      }
+
+      if (
+        message.type === 'admin-save-player' &&
+        typeof message.code === 'string' &&
+        typeof message.replace === 'boolean'
+      ) {
+        await handleSavePlayer(message.code, message.replace);
+      }
+
       // Сырые сообщения Node (ENOENT: ... open 'C:\...\packs\ghost.json') не
       // годятся для отправки в админку — они на английском и раскрывают
       // абсолютный путь на диске сервера. Ошибки validatePack/updateQuestion/
@@ -791,6 +821,54 @@ export function createServer(options: CreateServerOptions): GameServer {
               (err as NodeJS.ErrnoException).code === 'ENOENT'
                 ? 'не удалось сохранить жалобу — файл профиля не найден'
                 : adminPackErrorReason(err),
+          });
+        }
+      }
+
+      // Анкеты интересов игроков (design.md, 2026-08-26). Проверка «такой
+      // уже есть» и сама запись идут ВНУТРИ одной блокировки: между ними
+      // файл меняться не должен, иначе два подтверждения замены подряд
+      // затрут друг друга.
+      async function handleSavePlayer(
+        code: string,
+        replace: boolean,
+      ): Promise<void> {
+        if (!playersPath) return;
+        const parsed = parsePlayerCard(code);
+        if (!parsed.ok) {
+          send(ws, { type: 'admin-player-error', reason: parsed.reason });
+          return;
+        }
+        try {
+          const conflict = await withPlayersWriteLock(async () => {
+            const existing = await readPlayerList(playersPath);
+            const same = existing.find(
+              (player) =>
+                player.name.toLowerCase() === parsed.card.name.toLowerCase(),
+            );
+            if (same && !replace) return same.name;
+            await savePlayerCard(
+              playersPath,
+              parsed.card,
+              new Date().toISOString().slice(0, 10),
+            );
+            return null;
+          });
+          if (conflict !== null) {
+            send(ws, { type: 'admin-player-exists', name: conflict });
+            return;
+          }
+          send(ws, {
+            type: 'admin-players',
+            players: await readPlayerList(playersPath),
+          });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-player-error',
+            reason:
+              (err as NodeJS.ErrnoException).code === 'ENOENT'
+                ? 'файл анкет не найден'
+                : 'не удалось сохранить анкету',
           });
         }
       }

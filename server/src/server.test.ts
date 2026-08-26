@@ -3147,6 +3147,210 @@ describe('createServer pack editor', () => {
   });
 });
 
+describe('createServer player questionnaire', () => {
+  let server: GameServer;
+  let dir: string;
+  let baseUrl: string;
+  let playersPath: string;
+
+  const VANYA_CODE = JSON.stringify({
+    version: 1,
+    name: 'Ваня',
+    interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+    boring: [],
+  });
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-players-'));
+    playersPath = join(dir, 'players.md');
+    await writeFile(
+      playersPath,
+      '# Анкеты игроков\n\nВводный текст.\n',
+      'utf8',
+    );
+    const room = new Room(undefined, TEST_PACK);
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+      playersPath,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('admin-get-players на пустом файле отдаёт пустой список', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(JSON.stringify({ type: 'admin-get-players' }));
+    const reply = await admin.nextMessage();
+    expect(reply).toEqual({ type: 'admin-players', players: [] });
+    admin.ws.close();
+  });
+
+  it('admin-save-player пишет анкету и отдаёт обновлённый список', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-players',
+      players: [{ name: 'Ваня', date: expect.any(String) }],
+    });
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).toContain('- **Спорт:** Формула-1');
+    admin.ws.close();
+  });
+
+  it('повторное имя без подтверждения ничего не пишет', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+
+    const newCode = JSON.stringify({
+      version: 1,
+      name: 'Ваня',
+      interests: [{ area: 'Кино', examples: ['новое'] }],
+      boring: [],
+    });
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: newCode,
+        replace: false,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({ type: 'admin-player-exists', name: 'Ваня' });
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).not.toContain('новое'); // старая анкета на месте
+    admin.ws.close();
+  });
+
+  it('replace: true заменяет анкету', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+
+    const newCode = JSON.stringify({
+      version: 1,
+      name: 'Ваня',
+      interests: [{ area: 'Кино', examples: ['новое'] }],
+      boring: [],
+    });
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: newCode,
+        replace: true,
+      }),
+    );
+    await admin.nextMessage();
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).toContain('новое');
+    expect(content).not.toContain('Формула-1');
+    admin.ws.close();
+  });
+
+  it('битый код отдаёт причину, а не молчание', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: 'привет',
+        replace: false,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-player-error',
+      reason: expect.stringContaining('не похоже на код анкеты'),
+    });
+    admin.ws.close();
+  });
+
+  it('admin-save-player с отсутствующим файлом анкет отдаёт внятную причину', async () => {
+    await rm(playersPath, { force: true });
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-player-error',
+      reason: 'файл анкет не найден',
+    });
+    admin.ws.close();
+  });
+
+  // Комментарий у withPlayersWriteLock в server.ts обещает, что проверка
+  // существования и запись идут внутри одной блокировки. Держится это только
+  // на комментарии, пока такой тест не написан. Важно: два РАЗНЫХ имени,
+  // отправленных подряд БЕЗ ожидания ответа между отправками — обе операции
+  // без блокировки читают один и тот же файл, и та, что запишет позже,
+  // затирает результат первой. Одно и то же имя дважды ничего не доказывало
+  // бы: вторая отправка упёрлась бы в конфликт имён и без всякой блокировки.
+  it('две анкеты с разными именами, отправленные подряд без ожидания ответа между отправками, не теряют друг друга', async () => {
+    const admin = await connectAdmin(baseUrl);
+    const katyaCode = JSON.stringify({
+      version: 1,
+      name: 'Катя',
+      interests: [{ area: 'Музыка', examples: ['джаз'] }],
+      boring: [],
+    });
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: katyaCode,
+        replace: false,
+      }),
+    );
+
+    await admin.nextMessage();
+    await admin.nextMessage();
+
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).toContain('## Ваня');
+    expect(content).toContain('## Катя');
+    admin.ws.close();
+  });
+});
+
 describe('createServer media static route', () => {
   let server: GameServer;
   let dir: string;
