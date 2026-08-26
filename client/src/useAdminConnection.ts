@@ -208,7 +208,6 @@ export interface AdminConnection {
   // повторной отправки того же кода с replace: true.
   playerConflictName: string | null;
   clearPlayerFeedback(): void;
-  refreshPlayers(): void;
   savePlayer(code: string, replace: boolean): void;
 }
 
@@ -428,7 +427,6 @@ export function useAdminConnection(
       setPlayerError(null);
       setPlayerConflictName(null);
     },
-    refreshPlayers: () => send({ type: 'admin-get-players' }),
     savePlayer: (code, replace) =>
       send({ type: 'admin-save-player', code, replace }),
   };

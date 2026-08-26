@@ -91,7 +91,6 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     playerError: null,
     playerConflictName: null,
     clearPlayerFeedback: vi.fn(),
-    refreshPlayers: vi.fn(),
     savePlayer: vi.fn(),
     ...overrides,
   };

@@ -535,18 +535,6 @@ describe('useAdminConnection', () => {
     );
   });
 
-  it('refreshPlayers отправляет admin-get-players', () => {
-    const { result } = renderHook(() => useAdminConnection(factory));
-    const socket = FakeWebSocket.instances[0];
-    act(() => socket.emitOpen());
-    socket.sent = [];
-
-    act(() => result.current.refreshPlayers());
-    expect(socket.sent).toContainEqual(
-      JSON.stringify({ type: 'admin-get-players' }),
-    );
-  });
-
   it('savePlayer отправляет код и складывает пришедший список', () => {
     const { result } = renderHook(() => useAdminConnection(factory));
     const socket = FakeWebSocket.instances[0];
