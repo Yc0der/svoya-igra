@@ -611,56 +611,6 @@ describe('GameHistory: оценки вопросов', () => {
   });
 });
 
-describe('GameHistory.complaintContext', () => {
-  it('отдаёт вопрос таким, каким его видели в СЫГРАННОЙ партии', () => {
-    const history = makeHistory();
-    const gameId = history.startGame({
-      startedAt: '2026-08-21T18:00:00.000Z',
-      packFilename: 'p.json',
-      packTitle: 'Пак',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
-    })!;
-    history.recordQuestion(gameId, QUESTION);
-
-    expect(history.complaintContext(gameId, QUESTION.questionId)).toEqual({
-      packFilename: 'p.json',
-      packTitle: 'Пак',
-      themeName: QUESTION.themeName,
-      price: QUESTION.price,
-      text: QUESTION.text,
-      answer: QUESTION.answer,
-    });
-  });
-
-  it('неизвестный в этой партии вопрос — null', () => {
-    const history = makeHistory();
-    const gameId = history.startGame({
-      startedAt: '2026-08-21T18:00:00.000Z',
-      packFilename: 'p.json',
-      packTitle: 'Пак',
-      participants: [],
-    })!;
-    history.recordQuestion(gameId, QUESTION);
-
-    expect(history.complaintContext(gameId, 'ghost')).toBeNull();
-  });
-
-  it('не роняет вызов, когда база недоступна', () => {
-    const history = makeHistory();
-    const gameId = history.startGame({
-      startedAt: '2026-08-21T18:00:00.000Z',
-      packFilename: 'p.json',
-      packTitle: 'Пак',
-      participants: [],
-    })!;
-    history.close();
-    expect(() =>
-      history.complaintContext(gameId, QUESTION.questionId),
-    ).not.toThrow();
-    expect(history.complaintContext(gameId, QUESTION.questionId)).toBeNull();
-  });
-});
-
 describe('GameHistory.downTagsForReview', () => {
   function gameWithTwoQuestions(history: GameHistory): number {
     const id = history.startGame({
@@ -749,5 +699,244 @@ describe('GameHistory.downTagsForReview', () => {
     history.close();
     expect(() => history.downTagsForReview(gameId, 'p1', 5)).not.toThrow();
     expect(history.downTagsForReview(gameId, 'p1', 5)).toEqual([]);
+  });
+});
+
+describe('GameHistory.profileAggregate', () => {
+  it('схлопывает один вопрос из двух партий в одну запись', () => {
+    const history = makeHistory();
+    const g1 = history.startGame({
+      startedAt: '2026-08-01',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    const g2 = history.startGame({
+      startedAt: '2026-08-02',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    history.recordQuestion(g1, QUESTION);
+    history.recordQuestion(g2, QUESTION);
+    history.recordTag(g1, {
+      questionId: QUESTION.questionId,
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'down',
+    });
+    history.recordTag(g2, {
+      questionId: QUESTION.questionId,
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'down',
+    });
+    history.recordTagReason(
+      g1,
+      QUESTION.questionId,
+      'p1',
+      'Слишком сложный',
+      '',
+    );
+    history.recordTagReason(
+      g2,
+      QUESTION.questionId,
+      'p1',
+      'Слишком сложный',
+      '',
+    );
+
+    const aggregate = history.profileAggregate();
+    expect(aggregate.downTagged).toHaveLength(1);
+    expect(aggregate.downTagged[0]).toMatchObject({
+      packFilename: 'pack.json',
+      questionId: QUESTION.questionId,
+      down: 2,
+      up: 0,
+      reasons: [{ reason: 'Слишком сложный', count: 2 }],
+      lastGameId: g2,
+    });
+  });
+
+  it('включает палец вниз без разбора и не выдумывает ему причину', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-01',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    history.recordQuestion(gameId, QUESTION);
+    history.recordTag(gameId, {
+      questionId: QUESTION.questionId,
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'down',
+    });
+
+    const aggregate = history.profileAggregate();
+    expect(aggregate.downTagged[0].down).toBe(1);
+    expect(aggregate.downTagged[0].reasons).toEqual([]);
+    expect(aggregate.downTagged[0].texts).toEqual([]);
+  });
+
+  it('считает палец вверх рядом с пальцем вниз, но сам по себе записи не создаёт', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-01',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [
+        { counterId: 'p1', name: 'Ваня' },
+        { counterId: 'p2', name: 'Катя' },
+      ],
+    })!;
+    history.recordQuestion(gameId, QUESTION);
+    history.recordQuestion(gameId, { ...QUESTION, questionId: 'r1-geo-200' });
+    history.recordTag(gameId, {
+      questionId: QUESTION.questionId,
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'down',
+    });
+    history.recordTag(gameId, {
+      questionId: QUESTION.questionId,
+      participantId: 'p2',
+      participantName: 'Катя',
+      thumb: 'up',
+    });
+    history.recordTag(gameId, {
+      questionId: 'r1-geo-200',
+      participantId: 'p1',
+      participantName: 'Ваня',
+      thumb: 'up',
+    });
+
+    const aggregate = history.profileAggregate();
+    expect(aggregate.downTagged).toHaveLength(1);
+    expect(aggregate.downTagged[0]).toMatchObject({ down: 1, up: 1 });
+  });
+
+  it('различает «не взял никто» и «без вердикта»', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-01',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    // Верный, неверный, никто не нажал, ведущий отменил после нажатия.
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'a',
+      correct: true,
+    });
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'b',
+      correct: false,
+    });
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'c',
+      answeredBy: null,
+      answeredByCounterId: null,
+      correct: null,
+    });
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'd',
+      correct: null,
+    });
+
+    const aggregate = history.profileAggregate();
+    expect(aggregate.prices).toEqual([
+      { price: 100, correct: 1, wrong: 1, untaken: 1, noVerdict: 1 },
+    ]);
+  });
+
+  it('исключает из цен финальные вопросы и аукционы, но оставляет котов', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-01',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'p1', name: 'Ваня' }],
+    })!;
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'кот',
+      type: 'кот',
+    });
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'аукцион',
+      type: 'аукцион',
+      price: 700,
+    });
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'финал',
+      roundIndex: -1,
+      price: 0,
+    });
+
+    const aggregate = history.profileAggregate();
+    expect(aggregate.prices).toEqual([
+      { price: 100, correct: 1, wrong: 0, untaken: 0, noVerdict: 0 },
+    ]);
+  });
+
+  it('считает темы только по причине «Неинтересная тема»', () => {
+    const history = makeHistory();
+    const gameId = history.startGame({
+      startedAt: '2026-08-01',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [
+        { counterId: 'p1', name: 'Ваня' },
+        { counterId: 'p2', name: 'Катя' },
+      ],
+    })!;
+    history.recordQuestion(gameId, QUESTION);
+    for (const participantId of ['p1', 'p2']) {
+      history.recordTag(gameId, {
+        questionId: QUESTION.questionId,
+        participantId,
+        participantName: participantId,
+        thumb: 'down',
+      });
+    }
+    history.recordTagReason(
+      gameId,
+      QUESTION.questionId,
+      'p1',
+      'Неинтересная тема',
+      '',
+    );
+    history.recordTagReason(
+      gameId,
+      QUESTION.questionId,
+      'p2',
+      'Непонятная формулировка',
+      '',
+    );
+
+    const aggregate = history.profileAggregate();
+    expect(aggregate.boringThemes).toEqual([
+      { themeName: 'География', count: 1, games: 1 },
+    ]);
+  });
+
+  it('на пустой базе отдаёт нули и пустые списки', () => {
+    const aggregate = makeHistory().profileAggregate();
+    expect(aggregate).toEqual({
+      games: 0,
+      questions: 0,
+      tags: 0,
+      downTagged: [],
+      prices: [],
+      boringThemes: [],
+    });
   });
 });

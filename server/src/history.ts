@@ -3,6 +3,7 @@
 // про SQL. Игровой движок сюда не заглядывает вообще — пишет только Room.
 import { DatabaseSync } from 'node:sqlite';
 import type { Pack } from './pack.js';
+import { REASON_BORING_THEME } from './protocol.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS games (
@@ -107,32 +108,6 @@ export interface ReviewItem {
   answer: string;
 }
 
-/**
- * Вопрос таким, каким его реально видели на экране в СЫГРАННОЙ партии, а не
- * содержимое файла пакета прямо сейчас — то, из чего собирается жалоба в
- * профиль генератора за разбор в конце игры (финальное ревью ветки, п. 2).
- *
- * До этой правки жалоба собиралась через room.getPackInfo().activeFilename —
- * то есть привязывалась к пакету, который активен ПРЯМО СЕЙЧАС, а не к тому,
- * на котором реально играли. На game-end ведущий волен переключить пакет к
- * следующей партии, пока остальные ещё дописывают разбор; тогда questionId
- * искался бы в чужом пакете — либо совпал бы по slug'у с другим вопросом
- * (id вида `r1-<slug>-<price>`, slug'и тем между пакетами легко повторяются),
- * либо не нашёлся бы вовсе, и жалоба молча терялась в проглоченном catch.
- * Чтение из played_questions этой партии устраняет обе проблемы разом: не
- * зависит от того, какой пакет активен сейчас, не трогает диск на каждую
- * отправку и переживает правку пакета после партии — в профиль попадает тот
- * текст, который люди реально видели на экране.
- */
-export interface TagComplaintContext {
-  packFilename: string;
-  packTitle: string;
-  themeName: string;
-  price: number;
-  text: string;
-  answer: string;
-}
-
 export interface GameRow {
   id: number;
   startedAt: string;
@@ -169,12 +144,76 @@ export interface HistoryRecorder {
     participantId: string,
     limit: number,
   ): ReviewItem[];
-  // null — вопрос не найден в played_questions этой партии (устаревший/
-  // подложный questionId). См. докстринг TagComplaintContext.
-  complaintContext(
-    gameId: number,
-    questionId: string,
-  ): TagComplaintContext | null;
+}
+
+export interface ReasonCount {
+  reason: string;
+  count: number;
+}
+
+/**
+ * Вопрос, помеченный пальцем вниз, — единица списка в разделе
+ * «Автособранное». Ключ — пара (пак, id вопроса), а не строка партии: один и
+ * тот же вопрос, сыгранный дважды, даёт одну запись со сложенными числами.
+ * Один только questionId ключом быть не может: `r1-geo-100` встречается в
+ * разных паках, и на слайсе C эта коллизия уже привязывала жалобу к чужому
+ * вопросу.
+ */
+export interface DownTaggedQuestion {
+  packFilename: string;
+  questionId: string;
+  themeName: string;
+  price: number;
+  text: string;
+  answer: string;
+  down: number;
+  // Печатается рядом с down: вопрос с тремя 👎 и пятью 👍 не брак, а раскол в
+  // компании, и для генератора это разные выводы.
+  up: number;
+  // По убыванию кратности.
+  reasons: ReasonCount[];
+  texts: string[];
+  // Наибольший game_id среди оценок этого вопроса — по нему задача 2
+  // разрешает равенство при сортировке (свежее выше).
+  lastGameId: number;
+}
+
+/**
+ * Как берётся цена. Четыре числа, а не три: `correct IS NULL` означает две
+ * разные вещи (room.ts, recordPlayedQuestion) — никто не нажал, либо ведущий
+ * отменил вопрос уже после нажатия. Различает их answered_by, и без
+ * четвёртого числа сумма по строке не сходится с числом сыгранных вопросов.
+ */
+export interface PriceStats {
+  price: number;
+  correct: number;
+  wrong: number;
+  untaken: number;
+  noVerdict: number;
+}
+
+export interface BoringTheme {
+  themeName: string;
+  count: number;
+  games: number;
+}
+
+export interface ProfileAggregate {
+  games: number;
+  questions: number;
+  tags: number;
+  downTagged: DownTaggedQuestion[];
+  prices: PriceStats[];
+  boringThemes: BoringTheme[];
+}
+
+/**
+ * Узкий интерфейс для server.ts — только чтение сводки. Отдельно от
+ * HistoryRecorder (интерфейса Room) намеренно: сервер не должен иметь
+ * возможности что-то записать в историю, это дело Комнаты.
+ */
+export interface ProfileAggregateSource {
+  profileAggregate(): ProfileAggregate;
 }
 
 /**
@@ -222,7 +261,7 @@ function mapPlayedQuestionRow(row: Record<string, unknown>): PlayedQuestionRow {
   };
 }
 
-export class GameHistory implements HistoryRecorder {
+export class GameHistory implements HistoryRecorder, ProfileAggregateSource {
   private db: DatabaseSync;
 
   constructor(path: string) {
@@ -427,19 +466,19 @@ export class GameHistory implements HistoryRecorder {
    * Возвращает true, только если строка реально обновилась — то есть этот
    * участник действительно ставил палец ВНИЗ именно по этому вопросу
    * (`AND thumb = 0` в WHERE) И ещё не разбирал его (`AND reason IS NULL
-   * AND reason_text IS NULL`). Без этой проверки и без проверки возврата
-   * вызывающим кодом жалоба уходила бы в профиль генератора по одному
-   * только присланному клиентом questionId, включая устаревший/подложный —
-   * ревью задачи 4, Important 1.
+   * AND reason_text IS NULL`). Вызывающий код (Room.submitTagReason) обязан
+   * проверять возврат, а не считать запись состоявшейся по факту вызова —
+   * иначе устаревший/подложный questionId от клиента запускал бы пересчёт
+   * «Автособранного» впустую (ревью задачи 4, Important 1).
    *
    * Второе условие — «разобрал — больше не спрашиваем» (правило уже описано
    * в докстринге downTagsForReview, но раньше не было в этом WHERE): без
    * него повторный тап по «Отправить» с тем же уже заполненным reason/text
-   * снова матчил бы строку (SQLite засчитывает совпавший WHERE как
-   * изменение, даже если новые значения совпадают со старыми), возвращал бы
-   * true и дописывал бы в docs/pack-generator-profile.md вторую, возможно
-   * противоречащую первой, претензию на один и тот же вопрос (финальное
-   * ревью ветки, п. 3).
+   * (например двойной клик или повторная отправка формы) снова матчил бы
+   * строку (SQLite засчитывает совпавший WHERE как изменение, даже если
+   * новые значения совпадают со старыми) и молча ЗАМЕНЯЛ БЫ уже записанную
+   * причину новой — реально отправленную оценку игрока можно было бы
+   * непреднамеренно перезаписать другой (финальное ревью ветки, п. 3).
    */
   recordTagReason(
     gameId: number,
@@ -511,44 +550,6 @@ export class GameHistory implements HistoryRecorder {
     }
   }
 
-  /**
-   * Материал для жалобы в профиль генератора — см. докстринг
-   * TagComplaintContext. Читает played_questions/games ЭТОЙ партии, а не
-   * текущий активный пакет: questionId ищется среди вопросов, которые в этой
-   * партии реально были сыграны (recordPlayedQuestion в room.ts пишет туда
-   * каждый закрывшийся вопрос), поэтому подмена активного пакета между
-   * game-end и отправкой разбора на него не влияет.
-   */
-  complaintContext(
-    gameId: number,
-    questionId: string,
-  ): TagComplaintContext | null {
-    try {
-      const row = this.db
-        .prepare(
-          `SELECT g.pack_filename, g.pack_title, q.theme_name, q.price,
-                  q.text, q.answer
-           FROM played_questions q
-           JOIN games g ON g.id = q.game_id
-           WHERE q.game_id = ? AND q.question_id = ?
-           LIMIT 1`,
-        )
-        .get(gameId, questionId) as Record<string, unknown> | undefined;
-      if (!row) return null;
-      return {
-        packFilename: row.pack_filename as string,
-        packTitle: row.pack_title as string,
-        themeName: row.theme_name as string,
-        price: Number(row.price),
-        text: row.text as string,
-        answer: row.answer as string,
-      };
-    } catch (err) {
-      console.error('История: не удалось прочитать контекст жалобы —', err);
-      return null;
-    }
-  }
-
   allTags(): QuestionTagRow[] {
     try {
       const rows = this.db
@@ -566,6 +567,170 @@ export class GameHistory implements HistoryRecorder {
     } catch (err) {
       console.error('История: не удалось прочитать оценки —', err);
       return [];
+    }
+  }
+
+  /**
+   * Сводка для раздела «Автособранное» в docs/pack-generator-profile.md
+   * (design.md, 2026-08-25-profile-aggregation-design.md). Только числа и
+   * контекст — никаких выводов и никаких порогов: толкует их генератор,
+   * читая файл, а не сервер, записывая его.
+   *
+   * Список «учтено» здесь не применяется: он живёт в файле профиля, а не в
+   * базе (инвариант 5 — генератор не пишет в хранилище игры), и фильтрует
+   * записи уже profileSection.ts.
+   */
+  profileAggregate(): ProfileAggregate {
+    const empty: ProfileAggregate = {
+      games: 0,
+      questions: 0,
+      tags: 0,
+      downTagged: [],
+      prices: [],
+      boringThemes: [],
+    };
+    try {
+      const counts = this.db
+        .prepare(
+          `SELECT (SELECT COUNT(*) FROM games) AS games,
+                  (SELECT COUNT(*) FROM played_questions) AS questions,
+                  (SELECT COUNT(*) FROM question_tags) AS tags`,
+        )
+        .get() as Record<string, unknown>;
+
+      // round_index >= 0 отсекает финальный вопрос (room.ts,
+      // recordFinalQuestion пишет -1 и price 0 — ноль вместо цены не цена).
+      // type != 'аукцион' отсекает аукционы: в price у них лежит выигравшая
+      // ставка, а не номинал пакета (room.ts, recordPlayedQuestion), и на
+      // вопрос «верно ли выставлена цена 500 в паке» такая строка не
+      // отвечает. Номинал в базе не сохранён, чинить нечем.
+      const priceRows = this.db
+        .prepare(
+          `SELECT price,
+                  SUM(CASE WHEN correct = 1 THEN 1 ELSE 0 END) AS correct,
+                  SUM(CASE WHEN correct = 0 THEN 1 ELSE 0 END) AS wrong,
+                  SUM(CASE WHEN answered_by IS NULL THEN 1 ELSE 0 END) AS untaken,
+                  SUM(CASE WHEN answered_by IS NOT NULL AND correct IS NULL
+                           THEN 1 ELSE 0 END) AS no_verdict
+           FROM played_questions
+           WHERE round_index >= 0 AND type != 'аукцион'
+           GROUP BY price
+           ORDER BY price`,
+        )
+        .all() as Record<string, unknown>[];
+
+      const themeRows = this.db
+        .prepare(
+          `SELECT q.theme_name AS theme_name,
+                  COUNT(*) AS count,
+                  COUNT(DISTINCT t.game_id) AS games
+           FROM question_tags t
+           JOIN played_questions q
+             ON q.game_id = t.game_id AND q.question_id = t.question_id
+           WHERE t.reason = ?
+           GROUP BY q.theme_name
+           ORDER BY count DESC, q.theme_name`,
+        )
+        .all(REASON_BORING_THEME) as Record<string, unknown>[];
+
+      // Схлопывание идёт в TypeScript, а не в SQL: собрать здесь надо не одно
+      // число, а счётчики пальцев, кратности причин и список текстов сразу —
+      // в SQL это три отдельных запроса с ручной сборкой поверх них, при
+      // объёмах в сотни строк выигрыша нет, а читаемость хуже.
+      const tagRows = this.db
+        .prepare(
+          `SELECT g.pack_filename, t.question_id, t.game_id, t.thumb,
+                  t.reason, t.reason_text,
+                  q.theme_name, q.price, q.text, q.answer
+           FROM question_tags t
+           JOIN played_questions q
+             ON q.game_id = t.game_id AND q.question_id = t.question_id
+           JOIN games g ON g.id = t.game_id
+           ORDER BY t.id`,
+        )
+        .all() as Record<string, unknown>[];
+
+      const byQuestion = new Map<
+        string,
+        DownTaggedQuestion & { reasonCounts: Map<string, number> }
+      >();
+      for (const row of tagRows) {
+        const packFilename = row.pack_filename as string;
+        const questionId = row.question_id as string;
+        const key = `${packFilename}#${questionId}`;
+        let entry = byQuestion.get(key);
+        if (!entry) {
+          entry = {
+            packFilename,
+            questionId,
+            themeName: row.theme_name as string,
+            price: Number(row.price),
+            text: row.text as string,
+            answer: row.answer as string,
+            down: 0,
+            up: 0,
+            reasons: [],
+            texts: [],
+            lastGameId: 0,
+            reasonCounts: new Map(),
+          };
+          byQuestion.set(key, entry);
+        }
+        const isDown = Number(row.thumb) === 0;
+        if (isDown) entry.down += 1;
+        else entry.up += 1;
+        // lastGameId двигают только пальцы вниз: сортировка задачи 2 про них,
+        // и поздний палец вверх не должен поднимать старую претензию наверх.
+        if (isDown) {
+          entry.lastGameId = Math.max(entry.lastGameId, Number(row.game_id));
+        }
+        const reason = (row.reason as string | null) ?? null;
+        if (reason !== null) {
+          entry.reasonCounts.set(
+            reason,
+            (entry.reasonCounts.get(reason) ?? 0) + 1,
+          );
+        }
+        const reasonText = (row.reason_text as string | null) ?? null;
+        if (reasonText !== null && reasonText !== '')
+          entry.texts.push(reasonText);
+      }
+
+      const downTagged = [...byQuestion.values()]
+        .filter((entry) => entry.down > 0)
+        .map(({ reasonCounts, ...entry }) => ({
+          ...entry,
+          reasons: [...reasonCounts.entries()]
+            .map(([reason, count]) => ({ reason, count }))
+            .sort(
+              (a, b) => b.count - a.count || a.reason.localeCompare(b.reason),
+            ),
+        }))
+        .sort((a, b) => b.down - a.down || b.lastGameId - a.lastGameId);
+
+      return {
+        games: Number(counts.games),
+        questions: Number(counts.questions),
+        tags: Number(counts.tags),
+        downTagged,
+        prices: priceRows.map((row) => ({
+          price: Number(row.price),
+          correct: Number(row.correct),
+          wrong: Number(row.wrong),
+          untaken: Number(row.untaken),
+          noVerdict: Number(row.no_verdict),
+        })),
+        boringThemes: themeRows.map((row) => ({
+          themeName: row.theme_name as string,
+          count: Number(row.count),
+          games: Number(row.games),
+        })),
+      };
+    } catch (err) {
+      // Тот же принцип, что у остальных методов: побочная функция не роняет
+      // сервер (design.md, 2026-08-20, «Отказы не ломают партию»).
+      console.error('История: не удалось собрать сводку для профиля —', err);
+      return empty;
     }
   }
 }

@@ -1,8 +1,13 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appendComplaint, type ComplaintEntry } from './generatorProfile.js';
+import {
+  appendComplaint,
+  rewriteAutoSection,
+  type ComplaintEntry,
+} from './generatorProfile.js';
+import type { ProfileAggregate } from './history.js';
 
 const ENTRY: ComplaintEntry = {
   date: '2026-08-15',
@@ -115,5 +120,128 @@ describe('appendComplaint', () => {
     // Ровно один заголовок раздела «Жалобы» — инъекция не создала второй.
     const headingCount = content.split('## Жалобы и оценки игроков').length - 1;
     expect(headingCount).toBe(1);
+  });
+});
+
+describe('rewriteAutoSection', () => {
+  let dir: string;
+  let profilePath: string;
+
+  const EMPTY: ProfileAggregate = {
+    games: 0,
+    questions: 0,
+    tags: 0,
+    downTagged: [],
+    prices: [],
+    boringThemes: [],
+  };
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-auto-section-'));
+    profilePath = join(dir, 'profile.md');
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('переписывает раздел, не трогая ручные заметки и жалобы', async () => {
+    await writeFile(
+      profilePath,
+      [
+        '## Ручные заметки (сейчас)',
+        '',
+        '- правило',
+        '',
+        '---',
+        '',
+        '## Автособранное (будет позже)',
+        '',
+        'Пока пусто.',
+        '',
+        '---',
+        '',
+        '## Жалобы и оценки игроков',
+        '',
+        '- старая жалоба',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await rewriteAutoSection(profilePath, {
+      ...EMPTY,
+      games: 1,
+      questions: 1,
+      prices: [{ price: 100, correct: 1, wrong: 0, untaken: 0, noVerdict: 0 }],
+    });
+
+    const content = await readFile(profilePath, 'utf8');
+    expect(content).toContain('- **100** — верно 1, неверно 0');
+    expect(content).toContain('- правило');
+    expect(content).toContain('- старая жалоба');
+    expect(content).not.toContain('Пока пусто.');
+    // Жалобы обязаны остаться последними — appendComplaint пишет в конец файла.
+    expect(content.trimEnd().endsWith('- старая жалоба')).toBe(true);
+  });
+
+  it('не пишет на диск, когда пересчёт ничего не изменил', async () => {
+    await writeFile(
+      profilePath,
+      '# Профиль\n\n## Автособранное\n\nстарое\n',
+      'utf8',
+    );
+
+    await rewriteAutoSection(profilePath, EMPTY);
+    const first = await stat(profilePath);
+    await rewriteAutoSection(profilePath, EMPTY);
+    const second = await stat(profilePath);
+
+    // Пересчёт идёт на каждое объяснение причины — файл не должен
+    // переписываться, когда в нём нечего менять.
+    expect(second.mtimeMs).toBe(first.mtimeMs);
+  });
+
+  it('исключает записи, помеченные маркером «учтено»', async () => {
+    await writeFile(
+      profilePath,
+      [
+        '## Ручные заметки (сейчас)',
+        '',
+        '<!-- учтено: pack.json#q1 -->',
+        '',
+        '---',
+        '',
+        '## Автособранное',
+        '',
+        'Пока пусто.',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await rewriteAutoSection(profilePath, {
+      ...EMPTY,
+      games: 1,
+      downTagged: [
+        {
+          packFilename: 'pack.json',
+          questionId: 'q1',
+          themeName: 'Тема',
+          price: 100,
+          text: 'Вопрос?',
+          answer: 'Ответ',
+          down: 1,
+          up: 0,
+          reasons: [],
+          texts: [],
+          lastGameId: 1,
+        },
+      ],
+    });
+
+    const content = await readFile(profilePath, 'utf8');
+    expect(content).not.toContain('Вопрос?');
+    expect(content).toContain('<!-- учтено: pack.json#q1 -->');
   });
 });

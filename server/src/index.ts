@@ -185,6 +185,9 @@ async function main(): Promise<void> {
     port: PORT,
     packsDir: PACKS_DIR,
     profilePath: PROFILE_PATH,
+    // Та же самая база, что пишет Room, — но сервер видит её через узкий
+    // интерфейс только на чтение.
+    history,
   });
 
   // Без этого обработчика занятый порт (например, процесс, оставшийся от

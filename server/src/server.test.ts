@@ -565,7 +565,6 @@ describe('createServer history recording honesty', () => {
       clearTag: () => {},
       recordTagReason: () => false,
       downTagsForReview: () => [],
-      complaintContext: () => null,
     };
     const room = new Room(
       undefined,
@@ -804,10 +803,11 @@ async function settle(
 
 // tag-reason не отвечает подтверждением (в отличие от admin-report-question,
 // у которого клиент дожидается admin-report-ack и ТЕМ САМЫМ знает, что запись
-// в файл уже случилась) — рассылка state после room.submitTagReason()
-// уходит независимо от асинхронной записи appendTagReasonToProfile() в файл,
-// и settle() на неё никакой гарантии не даёт. Поэтому здесь опрашиваем сам
-// файл, а не полагаемся на порядок доставки двух независимых async-цепочек.
+// в файл уже случилась) — рассылка state после room.submitTagReason() уходит
+// независимо от асинхронного пересчёта refreshAutoSection() (server.ts) в
+// файл, и settle() на неё никакой гарантии не даёт. Поэтому здесь опрашиваем
+// сам файл, а не полагаемся на порядок доставки двух независимых
+// async-цепочек.
 async function waitForFileContent(
   path: string,
   substring: string,
@@ -1083,19 +1083,20 @@ describe('createServer game flow', () => {
   // Проводит tag-reason через настоящий websocket-сервер (не напрямую через
   // Room, как в room.test.ts) и проверяет, что запись реально доезжает до
   // профиля генератора, а не только до памяти комнаты.
-  it('tag-reason доносит причину до комнаты и дописывает её в профиль генератора', async () => {
+  it('tag-reason доносит причину до комнаты и пересчитывает «Автособранное»', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-tag-reason-'));
       const profilePath = join(dir, 'profile.md');
       await writeFile(
         profilePath,
-        '# Профиль компании\n\nВступление.\n',
+        '# Профиль компании\n\nВступление.\n\n---\n\n## Автособранное\n\nПока пусто.\n',
         'utf8',
       );
-      // Настоящая история (не фейк) — appendTagReasonToProfile теперь
-      // собирает запись из history.complaintContext, а не из текущего
-      // активного пакета (финальное ревью ветки, п. 2), так что тест обязан
+      // Настоящая история (не фейк) — запись в профиль генератора теперь
+      // идёт пересчётом всего раздела «Автособранное» из
+      // history.profileAggregate() (design.md, 2026-08-25), а не сборкой
+      // одной жалобы из контекста конкретного вопроса, поэтому тест обязан
       // пройти через настоящую запись/чтение, а не через заглушку, которая
       // повторяла бы ту же логику своими руками.
       const history = new GameHistory(':memory:');
@@ -1112,6 +1113,7 @@ describe('createServer game flow', () => {
         port: 8080,
         packsDir: dir,
         profilePath,
+        history,
       });
       await new Promise<void>((resolve) =>
         server.httpServer.listen(0, resolve),
@@ -1187,17 +1189,135 @@ describe('createServer game flow', () => {
       // пуст (единственная запись только что разобрана).
       expect(room.toGameStateView(first.participantId)?.tagReview).toEqual([]);
 
-      // И приводит к записи — на долгоживущем артефакте, ради проверки
-      // которого этот тест и существует.
+      // Оценка доезжает до долгоживущего артефакта — ради этого тест и
+      // существует. Но теперь пересчётом, а не дописыванием: то же самое от
+      // шестерых игроков даст одну запись «×6», а не шесть буллетов (живая
+      // партия 2026-08-21).
       const profileContent = await waitForFileContent(
         profilePath,
         'вообще не слышал про такое',
       );
-      expect(profileContent).toContain('## Жалобы и оценки игроков');
-      expect(profileContent).toContain('«Тест» (test.json)');
-      expect(profileContent).toContain('тема «Тема», вопрос за 100');
+      expect(profileContent).toContain('## Автособранное');
+      expect(profileContent).toContain('### Вопросы, помеченные пальцем вниз');
+      expect(profileContent).toContain('- **test.json#q1 · «Тема» · 100** —');
       expect(profileContent).toContain('«Вопрос?» (ответ: «Ответ»)');
-      expect(profileContent).toContain('слишком сложный');
+      expect(profileContent).toContain('👎 1 · причины: «Слишком сложный» ×1');
+      // Раздела жалоб разбор больше не касается вовсе.
+      expect(profileContent).not.toContain('## Жалобы и оценки игроков');
+
+      first.ws.close();
+      second.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Финальное ревью ветки, п. 8: только что покрытый тест выше проходит
+  // через game-end на пути к tag-reason, но проверяет исключительно
+  // содержимое, которое дописывает разбор причины (👎/причины). Числа по
+  // ценам, которые обновляет ИМЕННО точка game-end (design.md, 2026-08-25,
+  // «Когда пересчитывается», пункт 1 — «обновляет таблицу цен даже если
+  // никто ничего не разбирал»), тем тестом не проверялись и держались
+  // только на чтении кода. Здесь партия доигрывается до game-end БЕЗ единого
+  // tag-question/tag-reason — если бы пересчёт на game-end не сработал, файл
+  // остался бы «Пока пусто» навсегда.
+  it('game-end пересчитывает «Автособранное» сам по себе, без единого разбора причины', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-game-end-'));
+      const profilePath = join(dir, 'profile.md');
+      await writeFile(
+        profilePath,
+        '# Профиль компании\n\nВступление.\n\n---\n\n## Автособранное\n\nПока пусто.\n',
+        'utf8',
+      );
+      const history = new GameHistory(':memory:');
+      const room = new Room(
+        undefined,
+        TEST_PACK,
+        undefined,
+        'test.json',
+        history,
+      );
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        port: 8080,
+        packsDir: dir,
+        profilePath,
+        history,
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } =
+        server.httpServer.address() as import('node:net').AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const first = await joinPlayer(url, 'Ваня');
+      const second = await joinPlayer(url, 'Катя');
+      await first.nextMessage(); // трансляция лобби после join второго
+
+      first.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(first, second, first)) as {
+        game: { phase: string; turnParticipantId: string };
+      };
+      expect(aState.game.phase).toBe('selecting');
+
+      const picker =
+        aState.game.turnParticipantId === first.participantId ? first : second;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(first, second, picker);
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      const afterSelect = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterSelect.game.phase).toBe('question-open');
+
+      // Никто не жмёт — вопрос истекает сам, никто пальцем его не помечает.
+      let remaining = QUESTION_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterTimeout = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterTimeout.game.phase).toBe('reveal');
+
+      // TEST_PACK — единственный раунд с единственным вопросом, без финала:
+      // reveal доигрывает прямо в game-end, минуя round-end/selecting.
+      remaining = REVEAL_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterReveal = (await settle(first, second, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterReveal.game.phase).toBe('game-end');
+
+      // Никакого tag-question/tag-reason — ровно то, чего не хватало
+      // существующему покрытию.
+      const profileContent = await waitForFileContent(
+        profilePath,
+        '### Как берутся вопросы по ценам',
+      );
+      expect(profileContent).toContain('## Автособранное');
+      expect(profileContent).toContain(
+        '- **100** — верно 0, неверно 0, не взял никто 1, без вердикта 0',
+      );
+      expect(profileContent).not.toContain('Пока пусто');
 
       first.ws.close();
       second.ws.close();

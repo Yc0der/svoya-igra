@@ -29,12 +29,7 @@ import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
-import type {
-  HistoryRecorder,
-  PlayedQuestionInput,
-  TagComplaintContext,
-  Thumb,
-} from './history.js';
+import type { HistoryRecorder, PlayedQuestionInput, Thumb } from './history.js';
 
 export interface Participant {
   id: string;
@@ -137,7 +132,6 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     clearTag: () => {},
     recordTagReason: () => false,
     downTagsForReview: () => [],
-    complaintContext: () => null,
   };
   // Аннотация типа на самом литерале (не только на возврате функции) —
   // без неё пропущенный метод интерфейса не ловится `tsc`, потому что
@@ -224,17 +218,6 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
           err,
         );
         return [];
-      }
-    },
-    complaintContext(gameId, questionId) {
-      try {
-        return target.complaintContext(gameId, questionId);
-      } catch (err) {
-        console.error(
-          'История: рекордер бросил исключение (complaintContext) —',
-          err,
-        );
-        return null;
       }
     },
   };
@@ -865,29 +848,34 @@ export class Room {
    * Причина, по которой игрок пометил вопрос пальцем вниз. Приходит с экрана
    * разбора в конце партии.
    *
-   * Возвращает контекст вопроса ТОЙ ПАРТИИ, В КОТОРОЙ ЕГО РЕАЛЬНО ИГРАЛИ
-   * (history.complaintContext, читает played_questions/games, а не текущий
-   * активный пакет — финальное ревью ветки, п. 2), только если строка в
-   * истории реально обновилась: разбор идёт на экране game-end (сам экран
-   * существует только там) И этот участник действительно ставил палец ВНИЗ
-   * именно по этому вопросу И ещё не разбирал его (это проверяет
-   * history.recordTagReason своим `AND thumb = 0 AND reason IS NULL AND
-   * reason_text IS NULL`). null — ничего не обновилось и записывать в
-   * профиль генератора нечего.
+   * Возвращает true, только если строка в истории реально обновилась: разбор
+   * идёт на экране game-end (сам экран существует только там) И этот
+   * участник действительно ставил палец ВНИЗ именно по этому вопросу И ещё
+   * не разбирал его (это проверяет history.recordTagReason своим `AND
+   * thumb = 0 AND reason IS NULL AND reason_text IS NULL`). false — ничего не
+   * обновилось, пересчитывать «Автособранное» незачем.
    *
-   * Вызывающий (server.ts) обязан смотреть на возврат перед тем, как
-   * дописывать претензию в профиль генератора — иначе устаревший или
-   * подложный questionId от клиента превращался бы в выдуманную жалобу на
-   * долгоживущем артефакте (ревью задачи 4, Important 1).
+   * До финального ревью ветки (п. 2) этот метод возвращал контекст вопроса
+   * из history.complaintContext — остаток appendTagReasonToProfile, функции,
+   * которой больше нет: разбор в конце партии сейчас попадает в профиль
+   * генератора пересчётом всего раздела «Автособранное»
+   * (design.md, 2026-08-25), которому нужен только сам факт «что-то
+   * обновилось», а не контекст конкретного вопроса. Возврат сужен до
+   * boolean — ровно того, что нужно вызывающему (server.ts) как гейт перед
+   * пересчётом.
+   *
+   * Вызывающий обязан смотреть на возврат перед тем, как запускать пересчёт
+   * — иначе устаревший или подложный questionId от клиента запускал бы
+   * пересчёт впустую (ревью задачи 4, Important 1).
    */
   submitTagReason(
     participantId: string,
     questionId: string,
     reason: string | null,
     text: string,
-  ): TagComplaintContext | null {
-    if (this.game?.phase !== 'game-end') return null;
-    if (this.historyGameId === null) return null;
+  ): boolean {
+    if (this.game?.phase !== 'game-end') return false;
+    if (this.historyGameId === null) return false;
     const updated = this.history.recordTagReason(
       this.historyGameId,
       questionId,
@@ -895,9 +883,9 @@ export class Room {
       reason,
       text,
     );
-    if (!updated) return null;
+    if (!updated) return false;
     this.notify();
-    return this.history.complaintContext(this.historyGameId, questionId);
+    return true;
   }
 
   getState(): RoomState {
