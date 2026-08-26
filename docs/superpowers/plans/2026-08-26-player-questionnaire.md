@@ -23,21 +23,21 @@
 
 ## Файловая структура
 
-| Файл                                     | Что делает                                                                   |
-| ---------------------------------------- | ---------------------------------------------------------------------------- |
-| `server/src/markdownSection.ts`          | **создаётся** — общий `findSectionRange`, вынесенный из `profileSection.ts`  |
-| `server/src/profileSection.ts`           | **изменяется** — берёт `findSectionRange` из общего модуля                   |
-| `server/src/playerCard.ts`               | **создаётся** — разбор кода анкеты и разметка раздела игрока, чистые функции |
-| `server/src/playersFile.ts`              | **создаётся** — чтение и атомарная запись `docs/players.md`                  |
-| `server/src/protocol.ts`                 | **изменяется** — два клиентских и три серверных сообщения                    |
-| `server/src/server.ts`                   | **изменяется** — обработчики, `playersPath` в опциях                         |
-| `server/src/index.ts`                    | **изменяется** — `PLAYERS_PATH` и проводка                                   |
-| `client/src/useAdminConnection.ts`       | **изменяется** — отправка кода и состояние списка                            |
-| `client/src/Admin.tsx`                   | **изменяется** — раздел «Анкеты игроков»                                     |
-| `docs/anketa.html`                       | **создаётся** — страница анкеты                                              |
-| `docs/players.md`                        | **создаётся** — заготовка с вводным текстом                                  |
-| `.claude/skills/pack-generator/SKILL.md` | **изменяется** — Шаг 0 и Шаг 1                                               |
-| `docs/ideas.md`                          | **изменяется** — статус слайса D                                             |
+| Файл                                     | Что делает                                                                                 |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `server/src/markdownSection.ts`          | **создаётся** — общие `sectionEnd` и `findSectionRange`, вынесенные из `profileSection.ts` |
+| `server/src/profileSection.ts`           | **изменяется** — берёт `findSectionRange` из общего модуля                                 |
+| `server/src/playerCard.ts`               | **создаётся** — разбор кода анкеты и разметка раздела игрока, чистые функции               |
+| `server/src/playersFile.ts`              | **создаётся** — чтение и атомарная запись `docs/players.md`                                |
+| `server/src/protocol.ts`                 | **изменяется** — два клиентских и три серверных сообщения                                  |
+| `server/src/server.ts`                   | **изменяется** — обработчики, `playersPath` в опциях                                       |
+| `server/src/index.ts`                    | **изменяется** — `PLAYERS_PATH` и проводка                                                 |
+| `client/src/useAdminConnection.ts`       | **изменяется** — отправка кода и состояние списка                                          |
+| `client/src/Admin.tsx`                   | **изменяется** — раздел «Анкеты игроков»                                                   |
+| `docs/anketa.html`                       | **создаётся** — страница анкеты                                                            |
+| `docs/players.md`                        | **создаётся** — заготовка с вводным текстом                                                |
+| `.claude/skills/pack-generator/SKILL.md` | **изменяется** — Шаг 0 и Шаг 1                                                             |
+| `docs/ideas.md`                          | **изменяется** — статус слайса D                                                           |
 
 ---
 
@@ -52,7 +52,7 @@
 **Interfaces:**
 
 - Consumes: ничего нового.
-- Produces: `findSectionRange(lines: string[], heading: string)` из `markdownSection.ts`; `PlayerCard`, `ParsedCard`, `parsePlayerCard`, `renderPlayerSection`, `upsertPlayerSection`, `listPlayers`, `oneLine` из `playerCard.ts`. Задачи 2–3 работают только с этими именами.
+- Produces: `sectionEnd(lines: string[], start: number)` и `findSectionRange(lines: string[], heading: string)` из `markdownSection.ts`; `PlayerCard`, `ParsedCard`, `parsePlayerCard`, `renderPlayerSection`, `upsertPlayerSection`, `listPlayers`, `oneLine` из `playerCard.ts`. Задачи 2–3 работают только с этими именами.
 
 - [ ] **Шаг 1: Вынести `findSectionRange` в общий модуль**
 
