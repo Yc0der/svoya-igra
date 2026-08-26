@@ -3,6 +3,7 @@ import type {
   PriceStats,
   ProfileAggregate,
 } from './history.js';
+import { findSectionRange } from './markdownSection.js';
 
 // Заголовок раздела. Задача 3 ищет по нему границы заменяемого куска, поэтому
 // это одна константа на оба места, а не два одинаковых литерала.
@@ -25,29 +26,6 @@ const INTRO =
   'игрок объясняет причину на экране разбора. Правки руками не сохранятся ' +
   '— пиши их в «Ручные заметки». Источник — `game-history.db` (слайсы A и ' +
   'C)._';
-
-/**
- * Границы заменяемого раздела в списке строк: [start, end). Конец — первая
- * строка после заголовка, начинающая новый раздел («## ») или разделитель
- * («---»); сама она в раздел не входит и не трогается.
- *
- * Сравнение идёт по началу строки без обрезки отступа — это не небрежность:
- * многострочный свободный текст игрока вставляется с отступом в два пробела
- * (indentContinuation), и такая строка не должна считаться границей.
- */
-function findSectionRange(
-  lines: string[],
-): { start: number; end: number } | null {
-  const start = lines.findIndex((line) => line.startsWith(AUTO_HEADING));
-  if (start === -1) return null;
-  let end = start + 1;
-  while (end < lines.length) {
-    const line = lines[end];
-    if (line.startsWith('## ') || line.startsWith('---')) break;
-    end += 1;
-  }
-  return { start, end };
-}
 
 /**
  * Русское склонение числительного: 1 партия, 2 партии, 5 партий. Формы —
@@ -125,7 +103,7 @@ function renderPrice(stats: PriceStats): string {
  */
 export function parseAcknowledged(fileText: string): Set<string> {
   const lines = fileText.split('\n');
-  const range = findSectionRange(lines);
+  const range = findSectionRange(lines, AUTO_HEADING);
   const acknowledged = new Set<string>();
   lines.forEach((line, index) => {
     if (range && index >= range.start && index < range.end) return;
@@ -149,7 +127,7 @@ export function parseAcknowledged(fileText: string): Set<string> {
 export function spliceAutoSection(fileText: string, section: string): string {
   const lines = fileText.split('\n');
   const sectionLines = section.split('\n');
-  const range = findSectionRange(lines);
+  const range = findSectionRange(lines, AUTO_HEADING);
   if (range) {
     return [
       ...lines.slice(0, range.start),
