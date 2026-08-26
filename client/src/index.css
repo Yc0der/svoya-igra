@@ -745,6 +745,30 @@ code {
   font-weight: 400;
 }
 
+.player-people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 400px;
+}
+
+.player-people .button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.player-person-games {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text);
+}
+
 .player-pack-picker {
   border-top: 1px solid var(--border);
   padding-top: 16px;

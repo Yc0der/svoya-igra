@@ -18,6 +18,9 @@ export function Player() {
   const {
     status,
     join,
+    joinAs,
+    people,
+    rememberedPersonId,
     game,
     selfId,
     participants,
@@ -51,6 +54,11 @@ export function Player() {
     selectPack,
   } = useRoomConnection();
   const [name, setName] = useState('');
+  // «Меня тут нет» переключает список знакомых на старое поле ввода имени
+  // (Task 3). Не участвует в разметке, когда people пуст — тогда поле ввода
+  // и так показано сразу, это единственный откат на случай, если лобби со
+  // списком не приживётся на живой партии.
+  const [showNameForm, setShowNameForm] = useState(false);
   const [myVote, setMyVote] = useState<boolean | null>(null);
   // Ведущий в финале судит нескольких счётчиков по очереди в любом порядке —
   // одного myVote (как в base-round judging) не хватает, нужна отметка на
@@ -181,6 +189,43 @@ export function Player() {
   }
 
   if (status !== 'joined') {
+    // Пустой people — единственный сигнал «история выключена» (задача 2:
+    // отдельного флага нет). Это заявленный откат всей вехи: ровно старое
+    // поведение, поле имени и «Войти», без списка и без лишних надписей.
+    if (people.length > 0 && !showNameForm) {
+      return (
+        <div className="player player--join">
+          <h1>Своя игра</h1>
+          {status === 'person-taken' && (
+            <p className="player-alert" role="alert">
+              Этим игроком уже вошли с другого телефона
+            </p>
+          )}
+          {status === 'person-unknown' && (
+            <p className="player-alert" role="alert">
+              Такого игрока больше нет, выбери другого или введи имя
+            </p>
+          )}
+          <ul className="player-people">
+            {people.map((p) => (
+              <li key={p.id}>
+                <button
+                  className={`button${p.id === rememberedPersonId ? ' is-selected' : ''}`}
+                  onClick={() => joinAs(p.id)}
+                  disabled={status === 'joining'}
+                >
+                  <span>{p.name}</span>
+                  <span className="player-person-games">{p.games}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button className="button" onClick={() => setShowNameForm(true)}>
+            Меня тут нет
+          </button>
+        </div>
+      );
+    }
     return (
       <form className="player player--join" onSubmit={handleSubmit}>
         <h1>Своя игра</h1>
