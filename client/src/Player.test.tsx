@@ -247,6 +247,38 @@ describe('Player', () => {
     expect(join).toHaveBeenCalledWith('Петя');
   });
 
+  it('returns to the list of known people via "Назад к списку"', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'connecting',
+        people: [{ id: 7, name: 'Ваня', games: 5 }],
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<Player />);
+
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+    expect(screen.getByLabelText('Имя')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Назад к списку' }));
+
+    expect(screen.getByRole('list')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Имя')).not.toBeInTheDocument();
+  });
+
+  it('does not show "Назад к списку" when the people list is empty', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'connecting', people: [] }),
+    );
+
+    render(<Player />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Назад к списку' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows a person-taken message distinct from name-taken', () => {
     mockedUseRoomConnection.mockReturnValue(
       connection({
