@@ -132,6 +132,8 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     clearTag: () => {},
     recordTagReason: () => false,
     downTagsForReview: () => [],
+    createPerson: () => null,
+    listPeople: () => [],
   };
   // Аннотация типа на самом литерале (не только на возврате функции) —
   // без неё пропущенный метод интерфейса не ловится `tsc`, потому что
@@ -215,6 +217,28 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
       } catch (err) {
         console.error(
           'История: рекордер бросил исключение (downTagsForReview) —',
+          err,
+        );
+        return [];
+      }
+    },
+    createPerson(name, createdAt) {
+      try {
+        return target.createPerson(name, createdAt);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (createPerson) —',
+          err,
+        );
+        return null;
+      }
+    },
+    listPeople() {
+      try {
+        return target.listPeople();
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (listPeople) —',
           err,
         );
         return [];
@@ -496,6 +520,10 @@ export class Room {
           participants: counters.map((p) => ({
             counterId: p.id,
             name: p.name,
+            // Человека у участника ещё нет — он появится вместе с лобби
+            // (design.md, 2026-08-26-player-identity). Пока null: состав
+            // партии пишется, но никого не опознаёт.
+            personId: null,
           })),
         })
       : null;

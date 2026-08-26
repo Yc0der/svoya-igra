@@ -2741,6 +2741,8 @@ function fakeHistory(): FakeHistory {
           };
         });
     },
+    createPerson: () => null,
+    listPeople: () => [],
   };
   return fake;
 }
@@ -2986,6 +2988,12 @@ describe('Room: история партий', () => {
       recordTagReason: () => false,
       downTagsForReview: () => {
         throw new Error('boom: downTagsForReview');
+      },
+      createPerson: () => {
+        throw new Error('boom: createPerson');
+      },
+      listPeople: () => {
+        throw new Error('boom: listPeople');
       },
     };
     const room = roomWithHistory(throwingHistory);
