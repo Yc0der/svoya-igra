@@ -443,6 +443,12 @@ export class Room {
   // комнате не отменяется: два РАЗНЫХ человека-тёзки разведутся здесь, как и
   // при ручном вводе.
   joinAsPerson(personId: number): JoinResult {
+    // «История выключена — вход работает ровно как раньше» (design.md,
+    // «Лобби»): getPeople() в этом случае уже отдаёт пустой список, так что
+    // с точки зрения клиента такого человека не существует — даже если
+    // рекордер продолжает знать его с прошлого включения истории.
+    // person-unknown — честный ответ этому случаю, не отговорка.
+    if (!this.historyEnabled) return { error: 'person-unknown' };
     const person = this.history.listPeople().find((p) => p.id === personId);
     if (!person) return { error: 'person-unknown' };
     if (this.participants.some((p) => p.personId === personId)) {

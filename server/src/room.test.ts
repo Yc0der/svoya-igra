@@ -338,19 +338,32 @@ describe('Room.joinAsPerson', () => {
     const room = roomWithKnownPerson();
     expect(room.joinAsPerson(999)).toEqual({ error: 'person-unknown' });
   });
+
+  // «История выключена — вход работает ровно как раньше» (design.md,
+  // 2026-08-26-player-identity, «Лобби») распространяется и на join-as: с
+  // точки зрения клиента список людей пуст (getPeople() уже это отдаёт), и
+  // человека, которого клиент не видит, для него не существует — даже если
+  // рекордер продолжает знать его с прошлого включения истории. person-unknown
+  // здесь честный ответ, а не отговорка.
+  it('отклоняет любого человека, когда история выключена, тем же отказом, что и незнакомого', () => {
+    const room = roomWithKnownPerson();
+    room.setHistoryEnabled(false);
+    expect(room.joinAsPerson(7)).toEqual({ error: 'person-unknown' });
+  });
 });
 
 describe('Room.join — связь с человеком в истории', () => {
   it('обычный вход по имени заводит человека, когда история включена', () => {
-    let nextId = 1;
-    const history = historyStub({ createPerson: () => nextId++ });
+    // Сравнение с конкретным id, который вернул фейковый рекордер (а не
+    // просто not.toBeNull()) — так тест ловит и случай, когда personId
+    // вообще не заводится (остаётся undefined, а не null), и случай, когда
+    // в участника ляжет не тот id.
+    const history = historyStub({ createPerson: () => 42 });
     const room = new Room(undefined, undefined, undefined, undefined, history);
 
     const result = room.join('Катя');
 
-    expect(
-      'participant' in result && result.participant.personId,
-    ).not.toBeNull();
+    expect('participant' in result && result.participant.personId).toBe(42);
   });
 
   it('обычный вход не заводит человека, когда история выключена', () => {
