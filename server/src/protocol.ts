@@ -243,6 +243,19 @@ export type ClientMessage =
       filename: string;
       questionId: string;
       complaint: string;
+    }
+  // Анкеты интересов игроков (design.md, 2026-08-26). Код приходит от
+  // ведущего целиком, как его прислал игрок, — разбирает и проверяет его
+  // сервер, а не клиент: клиент не должен знать формат анкеты.
+  | { type: 'admin-get-players' }
+  | {
+      type: 'admin-save-player';
+      code: string;
+      // false — обычная отправка: если игрок с таким именем уже есть, сервер
+      // ответит admin-player-exists и НИЧЕГО не запишет. true — ведущий
+      // подтвердил замену. Подтверждение спрашивается один раз и на стороне
+      // клиента, чтобы сервер оставался без состояния между сообщениями.
+      replace: boolean;
     };
 
 export type StartGameErrorReason =
@@ -352,4 +365,9 @@ export type ServerMessage =
       filename: string;
       questionId: string;
       reason: string;
-    };
+    }
+  // Отдаётся и на admin-get-players, и как подтверждение успешной записи —
+  // список всегда актуальный, клиенту не нужно догадываться, что изменилось.
+  | { type: 'admin-players'; players: { name: string; date: string }[] }
+  | { type: 'admin-player-exists'; name: string }
+  | { type: 'admin-player-error'; reason: string };

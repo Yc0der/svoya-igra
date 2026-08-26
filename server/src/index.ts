@@ -28,6 +28,8 @@ const LAN_HOST_CONFIG_PATH =
   process.env.LAN_HOST_CONFIG_PATH ?? './lan-host.local.json';
 const PROFILE_PATH =
   process.env.PROFILE_PATH ?? './docs/pack-generator-profile.md';
+// docs/players.md — анкеты интересов (design.md, 2026-08-26).
+const PLAYERS_PATH = process.env.PLAYERS_PATH ?? './docs/players.md';
 // Разовая добавка к hiddenInterfaces из LAN_HOST_CONFIG_PATH ниже — для
 // одного запуска, не заводя постоянную запись в файл. Список интерфейсов,
 // не адресов: у заведомо бесполезных на этой машине адаптеров (VPN,
@@ -185,6 +187,7 @@ async function main(): Promise<void> {
     port: PORT,
     packsDir: PACKS_DIR,
     profilePath: PROFILE_PATH,
+    playersPath: PLAYERS_PATH,
     // Та же самая база, что пишет Room, — но сервер видит её через узкий
     // интерфейс только на чтение.
     history,
