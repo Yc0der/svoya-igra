@@ -36,8 +36,11 @@ export function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-// Сравнение имён — как у имён в комнате: без учёта регистра и лишних
-// пробелов, иначе «Ваня» и «ваня» заведут двух игроков.
+// Сравнение имён без учёта регистра, а также лишних пробелов по краям И
+// внутри строки (через oneLine — тем же приёмом, каким имя уходит в файл).
+// Строже, чем Room.normalizeName (trim + toLowerCase, внутренние пробелы не
+// трогает): здесь сравнивается ровно то значение, что попадёт в заголовок
+// раздела, а туда оно уже приходит схлопнутым.
 function sameName(a: string, b: string): boolean {
   return oneLine(a).toLowerCase() === oneLine(b).toLowerCase();
 }
@@ -126,20 +129,34 @@ export function upsertPlayerSection(
   date: string,
 ): string {
   const lines = fileText.split('\n');
+  // Все разделы с этим именем, а не только первый: файл заявлен как правимый
+  // руками, и ведущий может случайно продублировать «## Ваня». Замена одним
+  // findIndex попадала бы только в верхнюю копию — нижняя молча оставалась
+  // бы со старыми данными, listPlayers продолжал бы отдавать обе, а
+  // генератор читал бы два противоречащих друг другу набора интересов.
+  //
   // Точное сравнение имени, а не поиск заголовка по началу строки: раздел
   // «## Ваня и Катя» начинается с «## Ваня», и поиск по префиксу заменил бы
   // чужую анкету.
-  const start = lines.findIndex(
-    (line) => line.startsWith('## ') && sameName(line.slice(3), card.name),
-  );
+  const starts: number[] = [];
+  lines.forEach((line, index) => {
+    if (line.startsWith('## ') && sameName(line.slice(3), card.name)) {
+      starts.push(index);
+    }
+  });
   const section = renderPlayerSection(card, date).split('\n');
-  if (start !== -1) {
-    return [
-      ...lines.slice(0, start),
-      ...section,
-      '',
-      ...lines.slice(sectionEnd(lines, start)),
-    ].join('\n');
+  if (starts.length > 0) {
+    const result: string[] = [];
+    let cursor = 0;
+    starts.forEach((start, i) => {
+      result.push(...lines.slice(cursor, start));
+      // Новый раздел вставляется один раз, на месте первого совпадения;
+      // остальные совпавшие разделы просто вырезаются.
+      if (i === 0) result.push(...section, '');
+      cursor = sectionEnd(lines, start);
+    });
+    result.push(...lines.slice(cursor));
+    return result.join('\n');
   }
   const base = fileText.endsWith('\n') ? fileText : `${fileText}\n`;
   return `${base}\n${section.join('\n')}\n`;
