@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Анкета интересов — Своя игра</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f1ea;
+    --card: #ffffff;
+    --ink: #262220;
+    --muted: #6b6259;
+    --accent: #b5432a;
+    --accent-dark: #8f3220;
+    --border: #ddd4c6;
+    --boring-bg: #efe9dd;
+    --boring-selected: #b5432a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    line-height: 1.45;
+  }
+  body {
+    padding: 20px 16px 64px;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.5rem;
+    margin: 0 0 8px;
+  }
+  p.lead {
+    color: var(--muted);
+    margin: 0 0 24px;
+    font-size: 1rem;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .hint {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0 0 8px;
+  }
+  input[type="text"], textarea {
+    width: 100%;
+    font: inherit;
+    font-size: 1rem;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fffdf9;
+    color: var(--ink);
+    resize: vertical;
+  }
+  input[type="text"]:focus, textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  textarea { min-height: 3.2em; }
+  .boring-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  button.toggle {
+    font: inherit;
+    font-size: 0.95rem;
+    padding: 10px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--boring-bg);
+    color: var(--ink);
+    cursor: pointer;
+    min-height: 44px;
+    touch-action: manipulation;
+  }
+  button.toggle[aria-pressed="true"] {
+    background: var(--boring-selected);
+    border-color: var(--boring-selected);
+    color: #fff;
+    font-weight: 600;
+  }
+  .actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  button.primary, button.secondary {
+    font: inherit;
+    font-size: 1.05rem;
+    font-weight: 600;
+    padding: 14px 18px;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    min-height: 48px;
+    touch-action: manipulation;
+  }
+  button.primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  button.primary:active { background: var(--accent-dark); }
+  button.secondary {
+    background: #fff;
+    color: var(--ink);
+    border: 1px solid var(--border);
+  }
+  #error {
+    color: var(--accent-dark);
+    font-weight: 600;
+    margin-top: 10px;
+    display: none;
+  }
+  #result {
+    display: none;
+  }
+  #result.visible {
+    display: block;
+  }
+  textarea#code {
+    min-height: 8em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    background: #fffdf9;
+  }
+  #copyStatus {
+    margin-top: 8px;
+    font-size: 0.9rem;
+    color: var(--muted);
+    min-height: 1.2em;
+  }
+  .instructions {
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+  <h1>Анкета интересов</h1>
+  <p class="lead">
+    Заполни, чтобы в наборе вопросов на игре была тема и было немного про
+    тебя. Чем конкретнее примеры — тем лучше выйдет пак: не «люблю кино», а
+    какие именно фильмы. Когда закончишь, нажми «Готово», скопируй код внизу
+    и пришли его тому, кто собирает игру.
+  </p>
+
+  <div class="card">
+    <label for="name">Как тебя записать</label>
+    <p class="hint">Имя или ник — как удобнее, чтобы тебя узнали в вопросах.</p>
+    <input type="text" id="name" placeholder="Например, Катя">
+  </div>
+
+  <div class="card">
+    <label for="area-cinema">Кино и сериалы</label>
+    <p class="hint">Назови 2–3 фильма или сериала, которые пересматривал(а) или ждал(а) больше всего.</p>
+    <textarea id="area-cinema" placeholder="Интерстеллар, Твин Пикс, Один дома"></textarea>
+  </div>
+
+  <div class="card">
+    <label for="area-music">Музыка</label>
+    <p class="hint">2–3 исполнителя или трека, которые сейчас крутятся в плеере.</p>
+    <textarea id="area-music" placeholder="Земфира, Nirvana, песня Кино — Пачка сигарет"></textarea>
+  </div>
+
+  <div class="card">
+    <label for="area-sport">Спорт</label>
+    <p class="hint">2–3 команды, спортсмена или матча, за который болеешь.</p>
+    <textarea id="area-sport" placeholder="Зенит, финал ЧМ 2018, Федерер"></textarea>
+  </div>
+
+  <div class="card">
+    <label for="area-books">Книги</label>
+    <p class="hint">2–3 книги, которые запомнились или перечитывались.</p>
+    <textarea id="area-books" placeholder="Мастер и Маргарита, Дюна, Гарри Поттер"></textarea>
+  </div>
+
+  <div class="card">
+    <label for="area-games">Игры</label>
+    <p class="hint">2–3 игры, в которые играешь или играл(а) больше всего.</p>
+    <textarea id="area-games" placeholder="Ведьмак 3, Тетрис, Дота"></textarea>
+  </div>
+
+  <div class="card">
+    <label for="area-food">Еда и путешествия</label>
+    <p class="hint">2–3 блюда или места, куда хочется вернуться.</p>
+    <textarea id="area-food" placeholder="плов, Грузия, кофе с корицей"></textarea>
+  </div>
+
+  <div class="card">
+    <label for="area-hobbies">Увлечения и работа</label>
+    <p class="hint">2–3 вещи, которыми занимаешься помимо основного — работа, хобби, всё что угодно.</p>
+    <textarea id="area-hobbies" placeholder="вышивка, программирование на Python, разведение орхидей"></textarea>
+  </div>
+
+  <div class="card">
+    <label>Что тебе точно скучно</label>
+    <p class="hint">Отметь темы, вопросы про которые лучше вообще не задавать. Можно выбрать несколько.</p>
+    <div class="boring-grid" id="boringGrid"></div>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="primary" id="submitBtn">Готово</button>
+    <div id="error"></div>
+  </div>
+
+  <div class="card" id="result">
+    <label for="code">Твой код — пришли его целиком тому, кто собирает игру</label>
+    <textarea id="code" readonly></textarea>
+    <div class="actions">
+      <button type="button" class="secondary" id="copyBtn">Скопировать</button>
+    </div>
+    <div id="copyStatus"></div>
+    <p class="instructions">
+      Если кнопка не сработала — код уже выделен в поле выше, просто скопируй
+      его вручную (зажать и выбрать «Копировать»).
+    </p>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+
+  var AREAS = [
+    { id: 'area-cinema', label: 'Кино и сериалы' },
+    { id: 'area-music', label: 'Музыка' },
+    { id: 'area-sport', label: 'Спорт' },
+    { id: 'area-books', label: 'Книги' },
+    { id: 'area-games', label: 'Игры' },
+    { id: 'area-food', label: 'Еда и путешествия' },
+    { id: 'area-hobbies', label: 'Увлечения и работа' }
+  ];
+
+  var BORING = [
+    'Спорт',
+    'Политика',
+    'История',
+    'Наука',
+    'География',
+    'Кино',
+    'Музыка',
+    'Литература',
+    'Искусство',
+    'Техника',
+    'Мода',
+    'Животные'
+  ];
+
+  var selectedBoring = new Set();
+
+  var boringGrid = document.getElementById('boringGrid');
+  BORING.forEach(function (item) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toggle';
+    btn.textContent = item;
+    btn.setAttribute('aria-pressed', 'false');
+    btn.addEventListener('click', function () {
+      if (selectedBoring.has(item)) {
+        selectedBoring.delete(item);
+        btn.setAttribute('aria-pressed', 'false');
+      } else {
+        selectedBoring.add(item);
+        btn.setAttribute('aria-pressed', 'true');
+      }
+    });
+    boringGrid.appendChild(btn);
+  });
+
+  function showError(message) {
+    var el = document.getElementById('error');
+    if (!message) {
+      el.style.display = 'none';
+      el.textContent = '';
+      return;
+    }
+    el.style.display = 'block';
+    el.textContent = message;
+  }
+
+  document.getElementById('submitBtn').addEventListener('click', function () {
+    var nameInput = document.getElementById('name');
+    var name = nameInput.value.trim();
+    if (name === '') {
+      showError('Укажи, как тебя записать — это поле обязательное.');
+      nameInput.focus();
+      return;
+    }
+
+    var interests = AREAS
+      .map(function (area) {
+        var input = document.getElementById(area.id);
+        var examples = input.value
+          .split(',')
+          .map(function (s) { return s.trim(); })
+          .filter(function (s) { return s !== ''; });
+        return { area: area.label, examples: examples };
+      })
+      .filter(function (item) { return item.examples.length > 0; });
+
+    var boring = Array.from(selectedBoring);
+
+    if (interests.length === 0 && boring.length === 0) {
+      showError('Заполни хотя бы одну область или отметь что-то в «скучно».');
+      return;
+    }
+
+    showError('');
+
+    var card = {
+      version: 1,
+      name: name,
+      interests: interests,
+      boring: boring
+    };
+
+    var codeEl = document.getElementById('code');
+    codeEl.value = JSON.stringify(card, null, 2);
+
+    var result = document.getElementById('result');
+    result.classList.add('visible');
+    result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    document.getElementById('copyStatus').textContent = '';
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var codeEl = document.getElementById('code');
+    var statusEl = document.getElementById('copyStatus');
+
+    function selectManually(message) {
+      codeEl.focus();
+      codeEl.select();
+      try {
+        codeEl.setSelectionRange(0, codeEl.value.length);
+      } catch (e) {
+        // некоторые мобильные браузеры не поддерживают setSelectionRange
+        // для textarea в этом состоянии — сам select() уже сделал дело.
+      }
+      statusEl.textContent = message;
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(codeEl.value).then(
+        function () {
+          statusEl.textContent = 'Скопировано!';
+        },
+        function () {
+          selectManually('Не получилось скопировать автоматически — код выделен, скопируй вручную.');
+        }
+      );
+    } else {
+      selectManually('Автокопирование недоступно — код выделен, скопируй вручную.');
+    }
+  });
+})();
+</script>
+</body>
+</html>
