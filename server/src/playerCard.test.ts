@@ -211,6 +211,73 @@ describe('upsertPlayerSection', () => {
     const once = upsertPlayerSection(FILE, CARD, '2026-08-26');
     expect(upsertPlayerSection(once, CARD, '2026-08-26')).toBe(once);
   });
+
+  // Катя — последний раздел файла: sectionEnd для ннего идёт до конца
+  // массива строк, не до следующего «## », и это отдельный путь от замены
+  // раздела где-то в середине, уже покрытой тестами выше.
+  it('заменяет последний раздел файла, не оставляя хвостов старого', () => {
+    const updated = upsertPlayerSection(
+      FILE,
+      { ...CARD, name: 'Катя' },
+      '2026-08-26',
+    );
+    expect(updated).not.toContain('- **Музыка:** джаз');
+    expect(updated).toContain('## Катя');
+    expect(updated).toContain('- **Спорт:** Формула-1');
+    // Сосед перед заменяемым разделом и сама замена — единственные два
+    // раздела, ничего не задвоилось и не потерялось.
+    const headings = updated
+      .split('\n')
+      .filter((line) => line.startsWith('## '));
+    expect(headings).toEqual(['## Ваня', '## Катя']);
+  });
+
+  // Файл без завершающего перевода строки — отдельный путь от ветки
+  // «дописать в конец» (там base сам добавляет \n), здесь же замена
+  // читает lines = fileText.split('\n') на входе без финальной пустой
+  // строки.
+  it('заменяет раздел в файле без завершающего перевода строки', () => {
+    const fileWithoutTrailingNewline = FILE.replace(/\n$/, '');
+    expect(fileWithoutTrailingNewline.endsWith('\n')).toBe(false);
+    const updated = upsertPlayerSection(
+      fileWithoutTrailingNewline,
+      CARD,
+      '2026-08-26',
+    );
+    expect(updated).toContain('- **Спорт:** Формула-1');
+    expect(updated).not.toContain('- **Спорт:** старое');
+    expect(updated).toContain('## Катя');
+    expect(updated).toContain('- **Музыка:** джаз');
+  });
+
+  // Финальное ревью ветки, п. 5: если ведущий руками продублировал раздел
+  // одного и того же игрока, замена одним findIndex попадала бы только в
+  // первую копию — вторая молча оставалась бы со старыми данными.
+  it('сносит все разделы с этим именем, а не только первый, если игрок задвоен вручную', () => {
+    const file = [
+      '## Ваня',
+      '',
+      '- **Спорт:** старое сверху',
+      '',
+      '## Катя',
+      '',
+      '- **Музыка:** джаз',
+      '',
+      '## Ваня',
+      '',
+      '- **Спорт:** старое снизу',
+      '',
+    ].join('\n');
+    const updated = upsertPlayerSection(file, CARD, '2026-08-26');
+    const headings = updated
+      .split('\n')
+      .filter((line) => line.startsWith('## '));
+    expect(headings).toEqual(['## Ваня', '## Катя']);
+    expect(updated).not.toContain('старое сверху');
+    expect(updated).not.toContain('старое снизу');
+    expect(updated).toContain('- **Спорт:** Формула-1');
+    expect(updated).toContain('- **Музыка:** джаз');
+  });
 });
 
 describe('listPlayers', () => {
