@@ -130,6 +130,11 @@ export interface GameStateView {
 
 export type ClientMessage =
   | { type: 'join'; name: string }
+  // Вход «я — вот этот из списка» (design.md, 2026-08-26-player-identity,
+  // «Лобби») — вместо ввода имени руками участник выбирает себя среди уже
+  // известных людей (room.ts, Room.joinAsPerson). Имя сервер берёт у самого
+  // человека, клиент его не присылает.
+  | { type: 'join-as'; personId: number }
   | { type: 'reconnect'; token: string }
   | { type: 'start-game' }
   | { type: 'toggle-host' }
@@ -296,12 +301,22 @@ export const TAG_REASONS = [
 export type ServerMessage =
   | { type: 'joined'; participantId: string; token: string; name: string }
   | { type: 'name-taken' }
+  // Отдельные от name-taken отказы join-as (room.ts, Room.joinAsPerson) —
+  // причины разные (этим человеком уже кто-то вошёл / человека с таким id
+  // нет), и текст, который увидит игрок, тоже должен быть разным.
+  | { type: 'person-taken' }
+  | { type: 'person-unknown' }
   | { type: 'invalid-token' }
   | {
       type: 'state';
       participants: ParticipantView[];
       hostParticipantId: string | null;
       game: GameStateView | null;
+      // Список постоянных людей для входа «я — вот этот из списка» (room.ts,
+      // Room.getPeople). Пустой массив, когда история выключена — заявленный
+      // откат всей вехи: клиент показывает обычное поле ввода имени
+      // (design.md, 2026-08-26-player-identity, «Лобби»).
+      people: { id: number; name: string; games: number }[];
       // Живой, не разовый: пересчитывается на каждой рассылке (server.ts,
       // stateMessageFor) из room.getLanInfo(), а не отправляется один раз
       // при подключении — иначе уже подключённые табло/админка не увидели

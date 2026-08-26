@@ -17,6 +17,9 @@ export function deserializeSnapshot(json: string): RoomState {
     participants: parsed.participants!.map((p) => ({
       ...p,
       connected: false,
+      // Человек у участника (2026-08-26-player-identity) появился позже —
+      // снапшоты, записанные до него, этого поля не содержат вовсе.
+      personId: p.personId ?? null,
     })),
     game: parsed.game
       ? {

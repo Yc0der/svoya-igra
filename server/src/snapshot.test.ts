@@ -39,8 +39,20 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
   it('round-trips a room state, forcing all participants to disconnected', () => {
     const state: RoomState = {
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
-        { id: '2', name: 'Катя', token: 'tok-2', connected: false },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: true,
+          personId: null,
+        },
+        {
+          id: '2',
+          name: 'Катя',
+          token: 'tok-2',
+          connected: false,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -51,8 +63,20 @@ describe('serializeSnapshot / deserializeSnapshot', () => {
 
     expect(restored).toEqual({
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
-        { id: '2', name: 'Катя', token: 'tok-2', connected: false },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: false,
+          personId: null,
+        },
+        {
+          id: '2',
+          name: 'Катя',
+          token: 'tok-2',
+          connected: false,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -82,7 +106,13 @@ describe('writeSnapshot / readSnapshot', () => {
   it('writes and reads back the same state', async () => {
     const state: RoomState = {
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: true,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -94,7 +124,13 @@ describe('writeSnapshot / readSnapshot', () => {
 
     expect(result).toEqual({
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: false,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -126,7 +162,13 @@ describe('writeSnapshot / readSnapshot', () => {
   it('does not truncate the existing snapshot when the write is interrupted', async () => {
     const initial: RoomState = {
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: true,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -145,7 +187,13 @@ describe('writeSnapshot / readSnapshot', () => {
 
     const next: RoomState = {
       participants: [
-        { id: '2', name: 'Катя', token: 'tok-2', connected: true },
+        {
+          id: '2',
+          name: 'Катя',
+          token: 'tok-2',
+          connected: true,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -158,7 +206,13 @@ describe('writeSnapshot / readSnapshot', () => {
     const result = await readSnapshot(path);
     expect(result).toEqual({
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: false,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -171,7 +225,13 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
   it('round-trips a null game unchanged', () => {
     const state: RoomState = {
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: true,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -179,7 +239,13 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
     };
     expect(deserializeSnapshot(serializeSnapshot(state))).toEqual({
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: false },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: false,
+          personId: null,
+        },
       ],
       game: null,
       hostParticipantId: null,
@@ -191,8 +257,20 @@ describe('serializeSnapshot / deserializeSnapshot with game state', () => {
     const game = createInitialState(TEST_PACK, ['1', '2']);
     const state: RoomState = {
       participants: [
-        { id: '1', name: 'Ваня', token: 'tok-1', connected: true },
-        { id: '2', name: 'Катя', token: 'tok-2', connected: true },
+        {
+          id: '1',
+          name: 'Ваня',
+          token: 'tok-1',
+          connected: true,
+          personId: null,
+        },
+        {
+          id: '2',
+          name: 'Катя',
+          token: 'tok-2',
+          connected: true,
+          personId: null,
+        },
       ],
       game,
       hostParticipantId: null,

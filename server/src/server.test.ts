@@ -98,6 +98,7 @@ describe('createServer', () => {
       participants: [],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -140,6 +141,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -201,6 +203,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -235,6 +238,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -355,6 +359,7 @@ describe('createServer', () => {
       participants: [],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -411,6 +416,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -451,6 +457,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -635,6 +642,63 @@ describe('createServer history recording honesty', () => {
   });
 });
 
+// Отдельный describe по той же причине, что и history recording honesty
+// выше: тесту нужен рекордер, который знает конкретного человека (id 7 =
+// «Ваня») — комната describe('createServer', ...) выше собрана вообще без
+// рекордера, room.getPeople() у неё всегда пуст.
+describe('createServer join-as', () => {
+  it('входит человеком из списка и отклоняет второго под тем же человеком', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-join-as-'));
+    const history: HistoryRecorder = {
+      startGame: () => null,
+      recordQuestion: () => {},
+      finishGame: () => {},
+      discardGame: () => {},
+      recordTag: () => {},
+      clearTag: () => {},
+      recordTagReason: () => false,
+      downTagsForReview: () => [],
+      createPerson: () => null,
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    };
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const first = new WebSocket(url);
+    const nextFirstMessage = collectMessages(first);
+    await waitForOpen(first);
+    await nextFirstMessage(); // стартовое state
+
+    first.send(JSON.stringify({ type: 'join-as', personId: 7 }));
+    const joined = await nextFirstMessage();
+    expect(joined).toMatchObject({ type: 'joined', name: 'Ваня' });
+
+    const second = new WebSocket(url);
+    const nextSecondMessage = collectMessages(second);
+    await waitForOpen(second);
+    await nextSecondMessage(); // стартовое state
+
+    second.send(JSON.stringify({ type: 'join-as', personId: 7 }));
+    const rejection = await nextSecondMessage();
+    expect(rejection).toEqual({ type: 'person-taken' });
+
+    first.close();
+    second.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
 // Отдельный describe, а не тест внутри предыдущего: интервал хартбита ставится
 // внутри `createServer`, поэтому фейковые таймеры должны быть включены ДО его
 // вызова — иначе интервал получится настоящий и тест ждал бы пять секунд по
@@ -702,6 +766,7 @@ describe('createServer heartbeat', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],

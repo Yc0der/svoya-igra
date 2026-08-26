@@ -287,6 +287,117 @@ describe('Room.join', () => {
   });
 });
 
+// Заглушки, которых не хватает у остального интерфейса — эти тесты трогают
+// только createPerson/listPeople, поэтому весь набор описан прямо здесь, не
+// через общий fakeHistory() (тот ниже по файлу нарочно держит оба метода
+// заглушками, возвращающими null/[]: людей знать ему незачем).
+function historyStub(
+  overrides: Partial<HistoryRecorder> = {},
+): HistoryRecorder {
+  return {
+    startGame: () => null,
+    recordQuestion: () => {},
+    finishGame: () => {},
+    discardGame: () => {},
+    recordTag: () => {},
+    clearTag: () => {},
+    recordTagReason: () => false,
+    downTagsForReview: () => [],
+    createPerson: () => null,
+    listPeople: () => [],
+    ...overrides,
+  };
+}
+
+describe('Room.joinAsPerson', () => {
+  // Комната с фейковым рекордером, который знает одного человека.
+  function roomWithKnownPerson(): Room {
+    const history = historyStub({
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    });
+    return new Room(undefined, undefined, undefined, undefined, history);
+  }
+
+  it('вход человеком берёт его имя и связывает участника с ним', () => {
+    const room = roomWithKnownPerson();
+    const result = room.joinAsPerson(7);
+    expect('participant' in result).toBe(true);
+    if ('participant' in result) {
+      expect(result.participant.name).toBe('Ваня');
+      expect(result.participant.personId).toBe(7);
+    }
+  });
+
+  it('не пускает второго под тем же человеком', () => {
+    const room = roomWithKnownPerson();
+    room.joinAsPerson(7);
+    expect(room.joinAsPerson(7)).toEqual({ error: 'person-taken' });
+  });
+
+  it('отклоняет неизвестного человека', () => {
+    const room = roomWithKnownPerson();
+    expect(room.joinAsPerson(999)).toEqual({ error: 'person-unknown' });
+  });
+});
+
+describe('Room.join — связь с человеком в истории', () => {
+  it('обычный вход по имени заводит человека, когда история включена', () => {
+    let nextId = 1;
+    const history = historyStub({ createPerson: () => nextId++ });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+
+    const result = room.join('Катя');
+
+    expect(
+      'participant' in result && result.participant.personId,
+    ).not.toBeNull();
+  });
+
+  it('обычный вход не заводит человека, когда история выключена', () => {
+    let nextId = 1;
+    const history = historyStub({ createPerson: () => nextId++ });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+    room.setHistoryEnabled(false);
+
+    const result = room.join('Катя');
+
+    expect('participant' in result && result.participant.personId).toBeNull();
+  });
+
+  it('передаёт человека в историю при старте партии', () => {
+    let nextId = 100;
+    const recorded: { participants?: StartGameInput['participants'] } = {};
+    const history = historyStub({
+      startGame: (input) => {
+        recorded.participants = input.participants;
+        return 1;
+      },
+      createPerson: () => nextId++,
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    });
+    const room = new Room(
+      undefined,
+      TEST_PACK,
+      undefined,
+      'test.json',
+      history,
+    );
+    room.joinAsPerson(7);
+    room.join('Катя');
+
+    room.startGame(null);
+
+    expect(recorded.participants).toEqual([
+      { counterId: expect.any(String), name: 'Ваня', personId: 7 },
+      {
+        counterId: expect.any(String),
+        name: 'Катя',
+        personId: expect.any(Number),
+      },
+    ]);
+  });
+});
+
 describe('Room.reconnect', () => {
   it('marks a disconnected participant as connected again, keeping id and name', () => {
     const room = new Room();

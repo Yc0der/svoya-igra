@@ -143,6 +143,7 @@ export function createServer(options: CreateServerOptions): GameServer {
       participants: toParticipantView(room.getState()),
       hostParticipantId: room.getState().hostParticipantId,
       game: room.toGameStateView(viewerId),
+      people: room.getPeople(),
       lanUrl: lanUrlFor(lan.address, port),
       lanCandidates: lan.candidates,
       availablePacks: packInfo.available,
@@ -312,6 +313,22 @@ export function createServer(options: CreateServerOptions): GameServer {
         const result = room.join(message.name);
         if ('error' in result) {
           send(ws, { type: 'name-taken' });
+          return;
+        }
+        connections.set(ws, result.participant.id);
+        owners.set(result.participant.id, ws);
+        send(ws, {
+          type: 'joined',
+          participantId: result.participant.id,
+          token: result.participant.token,
+          name: result.participant.name,
+        });
+      }
+
+      if (message.type === 'join-as' && typeof message.personId === 'number') {
+        const result = room.joinAsPerson(message.personId);
+        if ('error' in result) {
+          send(ws, { type: result.error });
           return;
         }
         connections.set(ws, result.participant.id);

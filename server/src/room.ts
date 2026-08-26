@@ -29,13 +29,22 @@ import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
-import type { HistoryRecorder, PlayedQuestionInput, Thumb } from './history.js';
+import type {
+  HistoryRecorder,
+  PersonSummary,
+  PlayedQuestionInput,
+  Thumb,
+} from './history.js';
 
 export interface Participant {
   id: string;
   name: string;
   token: string;
   connected: boolean;
+  // Постоянный человек за этим участником (history.ts, people). null —
+  // гость или история выключена. Третья сущность рядом с участником и
+  // счётчиком, и путать их нельзя (design.md, 2026-08-26-player-identity).
+  personId: number | null;
 }
 
 export interface RoomState {
@@ -72,7 +81,9 @@ export interface PackInfo {
   activeFilename: string | null;
 }
 
-export type JoinResult = { participant: Participant } | { error: 'name-taken' };
+export type JoinResult =
+  | { participant: Participant }
+  | { error: 'name-taken' | 'person-taken' | 'person-unknown' };
 export type ReconnectResult =
   { participant: Participant } | { error: 'invalid-token' };
 export type StartGameResult =
@@ -393,7 +404,13 @@ export class Room {
     }
   }
 
-  join(name: string): JoinResult {
+  // personId — только для joinAsPerson() ниже: тот уже опознал человека и
+  // передаёт его id напрямую, минуя заведение нового. При обычном вызове
+  // (ввод имени руками) параметр не передаётся, и человек заводится здесь
+  // же, если история включена — ошибка заведения (рекордер вернул null) не
+  // мешает войти, участник просто останется без человека: партия важнее
+  // записи.
+  join(name: string, personId: number | null = null): JoinResult {
     const trimmed = name.trim();
     const normalized = normalizeName(trimmed);
     const taken = this.participants.some(
@@ -402,15 +419,43 @@ export class Room {
     if (taken) {
       return { error: 'name-taken' };
     }
+    const resolvedPersonId =
+      personId !== null
+        ? personId
+        : this.historyEnabled
+          ? this.history.createPerson(trimmed, new Date().toISOString())
+          : null;
     const participant: Participant = {
       id: randomUUID(),
       name: trimmed,
       token: randomUUID(),
       connected: true,
+      personId: resolvedPersonId,
     };
     this.participants.push(participant);
     this.notify();
     return { participant: { ...participant } };
+  }
+
+  // Вход «я — вот этот из списка» (design.md, 2026-08-26-player-identity,
+  // «Лобби») — вместо ручного ввода имени участник выбирает себя среди уже
+  // известных людей. Имя берётся у человека, но правило уникальности имени в
+  // комнате не отменяется: два РАЗНЫХ человека-тёзки разведутся здесь, как и
+  // при ручном вводе.
+  joinAsPerson(personId: number): JoinResult {
+    const person = this.history.listPeople().find((p) => p.id === personId);
+    if (!person) return { error: 'person-unknown' };
+    if (this.participants.some((p) => p.personId === personId)) {
+      return { error: 'person-taken' };
+    }
+    return this.join(person.name, personId);
+  }
+
+  // Пустой список — заявленный откат всей вехи при выключенной истории:
+  // клиент видит пустой список людей и показывает обычное поле ввода имени
+  // (design.md, 2026-08-26-player-identity, «Лобби»).
+  getPeople(): PersonSummary[] {
+    return this.historyEnabled ? this.history.listPeople() : [];
   }
 
   reconnect(token: string): ReconnectResult {
@@ -520,10 +565,7 @@ export class Room {
           participants: counters.map((p) => ({
             counterId: p.id,
             name: p.name,
-            // Человека у участника ещё нет — он появится вместе с лобби
-            // (design.md, 2026-08-26-player-identity). Пока null: состав
-            // партии пишется, но никого не опознаёт.
-            personId: null,
+            personId: p.personId,
           })),
         })
       : null;
