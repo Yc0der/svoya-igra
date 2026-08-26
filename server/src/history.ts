@@ -40,11 +40,41 @@ CREATE TABLE IF NOT EXISTS question_tags (
   reason_text      TEXT,
   UNIQUE (game_id, question_id, participant_id)
 );
+-- Человек живёт между партиями, участник — внутри одной, счётчик держит
+-- очки (design.md, 2026-08-26-player-identity, «Три сущности»). game_people
+-- связывает счётчик партии с человеком, и это ЕДИНСТВЕННОЕ место связи:
+-- у played_questions своей колонки с человеком нет намеренно, иначе при
+-- слиянии профилей перепривязывать пришлось бы две таблицы, и второй
+-- источник правды однажды разошёлся бы с первым.
+--
+-- Ключ (game_id, counter_id), а не (game_id, person_id): счётчик в партии
+-- принадлежит ровно одному человеку, а человек ПОСЛЕ СЛИЯНИЯ профилей может
+-- владеть двумя счётчиками одной партии. Такой ключ переживает слияние без
+-- конфликта.
+--
+-- Ни одна существующая колонка не меняется — поэтому миграции не нужно:
+-- CREATE TABLE IF NOT EXISTS заводит новые таблицы на уже существующей базе
+-- при первом же открытии. Старые партии останутся без опознанных людей и
+-- просто не попадут в персональную статистику.
+CREATE TABLE IF NOT EXISTS people (
+  id         INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS game_people (
+  game_id    INTEGER NOT NULL REFERENCES games(id),
+  person_id  INTEGER NOT NULL REFERENCES people(id),
+  counter_id TEXT NOT NULL,
+  PRIMARY KEY (game_id, counter_id)
+);
 `;
 
 export interface ParticipantRecord {
   counterId: string;
   name: string;
+  // null — участник без опознанного человека: гость, или история была
+  // выключена, когда он входил. Такие в game_people не попадают.
+  personId: number | null;
 }
 
 export interface StartGameInput {
@@ -144,6 +174,8 @@ export interface HistoryRecorder {
     participantId: string,
     limit: number,
   ): ReviewItem[];
+  createPerson(name: string, createdAt: string): number | null;
+  listPeople(): PersonSummary[];
 }
 
 export interface ReasonCount {
@@ -216,6 +248,42 @@ export interface ProfileAggregateSource {
   profileAggregate(): ProfileAggregate;
 }
 
+export interface PersonSummary {
+  id: number;
+  name: string;
+  games: number;
+}
+
+export interface PersonThemeStat {
+  themeName: string;
+  // Сколько вопросов этой темы сыграли при этом человеке.
+  played: number;
+  buzzes: number;
+  correct: number;
+}
+
+export interface PersonStats extends PersonSummary {
+  played: number;
+  buzzes: number;
+  correct: number;
+  // По убыванию нажатий. Ограничение показа накладывает разметка, не запрос.
+  themes: PersonThemeStat[];
+}
+
+export interface PlayerStats {
+  games: number;
+  people: PersonStats[];
+}
+
+// Новый узкий интерфейс — его видит server.ts, рядом с ProfileAggregateSource.
+// Отдельно от HistoryRecorder намеренно: Комнате незачем уметь сливать
+// профили, а серверу — записывать ход партии.
+export interface PeopleAdmin {
+  listPeople(): PersonSummary[];
+  mergePeople(fromId: number, intoId: number): boolean;
+  playerStats(): PlayerStats;
+}
+
 /**
  * Приводит текст к виду, в котором его можно сравнивать с другим текстом:
  * нижний регистр, `ё` → `е`, пунктуация → пробел, схлопнутые пробелы.
@@ -261,7 +329,9 @@ function mapPlayedQuestionRow(row: Record<string, unknown>): PlayedQuestionRow {
   };
 }
 
-export class GameHistory implements HistoryRecorder, ProfileAggregateSource {
+export class GameHistory
+  implements HistoryRecorder, ProfileAggregateSource, PeopleAdmin
+{
   private db: DatabaseSync;
 
   constructor(path: string) {
@@ -290,7 +360,19 @@ export class GameHistory implements HistoryRecorder, ProfileAggregateSource {
           input.packTitle,
           JSON.stringify(input.participants),
         );
-      return Number(result.lastInsertRowid);
+      const gameId = Number(result.lastInsertRowid);
+      // OR IGNORE — на случай повторной записи того же счётчика: партия
+      // заводится один раз, но глотать вместо падения здесь дешевле, чем
+      // ронять запись партии из-за состава.
+      const insertPerson = this.db.prepare(
+        `INSERT OR IGNORE INTO game_people (game_id, person_id, counter_id)
+         VALUES (?, ?, ?)`,
+      );
+      for (const participant of input.participants) {
+        if (participant.personId === null) continue;
+        insertPerson.run(gameId, participant.personId, participant.counterId);
+      }
+      return gameId;
     } catch (err) {
       console.error('История: не удалось начать запись партии —', err);
       return null;
@@ -730,6 +812,155 @@ export class GameHistory implements HistoryRecorder, ProfileAggregateSource {
       // Тот же принцип, что у остальных методов: побочная функция не роняет
       // сервер (design.md, 2026-08-20, «Отказы не ломают партию»).
       console.error('История: не удалось собрать сводку для профиля —', err);
+      return empty;
+    }
+  }
+
+  createPerson(name: string, createdAt: string): number | null {
+    try {
+      const result = this.db
+        .prepare(`INSERT INTO people (name, created_at) VALUES (?, ?)`)
+        .run(name, createdAt);
+      return Number(result.lastInsertRowid);
+    } catch (err) {
+      console.error('История: не удалось завести игрока —', err);
+      return null;
+    }
+  }
+
+  listPeople(): PersonSummary[] {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT p.id, p.name, COUNT(DISTINCT gp.game_id) AS games
+           FROM people p
+           LEFT JOIN game_people gp ON gp.person_id = p.id
+           GROUP BY p.id
+           ORDER BY games DESC, p.name`,
+        )
+        .all() as Record<string, unknown>[];
+      return rows.map((row) => ({
+        id: Number(row.id),
+        name: row.name as string,
+        games: Number(row.games),
+      }));
+    } catch (err) {
+      console.error('История: не удалось прочитать список игроков —', err);
+      return [];
+    }
+  }
+
+  /**
+   * Сливает двух людей в одного: перепривязывает состав партий и удаляет
+   * лишнюю запись. Возвращает false, если слить нечего или что-то пошло не
+   * так.
+   *
+   * Порядок обязателен: сначала перепривязка, потом удаление. Внешние ключи
+   * в SQLite включены (слайс A), и удаление человека, на которого ещё
+   * ссылается game_people, провалилось бы.
+   */
+  mergePeople(fromId: number, intoId: number): boolean {
+    if (fromId === intoId) return false;
+    try {
+      this.db.exec('BEGIN');
+      try {
+        // OR REPLACE, а не просто UPDATE: если оба «человека» сидели за одним
+        // столом (следствие ошибки при выборе себя в лобби), у одной партии
+        // окажутся два счётчика одного человека — ключ (game_id, counter_id)
+        // это допускает, а вот совпадения ключа быть не должно.
+        this.db
+          .prepare(
+            `UPDATE OR REPLACE game_people SET person_id = ? WHERE person_id = ?`,
+          )
+          .run(intoId, fromId);
+        this.db.prepare(`DELETE FROM people WHERE id = ?`).run(fromId);
+        this.db.exec('COMMIT');
+        return true;
+      } catch (err) {
+        this.db.exec('ROLLBACK');
+        throw err;
+      }
+    } catch (err) {
+      console.error('История: не удалось слить игроков —', err);
+      return false;
+    }
+  }
+
+  /**
+   * Статистика по людям для раздела «Показывает в игре»
+   * (design.md, 2026-08-26-player-identity).
+   *
+   * Только числа, никаких выводов и порогов: толкует их генератор.
+   *
+   * COUNT(DISTINCT q.id) везде не для красоты: после слияния профилей у
+   * человека может быть два счётчика одной партии, соединение выдаст каждый
+   * вопрос дважды, и обычный COUNT удвоил бы всё.
+   */
+  playerStats(): PlayerStats {
+    const empty: PlayerStats = { games: 0, people: [] };
+    try {
+      const games = this.db
+        .prepare(`SELECT COUNT(DISTINCT game_id) AS games FROM game_people`)
+        .get() as Record<string, unknown>;
+
+      const totals = this.db
+        .prepare(
+          `SELECT p.id, p.name,
+                  COUNT(DISTINCT gp.game_id) AS games,
+                  COUNT(DISTINCT q.id) AS played,
+                  COUNT(DISTINCT CASE WHEN q.answered_by_counter_id = gp.counter_id
+                                      THEN q.id END) AS buzzes,
+                  COUNT(DISTINCT CASE WHEN q.answered_by_counter_id = gp.counter_id
+                                       AND q.correct = 1 THEN q.id END) AS correct
+           FROM game_people gp
+           JOIN people p ON p.id = gp.person_id
+           LEFT JOIN played_questions q
+             ON q.game_id = gp.game_id AND q.round_index >= 0
+           GROUP BY p.id
+           ORDER BY p.name`,
+        )
+        .all() as Record<string, unknown>[];
+
+      const themes = this.db
+        .prepare(
+          `SELECT gp.person_id, q.theme_name,
+                  COUNT(DISTINCT q.id) AS played,
+                  COUNT(DISTINCT CASE WHEN q.answered_by_counter_id = gp.counter_id
+                                      THEN q.id END) AS buzzes,
+                  COUNT(DISTINCT CASE WHEN q.answered_by_counter_id = gp.counter_id
+                                       AND q.correct = 1 THEN q.id END) AS correct
+           FROM game_people gp
+           JOIN played_questions q
+             ON q.game_id = gp.game_id AND q.round_index >= 0
+           GROUP BY gp.person_id, q.theme_name
+           ORDER BY buzzes DESC, q.theme_name`,
+        )
+        .all() as Record<string, unknown>[];
+
+      return {
+        games: Number(games.games),
+        people: totals.map((row) => {
+          const id = Number(row.id);
+          return {
+            id,
+            name: row.name as string,
+            games: Number(row.games),
+            played: Number(row.played),
+            buzzes: Number(row.buzzes),
+            correct: Number(row.correct),
+            themes: themes
+              .filter((theme) => Number(theme.person_id) === id)
+              .map((theme) => ({
+                themeName: theme.theme_name as string,
+                played: Number(theme.played),
+                buzzes: Number(theme.buzzes),
+                correct: Number(theme.correct),
+              })),
+          };
+        }),
+      };
+    } catch (err) {
+      console.error('История: не удалось собрать статистику игроков —', err);
       return empty;
     }
   }
