@@ -841,6 +841,23 @@ code {
   margin-top: 12px;
 }
 
+.admin-section h3 {
+  font-size: 16px;
+  margin: 20px 0 12px;
+}
+
+.admin-merge-people {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 300px;
+}
+
+.admin-merge-people label {
+  font-size: 14px;
+  color: var(--text);
+}
+
 .admin-players {
   list-style: none;
   margin: 12px 0 0;

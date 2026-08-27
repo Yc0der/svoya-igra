@@ -25,7 +25,7 @@ import {
   type ComplaintEntry,
 } from './generatorProfile.js';
 import { TAG_REASONS } from './protocol.js';
-import type { ProfileAggregateSource } from './history.js';
+import type { ProfileAggregateSource, PeopleAdmin } from './history.js';
 import { parsePlayerCard } from './playerCard.js';
 import { readPlayerList, savePlayerCard } from './playersFile.js';
 
@@ -39,8 +39,9 @@ export interface CreateServerOptions {
   // путь не нужен вовсе — сервер без него просто не может принимать жалобы
   // (тихий no-op, см. handleReportQuestion).
   profilePath?: string;
-  // Только чтение сводки — записывать в историю может лишь Room.
-  history?: ProfileAggregateSource;
+  // Только чтение сводки и слияние профилей людей — записывать сыгранные
+  // партии в историю может лишь Room (задача 4, sdd/2026-08-26-player-identity).
+  history?: ProfileAggregateSource & PeopleAdmin;
   // docs/players.md — анкеты интересов (design.md, 2026-08-26).
   playersPath?: string;
 }
@@ -722,6 +723,33 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.replace === 'boolean'
       ) {
         await handleSavePlayer(message.code, message.replace);
+      }
+
+      if (
+        message.type === 'admin-merge-people' &&
+        typeof message.fromId === 'number' &&
+        typeof message.intoId === 'number'
+      ) {
+        if (!history) return;
+        // Пока партия идёт, человек связан с участником и счётчиком за
+        // столом; перепривязка под ногами у идущей игры — класс ошибок,
+        // которого проще не заводить (design.md, «Слияние профилей»).
+        if (room.hasActiveGame()) {
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'нельзя сливать игроков, пока идёт партия',
+          });
+          return;
+        }
+        const merged = history.mergePeople(message.fromId, message.intoId);
+        if (!merged) {
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'не удалось слить — выбраны один и тот же игрок?',
+          });
+          return;
+        }
+        send(ws, { type: 'admin-people', people: history.listPeople() });
       }
 
       // Сырые сообщения Node (ENOENT: ... open 'C:\...\packs\ghost.json') не

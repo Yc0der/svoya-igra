@@ -71,6 +71,12 @@ type ServerMessage =
       textRevealFadeMs: number;
       historyEnabled: boolean;
       historyRecording: boolean;
+      // Список постоянных людей — та же форма, что и state.people у
+      // useRoomConnection (задача 2). Задаче 4 нужен здесь только он: два
+      // <select> слияния строятся по этому списку, отдельного запроса не
+      // заводим (server/src/server.ts, stateMessageFor уже кладёт его в
+      // каждую рассылку).
+      people: { id: number; name: string; games: number }[];
     }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   | { type: 'select-pack-error'; reason: 'unknown-file' }
@@ -85,7 +91,12 @@ type ServerMessage =
     }
   | { type: 'admin-players'; players: { name: string; date: string }[] }
   | { type: 'admin-player-exists'; name: string }
-  | { type: 'admin-player-error'; reason: string };
+  | { type: 'admin-player-error'; reason: string }
+  | {
+      type: 'admin-people';
+      people: { id: number; name: string; games: number }[];
+    }
+  | { type: 'admin-people-error'; reason: string };
 
 type ClientMessage =
   | { type: 'admin-start-game' }
@@ -124,7 +135,8 @@ type ClientMessage =
       complaint: string;
     }
   | { type: 'admin-get-players' }
-  | { type: 'admin-save-player'; code: string; replace: boolean };
+  | { type: 'admin-save-player'; code: string; replace: boolean }
+  | { type: 'admin-merge-people'; fromId: number; intoId: number };
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -209,6 +221,13 @@ export interface AdminConnection {
   playerConflictName: string | null;
   clearPlayerFeedback(): void;
   savePlayer(code: string, replace: boolean): void;
+  // Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity)
+  // — тот же список людей, что и в лобби (задача 2/3), для двух <select> в
+  // подразделе «Один и тот же человек». Обновляется и обычным 'state', и
+  // прицельным admin-people после успешного слияния.
+  people: { id: number; name: string; games: number }[];
+  peopleError: string | null;
+  mergePeople(fromId: number, intoId: number): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -259,6 +278,10 @@ export function useAdminConnection(
   const [playerConflictName, setPlayerConflictName] = useState<string | null>(
     null,
   );
+  const [people, setPeople] = useState<
+    { id: number; name: string; games: number }[]
+  >([]);
+  const [peopleError, setPeopleError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -295,6 +318,7 @@ export function useAdminConnection(
           setTextRevealFadeMsState(message.textRevealFadeMs);
           setHistoryEnabledState(message.historyEnabled);
           setHistoryRecordingState(message.historyRecording);
+          setPeople(message.people);
           setSelectPackError(null);
           setStartGameError(null);
         }
@@ -335,6 +359,13 @@ export function useAdminConnection(
         if (message.type === 'admin-player-error') {
           setPlayerError(message.reason);
           setPlayerConflictName(null);
+        }
+        if (message.type === 'admin-people') {
+          setPeople(message.people);
+          setPeopleError(null);
+        }
+        if (message.type === 'admin-people-error') {
+          setPeopleError(message.reason);
         }
       });
 
@@ -429,5 +460,9 @@ export function useAdminConnection(
     },
     savePlayer: (code, replace) =>
       send({ type: 'admin-save-player', code, replace }),
+    people,
+    peopleError,
+    mergePeople: (fromId, intoId) =>
+      send({ type: 'admin-merge-people', fromId, intoId }),
   };
 }

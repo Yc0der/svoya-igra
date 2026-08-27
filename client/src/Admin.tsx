@@ -65,6 +65,9 @@ export function Admin() {
     playerConflictName,
     clearPlayerFeedback,
     savePlayer,
+    people,
+    peopleError,
+    mergePeople,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -77,6 +80,15 @@ export function Admin() {
   // ведущий вставляет анкеты подряд и сам видит, что список пополнился
   // (задача 3, sdd/2026-08-26-player-questionnaire).
   const [playerCode, setPlayerCode] = useState('');
+  // Слияние профилей (задача 4, sdd/2026-08-26-player-identity) — id как
+  // строка, потому что это значение <select>; '' — ничего не выбрано.
+  const [mergeFromId, setMergeFromId] = useState('');
+  const [mergeIntoId, setMergeIntoId] = useState('');
+  // Операция необратима — тот же принцип, что confirmingWipe/confirmingDelete
+  // выше, но с отдельным диалогом (а не перелейблом кнопки): в тексте
+  // подтверждения обязано быть видно, какое имя останется, а какое исчезнет
+  // (design.md, «Слияние профилей»), а не только «точно?».
+  const [confirmingMerge, setConfirmingMerge] = useState(false);
   // ВРЕМЕННО — подбор скорости показа текста вопроса вживую, см.
   // server/src/protocol.ts, StateMessage.textRevealWordsPerSecond. Убрать
   // вместе с полем, как только число зафиксируется в спеке.
@@ -296,6 +308,17 @@ export function Admin() {
     setConfirmingWipe(false);
   }
 
+  const mergeFromPerson = people.find((p) => String(p.id) === mergeFromId);
+  const mergeIntoPerson = people.find((p) => String(p.id) === mergeIntoId);
+
+  function handleConfirmMerge(): void {
+    if (!mergeFromPerson || !mergeIntoPerson) return;
+    mergePeople(mergeFromPerson.id, mergeIntoPerson.id);
+    setConfirmingMerge(false);
+    setMergeFromId('');
+    setMergeIntoId('');
+  }
+
   return (
     <div className="admin">
       <h1>Админ-панель</h1>
@@ -509,6 +532,90 @@ export function Admin() {
               </li>
             ))}
           </ul>
+        )}
+
+        <h3>Один и тот же человек</h3>
+        <p className="admin-hint">
+          Один человек мог зайти дважды под чуть разными именами — слить его
+          записи в одну. Необратимо: направление указываешь ты, лишняя запись
+          исчезает совсем.
+        </p>
+        <div className="admin-merge-people">
+          <label htmlFor="merge-from-id">Кого слить</label>
+          <select
+            id="merge-from-id"
+            value={mergeFromId}
+            onChange={(e) => {
+              setMergeFromId(e.target.value);
+              setConfirmingMerge(false);
+            }}
+          >
+            <option value="">— выбери —</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.games})
+              </option>
+            ))}
+          </select>
+          <label htmlFor="merge-into-id">В кого</label>
+          <select
+            id="merge-into-id"
+            value={mergeIntoId}
+            onChange={(e) => {
+              setMergeIntoId(e.target.value);
+              setConfirmingMerge(false);
+            }}
+          >
+            <option value="">— выбери —</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.games})
+              </option>
+            ))}
+          </select>
+          <div className="admin-actions">
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={
+                mergeFromId === '' ||
+                mergeIntoId === '' ||
+                mergeFromId === mergeIntoId
+              }
+              onClick={() => setConfirmingMerge(true)}
+            >
+              Слить
+            </button>
+          </div>
+        </div>
+        {confirmingMerge && mergeFromPerson && mergeIntoPerson && (
+          <div className="admin-player-conflict">
+            <p>
+              Останется «{mergeIntoPerson.name}» — «{mergeFromPerson.name}»
+              исчезнет безвозвратно.
+            </p>
+            <div className="admin-actions">
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={handleConfirmMerge}
+              >
+                Подтвердить
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={() => setConfirmingMerge(false)}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
+        )}
+        {peopleError && (
+          <p className="admin-error" role="alert">
+            {peopleError}
+          </p>
         )}
       </section>
 

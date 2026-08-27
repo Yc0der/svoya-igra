@@ -3418,6 +3418,121 @@ describe('createServer player questionnaire', () => {
   });
 });
 
+// Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity,
+// design.md «Слияние профилей»). Собственный history — GameHistory(':memory:'),
+// а не заглушка: mergePeople/listPeople реально трогают SQLite, и тест обязан
+// проверять настоящую перепривязку, а не то, что заглушка была вызвана.
+describe('createServer admin merge people', () => {
+  let server: GameServer;
+  let dir: string;
+  let baseUrl: string;
+  let history: GameHistory;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-merge-people-'));
+    history = new GameHistory(':memory:');
+    const room = new Room(undefined, TEST_PACK);
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+      history,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('сливает двух людей и отдаёт обновлённый список', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const admin = await connectAdmin(baseUrl);
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people',
+      people: [{ id: katyaId, name: 'Катя', games: 0 }],
+    });
+    expect(history.listPeople()).toEqual([
+      { id: katyaId, name: 'Катя', games: 0 },
+    ]);
+    admin.ws.close();
+  });
+
+  it('во время идущей партии отдаёт ошибку и ничего не меняет', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Игрок 1');
+    await admin.nextMessage(); // рассылка после join a
+    const b = await joinPlayer(baseUrl, 'Игрок 2');
+    await admin.nextMessage(); // рассылка после join b
+    await a.nextMessage(); // та же рассылка, но у a
+
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people-error',
+      reason: 'нельзя сливать игроков, пока идёт партия',
+    });
+    // Ничего не поменялось — оба всё ещё существуют раздельно.
+    expect(
+      history
+        .listPeople()
+        .map((p) => p.id)
+        .sort(),
+    ).toEqual([vanyaId, katyaId].sort());
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
+  });
+
+  it('слияние человека с самим собой отдаёт ошибку', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const admin = await connectAdmin(baseUrl);
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: vanyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people-error',
+      reason: 'не удалось слить — выбраны один и тот же игрок?',
+    });
+    expect(history.listPeople()).toEqual([
+      { id: vanyaId, name: 'Ваня', games: 0 },
+    ]);
+    admin.ws.close();
+  });
+});
+
 describe('createServer media static route', () => {
   let server: GameServer;
   let dir: string;

@@ -92,6 +92,9 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     playerConflictName: null,
     clearPlayerFeedback: vi.fn(),
     savePlayer: vi.fn(),
+    people: [],
+    peopleError: null,
+    mergePeople: vi.fn(),
     ...overrides,
   };
 }
@@ -1391,5 +1394,79 @@ describe('Admin — анкеты игроков', () => {
     const textarea = screen.getByPlaceholderText(/вставь код анкеты/i);
     await userEvent.type(textarea, 'a');
     expect(clearPlayerFeedback).toHaveBeenCalled();
+  });
+});
+
+// Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity)
+// — подраздел «Один и тот же человек» внутри «Анкеты игроков».
+describe('Admin — слияние профилей', () => {
+  const PEOPLE = [
+    { id: 1, name: 'Ваня', games: 5 },
+    { id: 2, name: 'Ваня (2)', games: 1 },
+  ];
+
+  it('кнопка «Слить» выключена, пока не выбраны двое разных', async () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ people: PEOPLE }));
+    render(<Admin />);
+    const button = screen.getByRole('button', { name: /слить/i });
+    expect(button).toBeDisabled();
+
+    await userEvent.selectOptions(screen.getByLabelText(/кого слить/i), '1');
+    expect(button).toBeDisabled(); // выбран только один
+
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '1');
+    expect(button).toBeDisabled(); // один и тот же человек с обеих сторон
+
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
+    expect(button).toBeEnabled();
+  });
+
+  it('подтверждение показывает, какое имя останется, а какое исчезнет, и вызывает mergePeople только после подтверждения', async () => {
+    const mergePeople = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ people: PEOPLE, mergePeople }),
+    );
+    render(<Admin />);
+    await userEvent.selectOptions(screen.getByLabelText(/кого слить/i), '1');
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
+    await userEvent.click(screen.getByRole('button', { name: /слить/i }));
+
+    expect(mergePeople).not.toHaveBeenCalled();
+    // Останется «Ваня (2)», исчезнет «Ваня» — оба имени должны быть видны,
+    // иначе ведущий узнает направление только по результату (задача 4).
+    const confirmText = screen.getByText(/останется/i);
+    expect(confirmText.textContent).toContain('Ваня (2)');
+    expect(confirmText.textContent).toMatch(/исчезнет/i);
+
+    await userEvent.click(screen.getByRole('button', { name: /подтвердить/i }));
+    expect(mergePeople).toHaveBeenCalledWith(1, 2);
+  });
+
+  it('«Отмена» на подтверждении не вызывает mergePeople', async () => {
+    const mergePeople = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ people: PEOPLE, mergePeople }),
+    );
+    render(<Admin />);
+    await userEvent.selectOptions(screen.getByLabelText(/кого слить/i), '1');
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
+    await userEvent.click(screen.getByRole('button', { name: /слить/i }));
+    await userEvent.click(screen.getByRole('button', { name: /отмена/i }));
+
+    expect(mergePeople).not.toHaveBeenCalled();
+    expect(screen.queryByText(/останется/i)).not.toBeInTheDocument();
+  });
+
+  it('показывает peopleError, включая отказ во время идущей партии', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        people: PEOPLE,
+        peopleError: 'нельзя сливать игроков, пока идёт партия',
+      }),
+    );
+    render(<Admin />);
+    expect(
+      screen.getByText('нельзя сливать игроков, пока идёт партия'),
+    ).toBeInTheDocument();
   });
 });

@@ -261,7 +261,12 @@ export type ClientMessage =
       // подтвердил замену. Подтверждение спрашивается один раз и на стороне
       // клиента, чтобы сервер оставался без состояния между сообщениями.
       replace: boolean;
-    };
+    }
+  // Слияние расщепившихся профилей одного человека (design.md,
+  // 2026-08-26-player-identity, «Слияние профилей») — направление указывает
+  // ведущий: fromId исчезает, intoId остаётся. Сервер сам проверяет, что
+  // партия сейчас не идёт (Room.hasActiveGame) — клиент этого не решает.
+  | { type: 'admin-merge-people'; fromId: number; intoId: number };
 
 export type StartGameErrorReason =
   | 'not-enough-players'
@@ -385,4 +390,15 @@ export type ServerMessage =
   // список всегда актуальный, клиенту не нужно догадываться, что изменилось.
   | { type: 'admin-players'; players: { name: string; date: string }[] }
   | { type: 'admin-player-exists'; name: string }
-  | { type: 'admin-player-error'; reason: string };
+  | { type: 'admin-player-error'; reason: string }
+  // Ответ на admin-merge-people: обновлённый список, той же формы, что и
+  // state.people (форма зеркалит PersonSummary из history.ts). Тот же приём,
+  // что admin-players — список всегда актуальный, клиенту не нужно
+  // догадываться, что изменилось.
+  | {
+      type: 'admin-people';
+      people: { id: number; name: string; games: number }[];
+    }
+  // Отказ admin-merge-people: партия ещё идёт, либо fromId/intoId совпали или
+  // fromId не существует (history.mergePeople вернул false).
+  | { type: 'admin-people-error'; reason: string };
