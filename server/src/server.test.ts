@@ -3431,7 +3431,20 @@ describe('createServer admin merge people', () => {
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'svoya-igra-merge-people-'));
     history = new GameHistory(':memory:');
-    const room = new Room(undefined, TEST_PACK);
+    // Тот же history — и в Room (откуда room.getPeople() берёт список для
+    // обычной рассылки state), и в createServer (откуда его берёт прямой
+    // обработчик admin-merge-people). В реальной сборке (index.ts) это один
+    // и тот же объект; развести их здесь — значит проверять не ту схему
+    // подключения, что работает на самом деле (тот же паттерн, что и в
+    // остальных тестах файла с настоящим GameHistory, например
+    // «tag-reason доносит причину до комнаты…» выше).
+    const room = new Room(
+      undefined,
+      TEST_PACK,
+      undefined,
+      'test.json',
+      history,
+    );
     server = createServer({
       room,
       clientDistPath: dir,
@@ -3497,13 +3510,12 @@ describe('createServer admin merge people', () => {
       type: 'admin-people-error',
       reason: 'нельзя сливать игроков, пока идёт партия',
     });
-    // Ничего не поменялось — оба всё ещё существуют раздельно.
-    expect(
-      history
-        .listPeople()
-        .map((p) => p.id)
-        .sort(),
-    ).toEqual([vanyaId, katyaId].sort());
+    // Ничего не поменялось — оба всё ещё существуют раздельно. Не сверяю
+    // список списком целиком: join() двух игроков в этом тесте сам заводит
+    // им записи людей (Room делит history с сервером — см. beforeEach), так
+    // что в базе есть и другие записи, к делу не относящиеся.
+    const peopleIds = history.listPeople().map((p) => p.id);
+    expect(peopleIds).toEqual(expect.arrayContaining([vanyaId, katyaId]));
 
     admin.ws.close();
     a.ws.close();
@@ -3530,6 +3542,94 @@ describe('createServer admin merge people', () => {
       { id: vanyaId, name: 'Ваня', games: 0 },
     ]);
     admin.ws.close();
+  });
+
+  // Ревью задачи 4, Important 1: сообщение об отказе не должно утверждать
+  // неправду. Гонка — кого-то из двоих уже слили с другого устройства между
+  // тем, как ведущий открыл диалог подтверждения (там ещё стояли два разных
+  // имени), и тем, как подтвердил его. mergePeople(fromId, intoId) в этом
+  // случае тоже вернёт false, но «выбран один и тот же игрок» была бы
+  // неправдой — ведущий видел два разных имени, а не одно.
+  it('если fromId уже слили с кем-то третьим до подтверждения, причина — что его больше нет, а не «один и тот же»', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const petyaId = history.createPerson('Петя', '2026-08-03')!;
+    // С другого устройства уже слили Ваню в Петю — Вани больше нет.
+    expect(history.mergePeople(vanyaId, petyaId)).toBe(true);
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people-error',
+      reason: 'такого игрока уже нет — обнови список',
+    });
+    admin.ws.close();
+  });
+
+  it('то же самое, если исчез intoId, а не fromId', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const petyaId = history.createPerson('Петя', '2026-08-03')!;
+    // С другого устройства уже слили Катю в Петю — Кати больше нет.
+    expect(history.mergePeople(katyaId, petyaId)).toBe(true);
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people-error',
+      reason: 'такого игрока уже нет — обнови список',
+    });
+    admin.ws.close();
+  });
+
+  // Ревью задачи 4, Important 2: список приходит и в прямом ответе
+  // инициатору, и в обычном состоянии комнаты (stateMessageFor кладёт
+  // room.getPeople() → history.listPeople()) — значит после успешного
+  // слияния свежий список обязан уйти ВСЕМ открытым сокетам, не только
+  // тому, кто его запросил. Второй сокет здесь стоит и за «вторую открытую
+  // админку», и за «лобби на телефоне игрока» — до join() это один и тот же
+  // путь: обычный сокет получает 'state' наравне с админкой.
+  it('после успешного слияния свежий список уходит и остальным открытым сокетам, не только инициатору', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const admin = await connectAdmin(baseUrl);
+    const bystander = await connectAdmin(baseUrl);
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const direct = await admin.nextMessage();
+    expect(direct).toEqual({
+      type: 'admin-people',
+      people: [{ id: katyaId, name: 'Катя', games: 0 }],
+    });
+
+    const broadcast = await bystander.nextMessage();
+    expect(broadcast).toMatchObject({
+      type: 'state',
+      people: [{ id: katyaId, name: 'Катя', games: 0 }],
+    });
+
+    admin.ws.close();
+    bystander.ws.close();
   });
 });
 

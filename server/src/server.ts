@@ -741,14 +741,47 @@ export function createServer(options: CreateServerOptions): GameServer {
           });
           return;
         }
-        const merged = history.mergePeople(message.fromId, message.intoId);
-        if (!merged) {
+        if (message.fromId === message.intoId) {
           send(ws, {
             type: 'admin-people-error',
             reason: 'не удалось слить — выбраны один и тот же игрок?',
           });
           return;
         }
+        // Проверяем существование ДО вызова mergePeople и отдельно от
+        // совпадения id выше — причина отказа обязана быть честной (ревью
+        // задачи 4, Important 1). Если кого-то из двоих уже слили с другого
+        // устройства между тем, как ведущий открыл диалог, и тем, как
+        // подтвердил его, mergePeople(fromId, intoId) тоже вернёт false —
+        // но «выбран один и тот же игрок» тут была бы неправдой: ведущий
+        // только что видел в диалоге два разных имени.
+        const existingIds = new Set(history.listPeople().map((p) => p.id));
+        if (
+          !existingIds.has(message.fromId) ||
+          !existingIds.has(message.intoId)
+        ) {
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'такого игрока уже нет — обнови список',
+          });
+          return;
+        }
+        const merged = history.mergePeople(message.fromId, message.intoId);
+        if (!merged) {
+          // Существование и несовпадение id уже проверены выше — сюда
+          // попадает только настоящий сбой mergePeople (ошибка БД).
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'не удалось слить — попробуй ещё раз',
+          });
+          return;
+        }
+        // Список уже едет в обычном состоянии комнаты (stateMessageFor
+        // кладёт room.getPeople() → history.listPeople()) —
+        // broadcastState() разносит свежий список всем: другим открытым
+        // админкам и, важнее, лобби на телефонах игроков, где список виден
+        // для входа «я — вот этот из списка» (ревью задачи 4, Important 2).
+        broadcastState();
         send(ws, { type: 'admin-people', people: history.listPeople() });
       }
 
