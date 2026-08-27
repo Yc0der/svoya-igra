@@ -850,6 +850,31 @@ async function joinPlayer(baseUrl: string, name: string) {
   };
 }
 
+// Тот же протокол, что и joinPlayer, но 'join-as' вместо 'join' — заходит
+// уже опознанным человеком (задача 5, sdd/2026-08-26-player-identity): нужно
+// там, где тест проверяет playerStats(), а она строится из game_people, куда
+// участник без personId никогда не попадает (history.ts, startGame).
+async function joinPlayerAs(baseUrl: string, personId: number) {
+  const ws = new WebSocket(baseUrl);
+  const nextMessage = collectMessages(ws);
+  await waitForOpen(ws);
+  await nextMessage(); // state
+  ws.send(JSON.stringify({ type: 'join-as', personId }));
+  const joined = (await nextMessage()) as {
+    participantId: string;
+    token: string;
+    name: string;
+  };
+  await nextMessage(); // сборос состояния лобби после join, которое видит сам подключившийся
+  return {
+    ws,
+    nextMessage,
+    participantId: joined.participantId,
+    token: joined.token,
+    name: joined.name,
+  };
+}
+
 type Player = Awaited<ReturnType<typeof joinPlayer>>;
 
 // Каждая рассылка состояния уходит на ОБА сокета сразу, поэтому любое
@@ -3415,6 +3440,133 @@ describe('createServer player questionnaire', () => {
     expect(content).toContain('## Ваня');
     expect(content).toContain('## Катя');
     admin.ws.close();
+  });
+});
+
+// Раздел «Показывает в игре» (задача 5, sdd/2026-08-26-player-identity).
+// Собственный history — GameHistory(':memory:'), как и в 'game-end
+// пересчитывает «Автособранное»' выше: playerStats() читает настоящий SQLite,
+// а не заглушку, и оба участника заходят через join-as с personId из
+// history.createPerson — только так они попадают в game_people, откуда
+// playerStats() вообще берёт людей (участник, зашедший обычным join, там не
+// появится, см. history.ts, startGame).
+describe('createServer game-end player stats', () => {
+  it('game-end пересчитывает «Показывает в игре» реальными числами партии', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-player-stats-'));
+      const playersPath = join(dir, 'players.md');
+      await writeFile(
+        playersPath,
+        '# Анкеты игроков\n\nВводный текст.\n',
+        'utf8',
+      );
+      const history = new GameHistory(':memory:');
+      const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+      const katyaId = history.createPerson('Катя', '2026-08-02')!;
+      const room = new Room(
+        undefined,
+        TEST_PACK,
+        undefined,
+        'test.json',
+        history,
+      );
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        port: 8080,
+        packsDir: dir,
+        playersPath,
+        history,
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } = server.httpServer.address() as AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const a = await joinPlayerAs(url, vanyaId);
+      const b = await joinPlayerAs(url, katyaId);
+      await a.nextMessage(); // трансляция лобби после join второго
+
+      a.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(a, b, a)) as {
+        game: { phase: string; turnParticipantId: string };
+      };
+      expect(aState.game.phase).toBe('selecting');
+
+      const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+      const other = picker === a ? b : a;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(a, b, picker); // question-reveal
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      await settle(a, b, picker); // question-open
+
+      picker.ws.send(JSON.stringify({ type: 'buzz' }));
+      await settle(a, b, picker); // buzzed
+      picker.ws.send(JSON.stringify({ type: 'said-answer' }));
+      await settle(a, b, picker); // judging
+
+      other.ws.send(JSON.stringify({ type: 'vote', correct: true }));
+      await settle(a, b, picker); // голос учтён, вердикт ещё не подведён
+
+      let remaining = VOTE_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterVote = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterVote.game.phase).toBe('reveal');
+
+      // TEST_PACK — единственный раунд с единственным вопросом, без финала:
+      // reveal доигрывает прямо в game-end, минуя round-end/selecting.
+      remaining = REVEAL_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterReveal = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterReveal.game.phase).toBe('game-end');
+
+      const content = await waitForFileContent(
+        playersPath,
+        '## Показывает в игре',
+      );
+      expect(content).toContain('Вводный текст.'); // анкеты выше не тронуты
+      expect(content).toContain(`### ${picker.name}`);
+      expect(content).toContain(
+        'Всего: нажимал 1 из 1 сыгранных при нём вопросов, верно 1.',
+      );
+      expect(content).toContain(
+        '- **Тема** — нажимал 1 из 1 вопросов темы, верно 1',
+      );
+      // Второй участник тоже сыграл вопрос, но не нажимал и не отвечал —
+      // это разные числа для одного и того же вопроса, и раздел обязан
+      // показывать их по каждому человеку отдельно, а не одной общей строкой.
+      expect(content).toContain(`### ${other.name}`);
+      expect(content).toContain(
+        'Всего: нажимал 0 из 1 сыгранных при нём вопросов, верно 0.',
+      );
+
+      a.ws.close();
+      b.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

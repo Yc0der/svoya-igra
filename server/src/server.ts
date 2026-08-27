@@ -27,7 +27,11 @@ import {
 import { TAG_REASONS } from './protocol.js';
 import type { ProfileAggregateSource, PeopleAdmin } from './history.js';
 import { parsePlayerCard } from './playerCard.js';
-import { readPlayerList, savePlayerCard } from './playersFile.js';
+import {
+  readPlayerList,
+  savePlayerCard,
+  savePlayerStats,
+} from './playersFile.js';
 
 export interface CreateServerOptions {
   room: Room;
@@ -197,6 +201,7 @@ export function createServer(options: CreateServerOptions): GameServer {
     const phase = state.game?.phase ?? null;
     if (phase === 'game-end' && previousPhase !== 'game-end') {
       void refreshAutoSection();
+      void refreshPlayerStats();
     }
     previousPhase = phase;
   });
@@ -247,7 +252,12 @@ export function createServer(options: CreateServerOptions): GameServer {
   const withPackWriteLock = createWriteLock();
   const withProfileWriteLock = createWriteLock();
   // Анкеты игроков живут в своём файле (docs/players.md) — сериализовать
-  // его запись с профилем генератора незачем, файлы разные.
+  // его запись с профилем генератора незачем, файлы разные. Этот же замок
+  // держит и savePlayerCard (admin-save-player), и savePlayerStats
+  // (refreshPlayerStats ниже) — оба пишут в один и тот же players.md, и без
+  // общего замка партия, дошедшая до game-end одновременно с сохранением
+  // анкеты, теряла бы одну из двух правок тем же способом, каким это уже
+  // объяснено у withPackWriteLock.
   const withPlayersWriteLock = createWriteLock();
 
   // Пересчёт раздела «Автособранное» (design.md, 2026-08-25). Ошибки
@@ -262,6 +272,25 @@ export function createServer(options: CreateServerOptions): GameServer {
       );
     } catch (err) {
       console.error('Не удалось пересчитать «Автособранное» в профиле:', err);
+    }
+  }
+
+  // Пересчёт раздела «Показывает в игре» (design.md, 2026-08-26-player-identity,
+  // задача 5). Та же точка вызова, что и у refreshAutoSection — game-end, и
+  // только она: playerStats() строится из game_people и played_questions,
+  // до которых оценкам (question_tags) дела нет, поэтому, в отличие от
+  // «Автособранного», пересчитывать на разбор причины смысла нет — эти числа
+  // на нём не меняются.
+  async function refreshPlayerStats(): Promise<void> {
+    if (!playersPath || !history) return;
+    try {
+      const stats = history.playerStats();
+      await withPlayersWriteLock(() => savePlayerStats(playersPath, stats));
+    } catch (err) {
+      console.error(
+        'Не удалось пересчитать «Показывает в игре» в анкетах:',
+        err,
+      );
     }
   }
 

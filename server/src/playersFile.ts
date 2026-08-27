@@ -4,6 +4,8 @@ import {
   upsertPlayerSection,
   type PlayerCard,
 } from './playerCard.js';
+import type { PlayerStats } from './history.js';
+import { renderPlayerStats, spliceStatsSection } from './playerStats.js';
 
 /**
  * Кладёт анкету в docs/players.md — новую дописывает, существующую заменяет.
@@ -22,6 +24,25 @@ export async function savePlayerCard(
   const updated = upsertPlayerSection(current, card, date);
   // Ведущий может вставить один и тот же код дважды — тогда менять нечего и
   // трогать файл незачем.
+  if (updated === current) return;
+  const tmpPath = `${playersPath}.tmp`;
+  await writeFile(tmpPath, updated, 'utf8');
+  await rename(tmpPath, playersPath);
+}
+
+/**
+ * Кладёт раздел «Показывает в игре» в docs/players.md — заменяет старый или
+ * дописывает в конец. Тот же приём, что у savePlayerCard: атомарная запись
+ * через temp + rename, и на диск ничего не пишется, если пересчёт дал тот же
+ * текст — сервер вызывает эту функцию на каждый переход партии в game-end, и
+ * без проверки файл переписывался бы даже когда в нём нечего менять.
+ */
+export async function savePlayerStats(
+  playersPath: string,
+  stats: PlayerStats,
+): Promise<void> {
+  const current = await readFile(playersPath, 'utf8');
+  const updated = spliceStatsSection(current, renderPlayerStats(stats));
   if (updated === current) return;
   const tmpPath = `${playersPath}.tmp`;
   await writeFile(tmpPath, updated, 'utf8');

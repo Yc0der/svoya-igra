@@ -2,13 +2,33 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readPlayerList, savePlayerCard } from './playersFile.js';
+import {
+  readPlayerList,
+  savePlayerCard,
+  savePlayerStats,
+} from './playersFile.js';
 import type { PlayerCard } from './playerCard.js';
+import type { PlayerStats } from './history.js';
 
 const CARD: PlayerCard = {
   name: 'Ваня',
   interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
   boring: ['Мода'],
+};
+
+const STATS: PlayerStats = {
+  games: 1,
+  people: [
+    {
+      id: 1,
+      name: 'Ваня',
+      games: 1,
+      played: 5,
+      buzzes: 3,
+      correct: 2,
+      themes: [{ themeName: 'Спорт', played: 5, buzzes: 3, correct: 2 }],
+    },
+  ],
 };
 
 describe('playersFile', () => {
@@ -50,5 +70,26 @@ describe('playersFile', () => {
 
   it('на отсутствующем файле отдаёт пустой список, а не падает', async () => {
     expect(await readPlayerList(join(dir, 'нет-такого.md'))).toEqual([]);
+  });
+
+  it('пересчитывает раздел «Показывает в игре», не трогая анкеты', async () => {
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    await savePlayerStats(playersPath, STATS);
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).toContain('## Ваня');
+    expect(content).toContain('- **Спорт:** Формула-1');
+    expect(content).toContain('## Показывает в игре');
+    expect(content).toContain('### Ваня');
+    expect(content).toContain(
+      'Всего: нажимал 3 из 5 сыгранных при нём вопросов, верно 2.',
+    );
+  });
+
+  it('повторный пересчёт с теми же числами не трогает диск', async () => {
+    await savePlayerStats(playersPath, STATS);
+    const first = await stat(playersPath);
+    await savePlayerStats(playersPath, STATS);
+    const second = await stat(playersPath);
+    expect(second.mtimeMs).toBe(first.mtimeMs);
   });
 });
