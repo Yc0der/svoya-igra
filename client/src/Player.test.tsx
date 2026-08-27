@@ -309,6 +309,64 @@ describe('Player', () => {
     );
   });
 
+  it('does not re-show a stale person-taken alert after navigating away and back without a new attempt', async () => {
+    // Дефект ревью: тап по человеку → отказ → «Меня тут нет» (тревога
+    // спрятана переключением ветки рендера) → «Назад к списку» — старая
+    // тревога не должна всплывать заново, ведь новой попытки входа не было.
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'person-taken',
+        people: [{ id: 7, name: 'Ваня', games: 5 }],
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<Player />);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Этим игроком уже вошли с другого телефона',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+    await user.click(screen.getByRole('button', { name: 'Назад к списку' }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('does not re-show a stale name-taken alert after navigating back to the list and to the form again', async () => {
+    // Симметричный дефект: неудачная попытка из формы → «Назад к списку» →
+    // «Меня тут нет» — старая тревога о занятом имени не должна всплывать
+    // заново без новой отправки. Статус хука проходит через 'joining', как
+    // это делает настоящий join() в useRoomConnection.ts — ровно так, как
+    // выглядела бы реальная попытка входа из формы.
+    const people = [{ id: 7, name: 'Ваня', games: 5 }];
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'connecting', people }),
+    );
+
+    const user = userEvent.setup();
+    const { rerender } = render(<Player />);
+
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Имя'), 'Ваня');
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'joining', people }),
+    );
+    rerender(<Player />);
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'name-taken', people }),
+    );
+    rerender(<Player />);
+    expect(screen.getByRole('alert')).toHaveTextContent('уже занято');
+
+    await user.click(screen.getByRole('button', { name: 'Назад к списку' }));
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('shows a start-game button in the lobby once joined, before any game exists', () => {
     mockedUseRoomConnection.mockReturnValue(connection({ game: null }));
     render(<Player />);

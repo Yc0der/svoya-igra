@@ -59,6 +59,18 @@ export function Player() {
   // и так показано сразу, это единственный откат на случай, если лобби со
   // списком не приживётся на живой партии.
   const [showNameForm, setShowNameForm] = useState(false);
+  // Гасит УЖЕ показанную тревогу отказа входа (name-taken/person-taken/
+  // person-unknown) при чисто локальной навигации между списком и формой —
+  // `status` в хуке меняется только сообщением сервера или новым
+  // join()/joinAs(), а переключение веток рендера само по себе до хука не
+  // доходит (дефект ревью задачи 3: два тапа между списком и формой
+  // возвращали устаревшую тревогу без новой попытки входа). Сбрасывается
+  // обратно в false ниже, как только status снова становится 'joining' —
+  // это и есть признак настоящей новой попытки, а не навигации.
+  const [errorDismissed, setErrorDismissed] = useState(false);
+  useEffect(() => {
+    if (status === 'joining') setErrorDismissed(false);
+  }, [status]);
   const [myVote, setMyVote] = useState<boolean | null>(null);
   // Ведущий в финале судит нескольких счётчиков по очереди в любом порядке —
   // одного myVote (как в base-round judging) не хватает, нужна отметка на
@@ -196,12 +208,12 @@ export function Player() {
       return (
         <div className="player player--join">
           <h1>Своя игра</h1>
-          {status === 'person-taken' && (
+          {status === 'person-taken' && !errorDismissed && (
             <p className="player-alert" role="alert">
               Этим игроком уже вошли с другого телефона
             </p>
           )}
-          {status === 'person-unknown' && (
+          {status === 'person-unknown' && !errorDismissed && (
             <p className="player-alert" role="alert">
               Такого игрока больше нет, выбери другого или введи имя
             </p>
@@ -220,7 +232,13 @@ export function Player() {
               </li>
             ))}
           </ul>
-          <button className="button" onClick={() => setShowNameForm(true)}>
+          <button
+            className="button"
+            onClick={() => {
+              setShowNameForm(true);
+              setErrorDismissed(true);
+            }}
+          >
             Меня тут нет
           </button>
         </div>
@@ -243,7 +261,7 @@ export function Player() {
         >
           Войти
         </button>
-        {status === 'name-taken' && (
+        {status === 'name-taken' && !errorDismissed && (
           <p className="player-alert" role="alert">
             Это имя уже занято, выбери другое
           </p>
@@ -257,7 +275,10 @@ export function Player() {
           <button
             type="button"
             className="button"
-            onClick={() => setShowNameForm(false)}
+            onClick={() => {
+              setShowNameForm(false);
+              setErrorDismissed(true);
+            }}
           >
             Назад к списку
           </button>
