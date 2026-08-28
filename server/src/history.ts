@@ -375,17 +375,29 @@ export class GameHistory
     // ключ (game_id, counter_id); любая другая ошибка (например устаревший
     // personId уже слитого и удалённого человека, задача 2) не должна ронять
     // запись партии целиком.
-    try {
-      const insertPerson = this.db.prepare(
-        `INSERT OR IGNORE INTO game_people (game_id, person_id, counter_id)
-         VALUES (?, ?, ?)`,
-      );
-      for (const participant of input.participants) {
-        if (participant.personId === null) continue;
+    //
+    // try/catch — ВНУТРИ цикла, на каждого участника отдельно (финальное
+    // ревью ветки, п. 2, Important). Участники живут в лобби между партиями
+    // дольше, чем действует блокировка слияния (та держит только идущую
+    // партию), и personId может протухнуть между тем, как ведущий слил
+    // профили, и следующим стартом партии. Один try/catch на весь цикл
+    // прерывался бы на первом же сбойном participant.personId и терял ВСЕХ
+    // участников после него — их партия молча выпадала бы из статистики,
+    // хотя personId у них был живым.
+    const insertPerson = this.db.prepare(
+      `INSERT OR IGNORE INTO game_people (game_id, person_id, counter_id)
+       VALUES (?, ?, ?)`,
+    );
+    for (const participant of input.participants) {
+      if (participant.personId === null) continue;
+      try {
         insertPerson.run(gameId, participant.personId, participant.counterId);
+      } catch (err) {
+        console.error(
+          'История: не удалось записать участника в состав партии —',
+          err,
+        );
       }
-    } catch (err) {
-      console.error('История: не удалось записать состав партии —', err);
     }
     return gameId;
   }
@@ -431,8 +443,13 @@ export class GameHistory
 
   discardGame(gameId: number): void {
     try {
-      // Удаляем оценки перед удалением игры — иначе FK-ограничение
-      // (question_tags.game_id REFERENCES games.id) упадёт на DELETE FROM games.
+      // Удаляем всё, что ссылается на games(id), перед удалением самой игры —
+      // иначе FK-ограничение упадёт на DELETE FROM games. game_people —
+      // первой в цепочке (финальное ревью ветки, п. 1, Critical): без неё
+      // DELETE FROM games бросал FOREIGN KEY constraint failed, ошибка
+      // ловилась этим catch и уходила в лог, а строка games и состав партии
+      // оставались — выброшенная партия продолжала считаться сыгранной.
+      this.db.prepare(`DELETE FROM game_people WHERE game_id = ?`).run(gameId);
       this.db
         .prepare(`DELETE FROM question_tags WHERE game_id = ?`)
         .run(gameId);

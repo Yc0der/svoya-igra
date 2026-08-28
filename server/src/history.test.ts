@@ -1000,6 +1000,57 @@ describe('люди и состав партии', () => {
     // Состав при этом не записался — personId 999 не существовал.
     expect(history.listPeople()).toEqual([]);
   });
+
+  // Финальное ревью ветки, п. 1 (Critical): discardGame() не знал про
+  // game_people. Внешние ключи в node:sqlite включены по умолчанию, и
+  // DELETE FROM games при живой ссылке из game_people бросает FOREIGN KEY
+  // constraint failed — ошибка ловится и уходит в лог, а строка games и
+  // состав партии остаются. Итог: выброшенная партия продолжает считаться
+  // сыгранной — фантомная партия в listPeople() у человека, которого
+  // ведущий явно выбросил из истории.
+  it('выброшенная партия с составом людей удаляется полностью — призрака в listPeople не остаётся', () => {
+    const history = makeHistory();
+    const vanya = history.createPerson('Ваня', '2026-08-26')!;
+    const id = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanya }],
+    })!;
+    history.discardGame(id);
+    expect(history.allGames()).toEqual([]);
+    expect(history.listPeople()).toEqual([
+      { id: vanya, name: 'Ваня', games: 0 },
+    ]);
+  });
+
+  // Финальное ревью ветки, п. 2 (Important), часть (а): участники живут в
+  // лобби между партиями дольше, чем действует блокировка слияния (та
+  // держит только идущую партию) — personId может протухнуть между слиянием
+  // профилей и следующим стартом. Раньше вставка состава шла под ОДНИМ
+  // try/catch на весь цикл: сбой на протухшем personId одного участника
+  // прерывал цикл целиком и терял ВСЕХ участников ПОСЛЕ него, даже с живым
+  // personId.
+  it('сбойный personId одного участника не мешает записать остальных после него', () => {
+    const history = makeHistory();
+    const vanya = history.createPerson('Ваня', '2026-08-26')!;
+    const id = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [
+        // Протухший personId (человек уже слит/удалён) — идёт ПЕРВЫМ.
+        { counterId: 'c1', name: 'Призрак', personId: 999 },
+        { counterId: 'c2', name: 'Ваня', personId: vanya },
+      ],
+    });
+    expect(id).not.toBeNull();
+    // Ваня — участник ПОСЛЕ сбойного — обязан попасть в состав, несмотря на
+    // то что перед ним стоял участник с несуществующим personId.
+    expect(history.listPeople()).toEqual([
+      { id: vanya, name: 'Ваня', games: 1 },
+    ]);
+  });
 });
 
 describe('GameHistory.playerStats', () => {
