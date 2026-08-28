@@ -464,6 +464,38 @@ export class Room {
     return this.historyEnabled ? this.history.listPeople() : [];
   }
 
+  // Перепривязывает живых участников комнаты со слитого человека (fromId) на
+  // того, в кого его слили (intoId) — вызывается из обработчика
+  // admin-merge-people (server.ts) сразу после успешного history.mergePeople
+  // (финальное ревью ветки, п. 2, Important, часть б).
+  //
+  // Зачем это вообще нужно отдельно от базы: участники живут в лобби МЕЖДУ
+  // партиями (resetGame/resetRoom чистят их только по команде ведущего), а
+  // слияние заблокировано лишь на время идущей партии (hasActiveGame()).
+  // Штатный путь — партия дошла до game-end, ведущий слил два расщепившихся
+  // профиля, а участники в комнате остались со ссылкой на уже удалённого
+  // fromId. Без этой перепривязки протухший personId бил дважды:
+  // - следующий startGame() записывал бы состав со сбойным personId (чинит
+  //   задача 2а — по-участнику try/catch), но со временем прежний человек
+  //   продолжал бы значиться отсутствующим;
+  // - joinAsPerson() сверяет занятость через
+  //   `participants.some(p => p.personId === personId)` — у протухшего
+  //   участника personId старый (fromId), поэтому выживший человек (intoId)
+  //   считался бы свободным, и второй телефон вошёл бы им же: за столом
+  //   оказались бы два участника на одного человека.
+  //
+  // Это лечит корень (состояние комнаты), а не только следствие (задача 2а).
+  reassignPerson(fromId: number, intoId: number): void {
+    let changed = false;
+    for (const participant of this.participants) {
+      if (participant.personId === fromId) {
+        participant.personId = intoId;
+        changed = true;
+      }
+    }
+    if (changed) this.notify();
+  }
+
   reconnect(token: string): ReconnectResult {
     const participant = this.participants.find((p) => p.token === token);
     if (!participant) {

@@ -3579,10 +3579,19 @@ describe('createServer admin merge people', () => {
   let dir: string;
   let baseUrl: string;
   let history: GameHistory;
+  let playersPath: string;
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'svoya-igra-merge-people-'));
     history = new GameHistory(':memory:');
+    // playersPath — для задачи 3 (финальное ревью ветки, Important): слияние
+    // обязано пересчитывать «Показывает в игре», не только базу.
+    playersPath = join(dir, 'players.md');
+    await writeFile(
+      playersPath,
+      '# Анкеты игроков\n\nВводный текст.\n',
+      'utf8',
+    );
     // Тот же history — и в Room (откуда room.getPeople() берёт список для
     // обычной рассылки state), и в createServer (откуда его берёт прямой
     // обработчик admin-merge-people). В реальной сборке (index.ts) это один
@@ -3603,6 +3612,7 @@ describe('createServer admin merge people', () => {
       port: 8080,
       packsDir: dir,
       history,
+      playersPath,
     });
     await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
     const { port } = server.httpServer.address() as AddressInfo;
@@ -3650,6 +3660,15 @@ describe('createServer admin merge people', () => {
     admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
     await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
 
+    // Снимок списка людей ДО попытки слияния — join() двух игроков в этом
+    // тесте сам заводит им записи людей (Room делит history с сервером — см.
+    // beforeEach), так что в базе есть и другие записи, к делу не
+    // относящиеся, и перечислять их поимённо незачем (финальное ревью ветки,
+    // п. 9): снимок и точное сравнение с ним после дают полную гарантию
+    // «ничего не изменилось» без arrayContaining, который проверял бы только
+    // отсутствие пропажи, но не появление лишнего и не смену состава.
+    const before = history.listPeople();
+
     admin.ws.send(
       JSON.stringify({
         type: 'admin-merge-people',
@@ -3662,12 +3681,7 @@ describe('createServer admin merge people', () => {
       type: 'admin-people-error',
       reason: 'нельзя сливать игроков, пока идёт партия',
     });
-    // Ничего не поменялось — оба всё ещё существуют раздельно. Не сверяю
-    // список списком целиком: join() двух игроков в этом тесте сам заводит
-    // им записи людей (Room делит history с сервером — см. beforeEach), так
-    // что в базе есть и другие записи, к делу не относящиеся.
-    const peopleIds = history.listPeople().map((p) => p.id);
-    expect(peopleIds).toEqual(expect.arrayContaining([vanyaId, katyaId]));
+    expect(history.listPeople()).toEqual(before);
 
     admin.ws.close();
     a.ws.close();
@@ -3782,6 +3796,63 @@ describe('createServer admin merge people', () => {
 
     admin.ws.close();
     bystander.ws.close();
+  });
+
+  // Финальное ревью ветки, п. 3 (Important): refreshPlayerStats() раньше
+  // вызывалась только из точки game-end — ведущий сливает расщепившиеся
+  // профили именно затем, чтобы числа в «Показывает в игре» сошлись, а файл
+  // до конца следующей партии продолжал бы показывать два раздела со старыми
+  // числами, один из которых принадлежит уже удалённому из базы человеку.
+  it('после успешного слияния пересчитывает «Показывает в игре» в файле анкет', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    // Партия и сыгранный вопрос заводятся прямо через history (минуя
+    // реальную партию через Room) — это тот же приём, что и в
+    // history.test.ts (playerStats seed()): playerStats() читает game_people
+    // и played_questions, ей всё равно, как они появились.
+    const gameId = history.startGame({
+      startedAt: '2026-08-01T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    })!;
+    history.recordQuestion(gameId, {
+      questionId: 'q1',
+      roundIndex: 0,
+      themeName: 'История',
+      price: 100,
+      type: 'обычный',
+      text: 'Вопрос',
+      answer: 'Ответ',
+      answeredBy: 'Ваня',
+      answeredByCounterId: 'c1',
+      correct: true,
+      contested: false,
+    });
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: katyaId,
+        intoId: vanyaId,
+      }),
+    );
+    await admin.nextMessage(); // admin-people
+
+    const content = await waitForFileContent(
+      playersPath,
+      '## Показывает в игре',
+    );
+    expect(content).toContain('### Ваня');
+    // Катя не сыграла ни одной партии и была слита без следа — второго
+    // раздела в файле быть не должно.
+    expect(content).not.toContain('### Катя');
+    expect(content).toContain(
+      'Всего: нажимал 1 из 1 сыгранных при нём вопросов, верно 1.',
+    );
+
+    admin.ws.close();
   });
 });
 

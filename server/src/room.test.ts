@@ -352,6 +352,73 @@ describe('Room.joinAsPerson', () => {
   });
 });
 
+// Финальное ревью ветки, п. 2 (Important), часть (б). Участники живут в
+// лобби МЕЖДУ партиями (resetGame/resetRoom чистят их только по команде
+// ведущего), а слияние заблокировано лишь на время идущей партии
+// (hasActiveGame()) — штатный путь: партия дошла до game-end, ведущий
+// слил два расщепившихся профиля, а участники в комнате остались со
+// ссылкой на уже удалённого fromId.
+describe('Room.reassignPerson', () => {
+  it('переводит участников со старого personId на новый', () => {
+    const history = historyStub({
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+    const joined = room.joinAsPerson(7);
+    if (!('participant' in joined)) throw new Error('expected join to succeed');
+
+    room.reassignPerson(7, 42);
+
+    const updated = room
+      .getState()
+      .participants.find((p) => p.id === joined.participant.id);
+    expect(updated?.personId).toBe(42);
+  });
+
+  it('не трогает участников с другим personId', () => {
+    const history = historyStub({ listPeople: () => [] });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+    const joined = room.join('Гость');
+    if (!('participant' in joined)) throw new Error('expected join to succeed');
+    expect(joined.participant.personId).toBeNull();
+
+    room.reassignPerson(7, 42);
+
+    const updated = room
+      .getState()
+      .participants.find((p) => p.id === joined.participant.id);
+    expect(updated?.personId).toBeNull();
+  });
+
+  // Воспроизводит сценарий из ревью целиком: человек 7 вошёл в лобби,
+  // ведущий слил его профиль в человека 42 (после слияния рекордер уже
+  // знает только 42 — fromId удалён), а комната перепривязывает живого
+  // участника. Без reassignPerson participants.some(p => p.personId ===
+  // personId) не нашёл бы совпадения с новым id 42 (участник всё ещё
+  // числился бы под старым 7), и второй телефон вошёл бы тем же человеком
+  // повторно вместо честного person-taken.
+  it('после перепривязки второй телефон не может войти тем же человеком повторно', () => {
+    let known: 7 | 42 = 7;
+    const history = historyStub({
+      listPeople: () =>
+        known === 7
+          ? [{ id: 7, name: 'Ваня', games: 3 }]
+          : [{ id: 42, name: 'Ваня', games: 3 }],
+    });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+    const first = room.joinAsPerson(7);
+    if (!('participant' in first)) throw new Error('expected join to succeed');
+
+    // Слияние: рекордер теперь знает только 42, комната перепривязывает
+    // живого участника с 7 на 42 (то, что делает server.ts после
+    // history.mergePeople).
+    known = 42;
+    room.reassignPerson(7, 42);
+
+    expect(room.joinAsPerson(42)).toEqual({ error: 'person-taken' });
+  });
+});
+
 describe('Room.join — связь с человеком в истории', () => {
   it('обычный вход по имени заводит человека, когда история включена', () => {
     // Сравнение с конкретным id, который вернул фейковый рекордер (а не

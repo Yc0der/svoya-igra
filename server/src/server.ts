@@ -805,6 +805,18 @@ export function createServer(options: CreateServerOptions): GameServer {
           });
           return;
         }
+        // Перепривязываем живых участников комнаты со слитого fromId на
+        // intoId ДО broadcastState() (финальное ревью ветки, п. 2, Important,
+        // часть б) — иначе участник, оставшийся в лобби со старым personId,
+        // сломает следующий startGame() и позволит второму телефону войти
+        // тем же человеком через joinAsPerson (room.ts, reassignPerson).
+        room.reassignPerson(message.fromId, message.intoId);
+        // Пересчитываем «Показывает в игре» сразу после слияния (финальное
+        // ревью ветки, п. 3, Important) — иначе ведущий сливает профили
+        // именно затем, чтобы числа сошлись, а файл до конца следующей
+        // партии продолжает показывать два раздела со старыми числами,
+        // один из которых принадлежит уже удалённому человеку.
+        void refreshPlayerStats();
         // Список уже едет в обычном состоянии комнаты (stateMessageFor
         // кладёт room.getPeople() → history.listPeople()) —
         // broadcastState() разносит свежий список всем: другим открытым
