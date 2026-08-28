@@ -276,11 +276,13 @@ export function createServer(options: CreateServerOptions): GameServer {
   }
 
   // Пересчёт раздела «Показывает в игре» (design.md, 2026-08-26-player-identity,
-  // задача 5). Та же точка вызова, что и у refreshAutoSection — game-end, и
-  // только она: playerStats() строится из game_people и played_questions,
-  // до которых оценкам (question_tags) дела нет, поэтому, в отличие от
-  // «Автособранного», пересчитывать на разбор причины смысла нет — эти числа
-  // на нём не меняются.
+  // задача 5). Две точки вызова: game-end (вместе с refreshAutoSection) и
+  // слияние профилей в admin-merge-people ниже — после слияния числа обязаны
+  // сойтись сразу, ведущий ради этого его и делает.
+  //
+  // А вот на разбор причины, в отличие от «Автособранного», пересчитывать
+  // смысла нет: playerStats() строится из game_people и played_questions, до
+  // которых оценкам (question_tags) дела нет — эти числа на них не меняются.
   async function refreshPlayerStats(): Promise<void> {
     if (!playersPath || !history) return;
     try {
@@ -806,10 +808,10 @@ export function createServer(options: CreateServerOptions): GameServer {
           return;
         }
         // Перепривязываем живых участников комнаты со слитого fromId на
-        // intoId ДО broadcastState() (финальное ревью ветки, п. 2, Important,
-        // часть б) — иначе участник, оставшийся в лобби со старым personId,
-        // сломает следующий startGame() и позволит второму телефону войти
-        // тем же человеком через joinAsPerson (room.ts, reassignPerson).
+        // intoId (финальное ревью ветки, п. 2, Important, часть б) — иначе
+        // участник, оставшийся в лобби со старым personId, сломает следующий
+        // startGame() и позволит второму телефону войти тем же человеком
+        // через joinAsPerson (room.ts, reassignPerson).
         room.reassignPerson(message.fromId, message.intoId);
         // Пересчитываем «Показывает в игре» сразу после слияния (финальное
         // ревью ветки, п. 3, Important) — иначе ведущий сливает профили

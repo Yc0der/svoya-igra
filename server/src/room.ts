@@ -485,15 +485,21 @@ export class Room {
   //   оказались бы два участника на одного человека.
   //
   // Это лечит корень (состояние комнаты), а не только следствие (задача 2а).
+  //
+  // Намеренно без notify(): personId в состоянии, которое уходит клиентам
+  // (getState → participants), не отдаётся вообще — он нужен только внутри
+  // комнаты и в составе партии для рекордера. Значит рассылка после этой
+  // правки отправила бы всем ровно то же состояние, что и до неё. То, что
+  // после слияния действительно поменялось и должно доехать до лобби на
+  // телефонах, — список людей, а его обработчик admin-merge-people
+  // рассылает сам и безусловно (server.ts), в том числе когда в комнате не
+  // оказалось ни одного участника с fromId.
   reassignPerson(fromId: number, intoId: number): void {
-    let changed = false;
     for (const participant of this.participants) {
       if (participant.personId === fromId) {
         participant.personId = intoId;
-        changed = true;
       }
     }
-    if (changed) this.notify();
   }
 
   reconnect(token: string): ReconnectResult {
