@@ -94,6 +94,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     savePlayer: vi.fn(),
     people: [],
     peopleError: null,
+    clearPeopleError: vi.fn(),
     mergePeople: vi.fn(),
     ...overrides,
   };
@@ -1468,5 +1469,26 @@ describe('Admin — слияние профилей', () => {
     expect(
       screen.getByText('нельзя сливать игроков, пока идёт партия'),
     ).toBeInTheDocument();
+  });
+
+  // Финальное ревью ветки, п. 7 (Minor): отказ слияния («нельзя сливать
+  // игроков, пока идёт партия») не должен пережить смену выбора — иначе он
+  // висит красным всю партию, хотя ведущий уже переключился на другую пару.
+  it('гасит peopleError при смене выбора в любом из двух списков', async () => {
+    const clearPeopleError = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        people: PEOPLE,
+        peopleError: 'нельзя сливать игроков, пока идёт партия',
+        clearPeopleError,
+      }),
+    );
+    render(<Admin />);
+
+    await userEvent.selectOptions(screen.getByLabelText(/кого слить/i), '1');
+    expect(clearPeopleError).toHaveBeenCalledTimes(1);
+
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
+    expect(clearPeopleError).toHaveBeenCalledTimes(2);
   });
 });

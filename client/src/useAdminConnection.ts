@@ -227,6 +227,13 @@ export interface AdminConnection {
   // прицельным admin-people после успешного слияния.
   people: { id: number; name: string; games: number }[];
   peopleError: string | null;
+  // Гасит отказ слияния (финальное ревью ветки, п. 7, Minor) — иначе
+  // «нельзя сливать игроков, пока идёт партия» висит красным всю партию и
+  // переживает смену выбора в обоих выпадающих списках. Вызывается из
+  // Admin.tsx при смене выбора в любом из двух — тот же класс дефекта, что
+  // уже чинили в лобби (задача 3), только там гасило прибытие 'state', а тут
+  // ошибка не про сервер, а про текущий выбор в форме.
+  clearPeopleError(): void;
   mergePeople(fromId: number, intoId: number): void;
 }
 
@@ -462,6 +469,7 @@ export function useAdminConnection(
       send({ type: 'admin-save-player', code, replace }),
     people,
     peopleError,
+    clearPeopleError: () => setPeopleError(null),
     mergePeople: (fromId, intoId) =>
       send({ type: 'admin-merge-people', fromId, intoId }),
   };

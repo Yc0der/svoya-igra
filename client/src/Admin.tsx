@@ -67,6 +67,7 @@ export function Admin() {
     savePlayer,
     people,
     peopleError,
+    clearPeopleError,
     mergePeople,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
@@ -548,6 +549,11 @@ export function Admin() {
             onChange={(e) => {
               setMergeFromId(e.target.value);
               setConfirmingMerge(false);
+              // Финальное ревью ветки, п. 7: отказ слияния («нельзя сливать
+              // игроков, пока идёт партия») не должен пережить смену выбора
+              // — иначе он висит красным всю партию, хотя ведущий уже
+              // переключился на другую пару.
+              clearPeopleError();
             }}
           >
             <option value="">— выбери —</option>
@@ -564,6 +570,7 @@ export function Admin() {
             onChange={(e) => {
               setMergeIntoId(e.target.value);
               setConfirmingMerge(false);
+              clearPeopleError();
             }}
           >
             <option value="">— выбери —</option>
