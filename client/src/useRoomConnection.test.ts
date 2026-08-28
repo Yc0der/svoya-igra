@@ -514,4 +514,33 @@ describe('useRoomConnection', () => {
 
     expect(result.current.status).toBe('person-unknown');
   });
+
+  // Финальное ревью ветки, п. 5 (Minor): сокет отвалился МЕЖДУ отправкой
+  // join-as и ответом joined (токена ещё нет — TOKEN_KEY не записан). Раньше
+  // обработчик 'open' ретраил только pendingNameRef, и статус навсегда
+  // оставался 'joining' — все кнопки имён заблокированы, тревоги нет.
+  // Единственный выход для игрока был «Меня тут нет» и ручной ввод имени —
+  // новый расщеплённый профиль, ровно то, против чего лобби и затевалось.
+  it('переотправляет join-as при переоткрытии сокета, если joined ещё не пришёл', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => result.current.joinAs(7));
+    expect(result.current.status).toBe('joining');
+
+    // Сокет отваливается до ответа joined — токена ещё нет в localStorage.
+    act(() => socket.close());
+    act(() => vi.advanceTimersByTime(2000));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    const reopened = FakeWebSocket.instances[1];
+    act(() => reopened.emitOpen());
+
+    expect(reopened.sent).toContainEqual(
+      JSON.stringify({ type: 'join-as', personId: 7 }),
+    );
+    expect(result.current.status).toBe('joining');
+  });
 });
