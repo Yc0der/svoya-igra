@@ -5,7 +5,8 @@
   "scripts": {
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
-    "test": "pnpm -r run test",
+    "test": "pnpm -r run test && pnpm run test:scripts",
+    "test:scripts": "node --test \".claude/scripts/lib/*.test.mjs\"",
     "build": "pnpm -r run build",
     "start": "node server/dist/index.js",
     "test:e2e": "pnpm run build && playwright test",
