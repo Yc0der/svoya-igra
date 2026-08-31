@@ -190,6 +190,30 @@ export function aggregateProject(parsedFiles, cap) {
   };
 }
 
+/**
+ * Время последнего запроса сессии — то же значение, что печатает dateOf в
+ * tokens.mjs. У сессии без единого запроса времени нет: пустая строка,
+ * которая в лексикографическом сравнении ISO-таймстампов меньше любой
+ * настоящей даты, поэтому такая сессия уходит в конец, не вытесняя живые.
+ */
+function lastRequestTimestamp(parsed) {
+  return parsed.requests[parsed.requests.length - 1]?.timestamp ?? '';
+}
+
+/**
+ * Сортирует разобранные сессии по времени последнего запроса, по убыванию —
+ * свежие по содержимому первыми. mtime файла для этого не годится: файл может
+ * быть тронут (бэкап, синхронизация) без единой новой записи внутри, тогда
+ * mtime расходится с содержимым на дни. findTranscripts по mtime не трогаем —
+ * там это нужно для другой цели: определить, какой транскрипт дописывается
+ * прямо сейчас (текущая сессия), и там mtime как раз надёжен.
+ */
+export function sortByLastRequest(parsedFiles) {
+  return [...parsedFiles].sort((a, b) =>
+    lastRequestTimestamp(b).localeCompare(lastRequestTimestamp(a)),
+  );
+}
+
 /** Хвост файла — чтобы хук не платил чтением 30 МБ на каждом вызове инструмента. */
 export async function readTail(path, maxBytes = 256 * 1024) {
   const handle = await open(path, 'r');

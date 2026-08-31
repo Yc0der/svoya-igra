@@ -7,13 +7,15 @@ import {
   carryCostByTool,
   findTranscripts,
   parseTranscript,
+  sortByLastRequest,
 } from './lib/transcript.mjs';
 import { formatReport } from './lib/report.mjs';
 
 const CAP = Number(process.env.TOKENS_CAP ?? 200_000);
 const shortId = (id) => (id ?? '—').slice(0, 8);
-// Дата последнего запроса — согласуется с сортировкой findTranscripts по mtime
-// (свежие первыми), в отличие от даты первого запроса, когда сессия началась.
+// Дата последнего запроса, а не первого — сессия могла начаться неделю назад
+// и просто возобновиться сегодня; см. sortByLastRequest, который таблицу
+// сессий проекта сортирует по этому же значению.
 const dateOf = (parsed) =>
   (parsed.requests[parsed.requests.length - 1]?.timestamp ?? '').slice(0, 10) ||
   '——————————';
@@ -44,6 +46,11 @@ const burnedOf = (parsed) =>
 
 const [now, ...rest] = parsedFiles;
 const nowRequests = now.requests;
+// findTranscripts сортирует по mtime — это надёжно только для выбора текущей
+// сессии (её файл дописывается прямо сейчас). Для таблицы сессий проекта
+// mtime может расходиться с содержимым (файл тронут без новой записи), поэтому
+// здесь сортируем по времени последнего запроса — оно же идёт в dateOf.
+const sessionsForTable = sortByLastRequest(rest);
 
 const project = aggregateProject(parsedFiles, CAP);
 
@@ -58,7 +65,7 @@ const report = formatReport({
     topTools: carryCostByTool(now).slice(0, 3),
   },
   project,
-  sessions: rest.map((parsed) => ({
+  sessions: sessionsForTable.map((parsed) => ({
     date: dateOf(parsed),
     id: shortId(parsed.sessionId),
     requests: parsed.requests.length,

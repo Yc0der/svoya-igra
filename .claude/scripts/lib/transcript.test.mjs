@@ -6,6 +6,7 @@ import {
   parseTranscript,
   carryCostByTool,
   aggregateProject,
+  sortByLastRequest,
 } from './transcript.mjs';
 
 const line = (obj) => JSON.stringify(obj);
@@ -185,4 +186,45 @@ test('aggregateProject считает контекст сразу за гран�
   );
   assert.equal(justOver500.over300, 100);
   assert.equal(justOver500.over500, 100);
+});
+
+test('sortByLastRequest сортирует сессии по времени последнего запроса, а не по порядку на входе', () => {
+  const old = { requests: [{ timestamp: '2026-08-04T05:47:36.000Z' }] };
+  const fresh = { requests: [{ timestamp: '2026-08-28T06:48:00.000Z' }] };
+  const middle = { requests: [{ timestamp: '2026-08-20T00:00:00.000Z' }] };
+  // На входе порядок «случайный» (как если бы пришёл из sort по mtime, который врёт).
+  assert.deepEqual(sortByLastRequest([old, fresh, middle]), [
+    fresh,
+    middle,
+    old,
+  ]);
+});
+
+test('sortByLastRequest берёт именно последний запрос сессии, а не первый', () => {
+  const resumedAfterDays = {
+    requests: [
+      { timestamp: '2026-08-01T00:00:00.000Z' },
+      { timestamp: '2026-08-30T00:00:00.000Z' },
+    ],
+  };
+  const startedLaterButNotResumed = {
+    requests: [{ timestamp: '2026-08-15T00:00:00.000Z' }],
+  };
+  assert.deepEqual(
+    sortByLastRequest([startedLaterButNotResumed, resumedAfterDays]),
+    [resumedAfterDays, startedLaterButNotResumed],
+  );
+});
+
+test('sortByLastRequest уводит сессию без запросов в конец, не ломая компаратор', () => {
+  const empty = { requests: [] };
+  const withRequest = { requests: [{ timestamp: '2026-08-10T00:00:00.000Z' }] };
+  assert.deepEqual(sortByLastRequest([empty, withRequest]), [
+    withRequest,
+    empty,
+  ]);
+  assert.deepEqual(sortByLastRequest([withRequest, empty]), [
+    withRequest,
+    empty,
+  ]);
 });
