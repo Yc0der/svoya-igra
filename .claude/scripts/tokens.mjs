@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
+  aggregateProject,
   carryCostByTool,
   findTranscripts,
   parseTranscript,
@@ -11,8 +12,11 @@ import { formatReport } from './lib/report.mjs';
 
 const CAP = Number(process.env.TOKENS_CAP ?? 200_000);
 const shortId = (id) => (id ?? '—').slice(0, 8);
+// Дата последнего запроса — согласуется с сортировкой findTranscripts по mtime
+// (свежие первыми), в отличие от даты первого запроса, когда сессия началась.
 const dateOf = (parsed) =>
-  (parsed.requests[0]?.timestamp ?? '').slice(0, 10) || '——————————';
+  (parsed.requests[parsed.requests.length - 1]?.timestamp ?? '').slice(0, 10) ||
+  '——————————';
 
 const files = await findTranscripts(
   join(homedir(), '.claude', 'projects'),
@@ -37,36 +41,11 @@ if (parsedFiles.length === 0) {
 
 const burnedOf = (parsed) =>
   parsed.requests.reduce((sum, r) => sum + r.contextTokens, 0);
-const cappedOf = (parsed) =>
-  parsed.requests.reduce((sum, r) => sum + Math.min(r.contextTokens, CAP), 0);
 
 const [now, ...rest] = parsedFiles;
 const nowRequests = now.requests;
 
-const project = {
-  sessions: parsedFiles.length,
-  requests: parsedFiles.reduce((sum, p) => sum + p.requests.length, 0),
-  burned: parsedFiles.reduce((sum, p) => sum + burnedOf(p), 0),
-  capped: parsedFiles.reduce((sum, p) => sum + cappedOf(p), 0),
-  avgContext: 0,
-  over300: 0,
-  over500: 0,
-};
-project.avgContext =
-  project.requests === 0 ? 0 : Math.round(project.burned / project.requests);
-
-let over300 = 0;
-let over500 = 0;
-for (const parsed of parsedFiles) {
-  for (const request of parsed.requests) {
-    if (request.contextTokens > 300_000) over300 += request.contextTokens;
-    if (request.contextTokens > 500_000) over500 += request.contextTokens;
-  }
-}
-const share = (part) =>
-  project.burned === 0 ? 0 : Math.round((part / project.burned) * 100);
-project.over300 = share(over300);
-project.over500 = share(over500);
+const project = aggregateProject(parsedFiles, CAP);
 
 const report = formatReport({
   cap: CAP,

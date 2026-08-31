@@ -5,6 +5,7 @@ import {
   projectRootSlug,
   parseTranscript,
   carryCostByTool,
+  aggregateProject,
 } from './transcript.mjs';
 
 const line = (obj) => JSON.stringify(obj);
@@ -125,4 +126,63 @@ test('carryCostByTool считает, сколько раз результат �
     { tool: 'Read', tokens: 300 },
     { tool: 'Bash', tokens: 10 },
   ]);
+});
+
+test('aggregateProject возвращает нули для пустого списка сессий', () => {
+  assert.deepEqual(aggregateProject([], 200_000), {
+    sessions: 0,
+    requests: 0,
+    burned: 0,
+    capped: 0,
+    avgContext: 0,
+    over300: 0,
+    over500: 0,
+  });
+});
+
+test('aggregateProject считает сожжённое, потолок и средний контекст по всем сессиям', () => {
+  const parsedFiles = [
+    { requests: [{ contextTokens: 100 }, { contextTokens: 900 }] },
+    { requests: [{ contextTokens: 1000 }] },
+  ];
+  const result = aggregateProject(parsedFiles, 500);
+  assert.equal(result.sessions, 2);
+  assert.equal(result.requests, 3);
+  assert.equal(result.burned, 2000);
+  // Потолок 500: min(100,500)+min(900,500)+min(1000,500) = 100+500+500 = 1100.
+  assert.equal(result.capped, 1100);
+  assert.equal(result.avgContext, Math.round(2000 / 3));
+});
+
+test('aggregateProject не считает контекст ровно на границе 300k/500k превышением', () => {
+  const at300k = aggregateProject(
+    [{ requests: [{ contextTokens: 300_000 }] }],
+    200_000,
+  );
+  assert.equal(at300k.over300, 0);
+  assert.equal(at300k.over500, 0);
+
+  const at500k = aggregateProject(
+    [{ requests: [{ contextTokens: 500_000 }] }],
+    200_000,
+  );
+  // 500 000 больше 300 000, но не больше 500 000 — граница строгая (>).
+  assert.equal(at500k.over300, 100);
+  assert.equal(at500k.over500, 0);
+});
+
+test('aggregateProject считает контекст сразу за границей 300k/500k превышением', () => {
+  const justOver300 = aggregateProject(
+    [{ requests: [{ contextTokens: 300_001 }] }],
+    200_000,
+  );
+  assert.equal(justOver300.over300, 100);
+  assert.equal(justOver300.over500, 0);
+
+  const justOver500 = aggregateProject(
+    [{ requests: [{ contextTokens: 500_001 }] }],
+    200_000,
+  );
+  assert.equal(justOver500.over300, 100);
+  assert.equal(justOver500.over500, 100);
 });

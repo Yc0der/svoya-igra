@@ -152,6 +152,44 @@ export function carryCostByTool(parsed) {
     .sort((a, b) => b.tokens - a.tokens);
 }
 
+/**
+ * Агрегаты по всем сессиям проекта для отчёта `/tokens`: сколько сожжено, сколько
+ * было бы при потолке `cap`, средний контекст запроса и доля сожжённого, которая
+ * пришлась на запросы за 300k/500k токенов. Граница строгая — запрос ровно на
+ * 300k (или 500k) в превышение не попадает, только те, что больше.
+ */
+export function aggregateProject(parsedFiles, cap) {
+  let requests = 0;
+  let burned = 0;
+  let capped = 0;
+  let over300 = 0;
+  let over500 = 0;
+
+  for (const parsed of parsedFiles) {
+    for (const request of parsed.requests) {
+      requests += 1;
+      burned += request.contextTokens;
+      capped += Math.min(request.contextTokens, cap);
+      if (request.contextTokens > 300_000) over300 += request.contextTokens;
+      if (request.contextTokens > 500_000) over500 += request.contextTokens;
+    }
+  }
+
+  const avgContext = requests === 0 ? 0 : Math.round(burned / requests);
+  const share = (part) =>
+    burned === 0 ? 0 : Math.round((part / burned) * 100);
+
+  return {
+    sessions: parsedFiles.length,
+    requests,
+    burned,
+    capped,
+    avgContext,
+    over300: share(over300),
+    over500: share(over500),
+  };
+}
+
 /** Хвост файла — чтобы хук не платил чтением 30 МБ на каждом вызове инструмента. */
 export async function readTail(path, maxBytes = 256 * 1024) {
   const handle = await open(path, 'r');
