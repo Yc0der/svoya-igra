@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/scripts/checkpoint.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
