@@ -80,10 +80,10 @@ test('класс А2: закоммиченный план', () => {
   assert.match(text, /А2/);
 });
 
-test('класс А3: смёрженный PR напоминает про устные правила ревью', () => {
+test('класс А3: смёрженный PR', () => {
   const text = checkpointReminder(facts({ event: 'merge', changedPaths: [] }));
   assert.match(text, /А3/);
-  assert.match(text, /CLAUDE\.md/);
+  assert.match(text, /\/clear/);
 });
 
 test('класс А4: записанный пак — даже при грязном дереве', () => {
@@ -102,14 +102,14 @@ test('класс А4: записанный пак — даже при грязн
 test('класс Б: коммит без спеки и плана — только выше порога', () => {
   assert.equal(checkpointReminder(facts({ contextTokens: 150_000 })), null);
   const text = checkpointReminder(facts({ contextTokens: 250_000 }));
-  assert.match(text, /класс Б/);
+  assert.match(text, /Б/);
   assert.match(text, /\/handoff/);
 });
 
 test('класс Б молчит, когда проверки красные или не прогонялись', () => {
   assert.equal(checkpointReminder(facts({ checks: 'red' })), null);
   const unknown = checkpointReminder(facts({ checks: 'unknown' }));
-  assert.match(unknown, /подтверди/);
+  assert.match(unknown, /не прогонялись/);
 });
 
 test('грязное рабочее дерево глушит все классы, кроме А4', () => {
@@ -142,7 +142,7 @@ test('по одному и тому же коммиту напоминаем о�
   assert.equal(checkpointReminder(facts({ remindedSha: 'abc1234' })), null);
 });
 
-test('любое напоминание короче 400 символов', () => {
+test('любое напоминание короче 90 символов — бюджет не абзац, а фраза', () => {
   const cases = [
     facts({ changedPaths: ['docs/superpowers/specs/x-design.md'] }),
     facts({ changedPaths: ['docs/superpowers/plans/x.md'] }),
@@ -154,6 +154,6 @@ test('любое напоминание короче 400 символов', () =
   for (const c of cases) {
     const text = checkpointReminder(c);
     assert.ok(text, 'ожидалось напоминание');
-    assert.ok(text.length <= 400, `слишком длинно: ${text.length}`);
+    assert.ok(text.length <= 90, `слишком длинно: ${text.length}`);
   }
 });
