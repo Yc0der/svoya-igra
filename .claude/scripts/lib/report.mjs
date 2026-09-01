@@ -1,8 +1,14 @@
+// Порядок выбирается по уже округлённому числу, а не по сырому. Иначе 999 500
+// остаётся в «k» и печатается как «1000k»: четыре разряда вместо трёх, на которые
+// рассчитаны колонки таблицы сессий, и читается хуже, чем «1.0M».
 export function fmtTokens(n) {
   const value = Number(n) || 0;
-  if (value >= 1e9) return `${(value / 1e9).toFixed(1)}G`;
-  if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-  if (value >= 1e3) return `${Math.round(value / 1e3)}k`;
+  const g = `${(value / 1e9).toFixed(1)}G`;
+  const m = `${(value / 1e6).toFixed(1)}M`;
+  const k = Math.round(value / 1e3);
+  if (value >= 1e9) return g;
+  if (value >= 1e6) return parseFloat(m) >= 1000 ? g : m;
+  if (value >= 1e3) return k >= 1000 ? m : `${k}k`;
   return String(Math.round(value));
 }
 
