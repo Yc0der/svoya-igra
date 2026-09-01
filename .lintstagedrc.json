@@ -1,4 +1,5 @@
 {
+  ".claude/**/*.mjs": ["prettier --write"],
   "client/**/*.{ts,tsx}": ["oxlint --fix", "prettier --write"],
   "server/**/*.ts": [
     "eslint --fix --config server/eslint.config.js",
