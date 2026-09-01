@@ -4,6 +4,12 @@ const PACK_PATH = /(^|\/)packs\/[^/]+\.json$/;
 const SPEC_PATH = /^docs\/superpowers\/specs\/.+\.md$/;
 const PLAN_PATH = /^docs\/superpowers\/plans\/.+\.md$/;
 
+// Мёрж случается двумя путями: `gh pr merge` в Bash и вызов инструмента GitHub MCP.
+// У второго текста команды нет вообще, видно только имя инструмента. Префикс сервера
+// зависит от того, как установлен плагин, поэтому сверяется хвост — и целиком, чтобы
+// соседние инструменты про PR не считались слиянием.
+const MCP_MERGE_TOOL = /^mcp__.+__merge_pull_request$/;
+
 const slashes = (path) => (path ?? '').replace(/\\/g, '/');
 
 // Разбивает команду на подкоманды по shell-разделителям, чтобы упоминание
@@ -25,6 +31,8 @@ export function classifyEvent(payload) {
       ? 'artifact'
       : null;
   }
+
+  if (MCP_MERGE_TOOL.test(tool ?? '')) return 'merge';
 
   if (tool !== 'Bash') return null;
   const command = payload.tool_input?.command ?? '';
