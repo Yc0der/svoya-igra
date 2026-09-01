@@ -60,7 +60,7 @@
 - Consumes: ничего
 - Produces: ничего — задача не оставляет следа в коде, следующие задачи от неё не зависят
 
-- [ ] **Step 1: Посмотреть, где включён плагин**
+- [x] **Step 1: Посмотреть, где включён плагин**
 
 ```bash
 node -e "console.log(require('fs').readFileSync(process.env.USERPROFILE+'/.claude/settings.json','utf8'))"
@@ -74,13 +74,13 @@ node -e "console.log(require('fs').readFileSync(process.env.USERPROFILE+'/.claud
 grep -rln playwright /c/Users/ib1te/.claude/settings.json /c/Users/ib1te/.claude/plugins/config.json
 ```
 
-- [ ] **Step 2: Выключить playwright**
+- [x] **Step 2: Выключить playwright**
 
 Отредактировать найденный файл: запись плагина `playwright` перевести в `false` (если формат — объект вида `{"имя@маркетплейс": true}`) либо убрать из массива (если формат — список имён).
 
 Остальные плагины не трогать. В частности `context7` вызван 0 раз, но это всего два определения инструментов — спека явно оставляет его.
 
-- [ ] **Step 3: Проверить, что JSON остался валидным**
+- [x] **Step 3: Проверить, что JSON остался валидным**
 
 ```bash
 node -e "JSON.parse(require('fs').readFileSync(process.env.USERPROFILE+'/.claude/settings.json','utf8'));console.log('settings.json валиден')"
@@ -88,7 +88,7 @@ node -e "JSON.parse(require('fs').readFileSync(process.env.USERPROFILE+'/.claude
 
 Ожидается: `settings.json валиден`.
 
-- [ ] **Step 4: Сообщить пользователю**
+- [x] **Step 4: Сообщить пользователю**
 
 Коммита нет — файл вне репозитория. Сказать: плагин выключен, изменение подхватится при следующем запуске Claude Code, разницу видно в `/context` до и после перезапуска.
 
@@ -105,7 +105,7 @@ node -e "JSON.parse(require('fs').readFileSync(process.env.USERPROFILE+'/.claude
 - Consumes: ничего
 - Produces: раздел «Точки выхода» в `CLAUDE.md` — на него ссылаются тексты напоминаний из Task 6 и слэш-команда `/handoff` из Task 8
 
-- [ ] **Step 1: Сверить размеры файлов с репозиторием**
+- [x] **Step 1: Сверить размеры файлов с репозиторием**
 
 Числа в спеке устарели (там `room.ts` 1794 строки, фактически 1669). Взять актуальные и округлить:
 
@@ -113,7 +113,7 @@ node -e "JSON.parse(require('fs').readFileSync(process.env.USERPROFILE+'/.claude
 wc -l server/src/*.ts client/src/*.ts client/src/*.tsx | sort -rn | head -14
 ```
 
-- [ ] **Step 2: Создать `CLAUDE.md`**
+- [x] **Step 2: Создать `CLAUDE.md`**
 
 Содержимое целиком (округлённые размеры — на момент написания плана; если Step 1 показал заметно другие, поправить):
 
@@ -200,7 +200,7 @@ pnpm-монорепозиторий, две рабочие области: `serv
 - `CONTRIBUTING.md` — ветки и коммиты
 ```
 
-- [ ] **Step 3: Проверить, что все упомянутые пути существуют**
+- [x] **Step 3: Проверить, что все упомянутые пути существуют**
 
 ```bash
 ls CLAUDE.md server/src/engine.ts server/src/room.ts server/src/server.ts server/src/protocol.ts server/src/pack.ts server/src/packs.ts server/src/history.ts client/src/Board.tsx client/src/Player.tsx client/src/Admin.tsx client/src/VideoPlayer.tsx packs e2e docs/ideas.md docs/lifecycle.md docs/players.md docs/pack-generator-profile.md docs/superpowers/specs/2026-08-03-svoya-igra-design.md CONTRIBUTING.md
@@ -208,7 +208,7 @@ ls CLAUDE.md server/src/engine.ts server/src/room.ts server/src/server.ts server
 
 Ожидается: все пути напечатаны, ни одного `No such file`.
 
-- [ ] **Step 4: Прогнать Prettier**
+- [x] **Step 4: Прогнать Prettier**
 
 ```bash
 pnpm exec prettier --write CLAUDE.md
@@ -216,7 +216,7 @@ pnpm exec prettier --write CLAUDE.md
 
 Ожидается: файл отформатирован без ошибок разбора.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add CLAUDE.md
@@ -258,7 +258,7 @@ git commit -m "docs: CLAUDE.md — карта проекта и правила �
   - `readTail(path: string, maxBytes?: number): Promise<string>`
   - `latestContextTokens(text: string): number|null`
 
-- [ ] **Step 1: Подключить запуск тестов скриптов**
+- [x] **Step 1: Подключить запуск тестов скриптов**
 
 В корневом `package.json` в `scripts` заменить `"test"` и добавить `"test:scripts"`:
 
@@ -273,7 +273,7 @@ git commit -m "docs: CLAUDE.md — карта проекта и правила �
   ".claude/**/*.mjs": ["prettier --write"]
 ```
 
-- [ ] **Step 2: Написать падающий тест**
+- [x] **Step 2: Написать падающий тест**
 
 Создать `.claude/scripts/lib/transcript.test.mjs`:
 
@@ -408,7 +408,7 @@ test('carryCostByTool считает, сколько раз результат �
 });
 ```
 
-- [ ] **Step 3: Прогнать тесты и убедиться, что они падают**
+- [x] **Step 3: Прогнать тесты и убедиться, что они падают**
 
 ```bash
 pnpm run test:scripts
@@ -416,7 +416,7 @@ pnpm run test:scripts
 
 Ожидается: падение с `Cannot find module` — файла `transcript.mjs` ещё нет. Если вместо этого печатается `0 tests` — значит `node --test <каталог>` не нашёл файл; тогда заменить скрипт на `node --test \".claude/scripts/lib/*.test.mjs\"` и повторить.
 
-- [ ] **Step 4: Написать `lib/transcript.mjs`**
+- [x] **Step 4: Написать `lib/transcript.mjs`**
 
 ```js
 import { open, readdir, stat } from 'node:fs/promises';
@@ -601,7 +601,7 @@ export function latestContextTokens(text) {
 }
 ```
 
-- [ ] **Step 5: Прогнать тесты и убедиться, что они зелёные**
+- [x] **Step 5: Прогнать тесты и убедиться, что они зелёные**
 
 ```bash
 pnpm run test:scripts
@@ -609,7 +609,7 @@ pnpm run test:scripts
 
 Ожидается: `pass 7`, `fail 0`.
 
-- [ ] **Step 6: Проверить модуль на настоящем транскрипте**
+- [x] **Step 6: Проверить модуль на настоящем транскрипте**
 
 ```bash
 node -e "import('./.claude/scripts/lib/transcript.mjs').then(async (m)=>{const fs=await import('node:fs/promises');const os=await import('node:os');const f=(await m.findTranscripts(os.homedir()+'/.claude/projects', process.cwd()))[0];const p=m.parseTranscript(await fs.readFile(f.path,'utf8'));console.log({file:f.path,requests:p.requests.length,compacts:p.compacts,top:m.carryCostByTool(p).slice(0,3)});})"
@@ -617,7 +617,7 @@ node -e "import('./.claude/scripts/lib/transcript.mjs').then(async (m)=>{const f
 
 Ожидается: непустое число запросов и осмысленный топ инструментов. Если `requests: 0` — разбор не совпал с форматом, разбираться до перехода к следующей задаче.
 
-- [ ] **Step 7: Коммит**
+- [x] **Step 7: Коммит**
 
 ```bash
 git add .claude/scripts/lib/transcript.mjs .claude/scripts/lib/transcript.test.mjs package.json .lintstagedrc.json
@@ -656,7 +656,7 @@ git commit -m "feat: разбор транскриптов для отчёта �
 
     `over300`/`over500` — целые проценты. `sessions` печатается не более восьми строк.
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Создать `.claude/scripts/lib/report.test.mjs`:
 
@@ -749,7 +749,7 @@ test('formatReport переживает пустой проект', () => {
 });
 ```
 
-- [ ] **Step 2: Прогнать тесты и убедиться, что они падают**
+- [x] **Step 2: Прогнать тесты и убедиться, что они падают**
 
 ```bash
 pnpm run test:scripts
@@ -757,7 +757,7 @@ pnpm run test:scripts
 
 Ожидается: падение с `Cannot find module './report.mjs'`, тесты `transcript.test.mjs` при этом зелёные.
 
-- [ ] **Step 3: Написать `lib/report.mjs`**
+- [x] **Step 3: Написать `lib/report.mjs`**
 
 ```js
 export function fmtTokens(n) {
@@ -821,7 +821,7 @@ export function formatReport({ cap, current, project, sessions }) {
 }
 ```
 
-- [ ] **Step 4: Прогнать тесты и убедиться, что они зелёные**
+- [x] **Step 4: Прогнать тесты и убедиться, что они зелёные**
 
 ```bash
 pnpm run test:scripts
@@ -829,7 +829,7 @@ pnpm run test:scripts
 
 Ожидается: `fail 0`, всего 11 тестов.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add .claude/scripts/lib/report.mjs .claude/scripts/lib/report.test.mjs
@@ -852,7 +852,7 @@ git commit -m "feat: форматирование отчёта по расход
 - Consumes: `findTranscripts`, `parseTranscript`, `carryCostByTool` из `lib/transcript.mjs`; `formatReport` из `lib/report.mjs`
 - Produces: команда `/tokens`; переменная окружения `TOKENS_CAP` задаёт потолок для оценки экономии (по умолчанию 200000)
 
-- [ ] **Step 1: Написать `tokens.mjs`**
+- [x] **Step 1: Написать `tokens.mjs`**
 
 ```js
 #!/usr/bin/env node
@@ -948,7 +948,7 @@ const report = formatReport({
 console.log(report.join('\n'));
 ```
 
-- [ ] **Step 2: Запустить и посмотреть на вывод**
+- [x] **Step 2: Запустить и посмотреть на вывод**
 
 ```bash
 node .claude/scripts/tokens.mjs
@@ -962,7 +962,7 @@ node .claude/scripts/tokens.mjs | wc -l
 
 Ожидается: число ≤ 30. Если больше — уменьшить `MAX_SESSION_ROWS` в `lib/report.mjs` и поправить тест длины.
 
-- [ ] **Step 3: Создать слэш-команду**
+- [x] **Step 3: Создать слэш-команду**
 
 `.claude/commands/tokens.md`:
 
@@ -982,7 +982,7 @@ allowed-tools: Bash(node .claude/scripts/tokens.mjs)
 нет и почему.
 ```
 
-- [ ] **Step 4: Проверить, что команда видна**
+- [x] **Step 4: Проверить, что команда видна**
 
 Перезапуск Claude Code не нужен — файлы команд подхватываются на лету. Убедиться, что файл на месте и его frontmatter валиден:
 
@@ -992,7 +992,7 @@ head -5 .claude/commands/tokens.md
 
 Ожидается: строки frontmatter между `---`.
 
-- [ ] **Step 5: Прогнать все проверки**
+- [x] **Step 5: Прогнать все проверки**
 
 ```bash
 pnpm run test:scripts
@@ -1000,7 +1000,7 @@ pnpm run test:scripts
 
 Ожидается: `fail 0`.
 
-- [ ] **Step 6: Коммит**
+- [x] **Step 6: Коммит**
 
 ```bash
 git add .claude/scripts/tokens.mjs .claude/commands/tokens.md
@@ -1048,7 +1048,7 @@ git commit -m "feat: слэш-команда /tokens — отчёт по рас�
 
   - `CONTEXT_THRESHOLD = 200_000`
 
-- [ ] **Step 1: Написать падающий тест**
+- [x] **Step 1: Написать падающий тест**
 
 Создать `.claude/scripts/lib/checkpoint-rules.test.mjs`:
 
@@ -1214,7 +1214,7 @@ test('любое напоминание короче 400 символов', () =
 });
 ```
 
-- [ ] **Step 2: Прогнать тесты и убедиться, что они падают**
+- [x] **Step 2: Прогнать тесты и убедиться, что они падают**
 
 ```bash
 pnpm run test:scripts
@@ -1222,7 +1222,7 @@ pnpm run test:scripts
 
 Ожидается: падение с `Cannot find module './checkpoint-rules.mjs'`.
 
-- [ ] **Step 3: Написать `lib/checkpoint-rules.mjs`**
+- [x] **Step 3: Написать `lib/checkpoint-rules.mjs`**
 
 ```js
 export const CONTEXT_THRESHOLD = 200_000;
@@ -1308,7 +1308,7 @@ export function checkpointReminder(facts) {
 }
 ```
 
-- [ ] **Step 4: Прогнать тесты и убедиться, что они зелёные**
+- [x] **Step 4: Прогнать тесты и убедиться, что они зелёные**
 
 ```bash
 pnpm run test:scripts
@@ -1316,7 +1316,7 @@ pnpm run test:scripts
 
 Ожидается: `fail 0`, всего 24 теста.
 
-- [ ] **Step 5: Коммит**
+- [x] **Step 5: Коммит**
 
 ```bash
 git add .claude/scripts/lib/checkpoint-rules.mjs .claude/scripts/lib/checkpoint-rules.test.mjs
@@ -1346,7 +1346,7 @@ git commit -m "feat: правила напоминания о безопасно
 - Consumes: `classifyEvent`, `checksVerdict`, `checkpointReminder` из `lib/checkpoint-rules.mjs`; `readTail`, `latestContextTokens`, `projectSlug` из `lib/transcript.mjs`
 - Produces: файл состояния `.claude/state/checkpoint-<sessionId>.json` вида `{ "checks": "green"|"red"|"unknown", "remindedSha": string|null }`
 
-- [ ] **Step 1: Написать `checkpoint.mjs`**
+- [x] **Step 1: Написать `checkpoint.mjs`**
 
 ```js
 #!/usr/bin/env node
@@ -1492,7 +1492,7 @@ async function main() {
 main().catch(() => emit(null));
 ```
 
-- [ ] **Step 2: Создать `.claude/settings.json`**
+- [x] **Step 2: Создать `.claude/settings.json`**
 
 Файл в git — это общая для машин конфигурация; персональные разрешения остаются в `settings.local.json`, который в `.gitignore`. Путь к скрипту относительный: хук запускается с рабочим каталогом проекта, и в воркtree он тоже разрешится правильно, потому что `.claude/scripts/` лежит в git.
 
@@ -1515,7 +1515,7 @@ main().catch(() => emit(null));
 }
 ```
 
-- [ ] **Step 3: Игнорировать файлы состояния**
+- [x] **Step 3: Игнорировать файлы состояния**
 
 В конец `.gitignore` добавить:
 
@@ -1524,7 +1524,7 @@ main().catch(() => emit(null));
 .claude/state/
 ```
 
-- [ ] **Step 4: Проверить молчание на нерелевантном событии**
+- [x] **Step 4: Проверить молчание на нерелевантном событии**
 
 ```bash
 echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"cwd":"'"$PWD"'"}' | node .claude/scripts/checkpoint.mjs; echo "EXIT:$?"
@@ -1532,7 +1532,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"cwd":"'"$PWD"'"}' |
 
 Ожидается: пустой вывод и `EXIT:0`.
 
-- [ ] **Step 5: Проверить срабатывание класса А2 на настоящем репозитории**
+- [x] **Step 5: Проверить срабатывание класса А2 на настоящем репозитории**
 
 Последний коммит на этот момент — коммит правил из Task 6, файла плана в нём нет, поэтому сначала сделать проверку на подставленном событии мёржа (оно не смотрит на пути):
 
@@ -1542,7 +1542,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1 --squash"},"cwd
 
 Ожидается: JSON с `hookSpecificOutput.additionalContext`, внутри текст про класс А3, и `EXIT:0`.
 
-- [ ] **Step 6: Проверить, что грязное дерево глушит хук**
+- [x] **Step 6: Проверить, что грязное дерево глушит хук**
 
 ```bash
 echo "мусор" > .checkpoint-probe && echo '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1 --squash"},"cwd":"'"$PWD"'"}' | node .claude/scripts/checkpoint.mjs; echo "EXIT:$?"; rm .checkpoint-probe
@@ -1550,7 +1550,7 @@ echo "мусор" > .checkpoint-probe && echo '{"tool_name":"Bash","tool_input":
 
 Ожидается: пустой вывод и `EXIT:0`. Это прямая проверка из раздела «Проверка» спеки: хук не срабатывает при грязном рабочем дереве.
 
-- [ ] **Step 7: Замерить, что хук не задерживает вызов инструмента**
+- [x] **Step 7: Замерить, что хук не задерживает вызов инструмента**
 
 ```bash
 time (echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"'"$PWD"'"}' | node .claude/scripts/checkpoint.mjs)
@@ -1558,7 +1558,7 @@ time (echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"'"$PWD"'"}'
 
 Ожидается: доли секунды, целиком на старт Node. Если больше секунды — быстрый выход не сработал, разбираться.
 
-- [ ] **Step 8: Убедиться, что состояние не попадает в git**
+- [x] **Step 8: Убедиться, что состояние не попадает в git**
 
 ```bash
 git status --porcelain .claude/state
@@ -1566,7 +1566,7 @@ git status --porcelain .claude/state
 
 Ожидается: пустой вывод (каталога может ещё не быть — это тоже пусто).
 
-- [ ] **Step 9: Коммит**
+- [x] **Step 9: Коммит**
 
 ```bash
 git add .claude/scripts/checkpoint.mjs .claude/settings.json .gitignore
@@ -1588,7 +1588,7 @@ git commit -m "feat: неблокирующий хук с напоминание
 - Consumes: раздел «Точки выхода» в `CLAUDE.md` (Task 2)
 - Produces: соглашение о секции «## Состояние» в файлах `docs/superpowers/plans/*.md`
 
-- [ ] **Step 1: Создать `.claude/commands/handoff.md`**
+- [x] **Step 1: Создать `.claude/commands/handoff.md`**
 
 ````markdown
 ---
@@ -1635,7 +1635,7 @@ git commit -m "docs: состояние работы перед очисткой
 Затем одной строкой скажи, что контекст можно чистить через `/clear`.
 ````
 
-- [ ] **Step 2: Проверить frontmatter**
+- [x] **Step 2: Проверить frontmatter**
 
 ```bash
 head -4 .claude/commands/handoff.md
@@ -1643,7 +1643,7 @@ head -4 .claude/commands/handoff.md
 
 Ожидается: строка `---`, строка `description: ...`, строка `---`.
 
-- [ ] **Step 3: Прогнать Prettier**
+- [x] **Step 3: Прогнать Prettier**
 
 ```bash
 pnpm exec prettier --write .claude/commands/handoff.md .claude/commands/tokens.md
@@ -1651,7 +1651,7 @@ pnpm exec prettier --write .claude/commands/handoff.md .claude/commands/tokens.m
 
 Ожидается: оба файла отформатированы без ошибок разбора.
 
-- [ ] **Step 4: Коммит**
+- [x] **Step 4: Коммит**
 
 ```bash
 git add .claude/commands/handoff.md .claude/commands/tokens.md
@@ -1673,7 +1673,7 @@ git commit -m "feat: слэш-команда /handoff — передача со�
 - Consumes: всё, сделанное в задачах 1–8
 - Produces: ничего
 
-- [ ] **Step 1: `/tokens` отрабатывает и укладывается в ≤30 строк**
+- [x] **Step 1: `/tokens` отрабатывает и укладывается в ≤30 строк**
 
 ```bash
 node .claude/scripts/tokens.mjs | tee /dev/stderr | wc -l
@@ -1681,7 +1681,7 @@ node .claude/scripts/tokens.mjs | tee /dev/stderr | wc -l
 
 Ожидается: осмысленный отчёт и число ≤ 30.
 
-- [ ] **Step 2: Хук срабатывает на коммите**
+- [x] **Step 2: Хук срабатывает на коммите**
 
 ```bash
 echo '{"tool_name":"Bash","tool_input":{"command":"git commit -m \"docs: x\""},"cwd":"'"$PWD"'","session_id":"probe"}' | node .claude/scripts/checkpoint.mjs; echo "EXIT:$?"
@@ -1695,7 +1695,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1"},"cwd":"'"$PWD
 
 Ожидается: JSON с текстом про класс А3, `EXIT:0`.
 
-- [ ] **Step 3: Хук не срабатывает при грязном рабочем дереве**
+- [x] **Step 3: Хук не срабатывает при грязном рабочем дереве**
 
 ```bash
 echo "мусор" > .checkpoint-probe && echo '{"tool_name":"Bash","tool_input":{"command":"gh pr merge 1"},"cwd":"'"$PWD"'","session_id":"probe"}' | node .claude/scripts/checkpoint.mjs; echo "EXIT:$?"; rm .checkpoint-probe
@@ -1703,7 +1703,7 @@ echo "мусор" > .checkpoint-probe && echo '{"tool_name":"Bash","tool_input":
 
 Ожидается: пустой вывод, `EXIT:0`.
 
-- [ ] **Step 4: Ни один хук не блокирует и не задерживает вызов инструмента**
+- [x] **Step 4: Ни один хук не блокирует и не задерживает вызов инструмента**
 
 ```bash
 echo '{"tool_name":"Bash","tool_input":{"command":"ls"},"cwd":"'"$PWD"'"}' | node .claude/scripts/checkpoint.mjs; echo "EXIT:$?"
@@ -1714,7 +1714,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"git commit -m x"},"cwd":"/н�
 
 Ожидается: четыре раза `EXIT:0`, ни одной строки в stderr, ни одного `decision`.
 
-- [ ] **Step 5: `pnpm test`, `pnpm typecheck`, `pnpm lint` зелёные**
+- [x] **Step 5: `pnpm test`, `pnpm typecheck`, `pnpm lint` зелёные**
 
 ```bash
 pnpm test
@@ -1740,7 +1740,14 @@ pnpm lint
 
 Если хук не сработал — проверить, что он вообще зарегистрирован: `.claude/settings.json` должен быть подхвачен, а не перекрыт `settings.local.json`.
 
-- [ ] **Step 7: Отметить прогресс в плане и закоммитить**
+Не отмечено: рестарт сессии агент себе выполнить не может. Проверено то, что доступно без
+рестарта — `settings.local.json` не содержит ключа `hooks` (не может перекрыть регистрацию),
+и в state-файле текущей живой сессии (`.claude/state/checkpoint-<session>.json`) уже видно
+реальное срабатывание хука на настоящих вызовах инструментов в рамках Task 9 (поле `checks`
+обновилось после реального `pnpm test`). Полный цикл «рестарт → коммит → пометка выше 200k →
+дедуп на повторном коммите» остаётся на усмотрение пользователя.
+
+- [x] **Step 7: Отметить прогресс в плане и закоммитить**
 
 ```bash
 git add docs/superpowers/plans/2026-08-30-token-budget.md
