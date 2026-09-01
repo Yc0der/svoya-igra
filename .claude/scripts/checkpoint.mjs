@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +7,9 @@ import {
   checksVerdict,
   checkpointReminder,
 } from './lib/checkpoint-rules.mjs';
+import { createDeadline } from './lib/deadline.mjs';
+import { gitFacts } from './lib/git-facts.mjs';
+import { loadState, saveState } from './lib/state.mjs';
 import {
   latestContextTokens,
   projectSlug,
@@ -17,9 +19,13 @@ import {
 // И git, и чтение stdin в норме укладываются в низкие сотни миллисекунд — три git-вызова
 // подряд на путях commit/merge по замеру дают медиану ~180 мс, а не единицы миллисекунд.
 // Но и это не гарантия: зависший git-процесс или родитель, не закрывший stdin, не должны
-// держать вызов инструмента до внешнего timeout из settings.json (10 с) — свой предел
-// на порядок меньше, чтобы отказ был дешёвым, а не просто менее дорогим, чем ничего.
-const IO_TIMEOUT_MS = 2000;
+// держать вызов инструмента до внешнего timeout из settings.json (10 с).
+//
+// Бюджет один на весь запуск, а не на каждую операцию: покомандный предел ограничивает
+// одну команду, а не работу целиком, и пять операций по 2 с складывались ровно в те же
+// 10 с — то есть свой предел не давал никакого запаса. Общий бюджет убирает сложение.
+const BUDGET_MS = 2000;
+const budget = createDeadline(BUDGET_MS);
 
 /** Единственный выход из скрипта. Молчание — тоже допустимый ответ. */
 function emit(text) {
@@ -61,37 +67,22 @@ function readStdin(timeoutMs) {
   });
 }
 
-function git(cwd, args) {
+/** Один git-вызов с выданным ему остатком бюджета. null — git не ответил. */
+function git(cwd, args, timeoutMs) {
   try {
     return execFileSync('git', args, {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: IO_TIMEOUT_MS,
+      timeout: timeoutMs,
     });
   } catch {
     return null;
   }
 }
 
-async function loadState(path) {
-  try {
-    return JSON.parse(await readFile(path, 'utf8'));
-  } catch {
-    return { checks: 'unknown', remindedSha: null, remindedArtifacts: [] };
-  }
-}
-
-async function saveState(dir, path, state) {
-  try {
-    await mkdir(dir, { recursive: true });
-    await writeFile(path, JSON.stringify(state), 'utf8');
-  } catch {
-    // состояние — оптимизация, а не источник истины
-  }
-}
-
 async function contextTokens(payload, cwd) {
+  if (budget.left() === 0) return null; // за бюджетом честный ответ — «не знаю»
   const direct = payload.transcript_path;
   const fallback =
     payload.session_id &&
@@ -115,7 +106,7 @@ async function contextTokens(payload, cwd) {
 }
 
 async function main() {
-  const raw = await readStdin(IO_TIMEOUT_MS);
+  const raw = await readStdin(budget.left());
   if (raw === null) return emit(null); // вход не подоспел вовремя
 
   let payload;
@@ -158,39 +149,24 @@ async function main() {
     return emit(text);
   }
 
-  const status = git(cwd, ['status', '--porcelain']);
-  const worktreeClean = status !== null && status.trim() === '';
-  const commitSha = git(cwd, ['rev-parse', 'HEAD'])?.trim() ?? null;
-  const changedPaths = (
-    git(cwd, ['show', '--name-only', '--format=', 'HEAD']) ?? ''
-  )
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  // Отдельно от changedPaths: только пути, добавленные именно этим коммитом.
-  // Решение (А1/А2 требуют «добавлен, не изменён») принимает checkpointReminder —
-  // здесь только факт из git.
-  const addedPaths = (
-    git(cwd, ['show', '--diff-filter=A', '--name-only', '--format=', 'HEAD']) ??
-    ''
-  )
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
+  const facts = gitFacts(
+    (args, timeoutMs) => git(cwd, args, timeoutMs),
+    budget,
+  );
 
   const text = checkpointReminder({
     event,
-    commitSha,
-    changedPaths,
-    addedPaths,
-    worktreeClean,
+    ...facts,
     contextTokens: await contextTokens(payload, cwd),
     checks: state.checks ?? 'unknown',
     remindedSha: state.remindedSha ?? null,
   });
 
-  if (text && commitSha)
-    await saveState(stateDir, statePath, { ...state, remindedSha: commitSha });
+  if (text && facts.commitSha)
+    await saveState(stateDir, statePath, {
+      ...state,
+      remindedSha: facts.commitSha,
+    });
   return emit(text);
 }
 
