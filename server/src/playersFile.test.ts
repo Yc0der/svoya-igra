@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  deletePlayerCard,
+  readPlayerCard,
   readPlayerList,
   savePlayerCard,
   savePlayerStats,
@@ -89,6 +91,33 @@ describe('playersFile', () => {
     await savePlayerStats(playersPath, STATS);
     const first = await stat(playersPath);
     await savePlayerStats(playersPath, STATS);
+    const second = await stat(playersPath);
+    expect(second.mtimeMs).toBe(first.mtimeMs);
+  });
+  it('отдаёт анкету обратно так, как её записали', async () => {
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    const read = await readPlayerCard(playersPath, 'ваня');
+    expect(read?.card).toEqual(CARD);
+    expect(read?.extraLines).toEqual([]);
+  });
+
+  it('на незнакомое имя и на отсутствующий файл отдаёт null', async () => {
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    expect(await readPlayerCard(playersPath, 'Пётр')).toBeNull();
+    expect(await readPlayerCard(join(dir, 'нет.md'), 'Ваня')).toBeNull();
+  });
+
+  it('удаляет анкету и говорит, что удалила', async () => {
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    expect(await deletePlayerCard(playersPath, 'Ваня')).toBe(true);
+    expect(await readPlayerList(playersPath)).toEqual([]);
+  });
+
+  it('повторное удаление не трогает диск и возвращает false', async () => {
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    await deletePlayerCard(playersPath, 'Ваня');
+    const first = await stat(playersPath);
+    expect(await deletePlayerCard(playersPath, 'Ваня')).toBe(false);
     const second = await stat(playersPath);
     expect(second.mtimeMs).toBe(first.mtimeMs);
   });

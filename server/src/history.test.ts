@@ -1142,6 +1142,57 @@ describe('GameHistory.playerStats', () => {
   });
 });
 
+describe('GameHistory.forgetPerson', () => {
+  it('убирает человека из списка и из статистики, не трогая партию', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    const gameId = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: a }],
+    })!;
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'q1',
+      answeredByCounterId: 'c1',
+      correct: true,
+    });
+
+    expect(history.forgetPerson(a)).toBe(true);
+    expect(history.listPeople()).toEqual([]);
+    expect(history.playerStats().people).toEqual([]);
+    // Вопрос остаётся: он обезличен и нужен генератору (спека анкет,
+    // «Удаление — человек целиком, и это сказано прямо»).
+    expect(history.allPlayedQuestions()).toHaveLength(1);
+  });
+
+  it('забывает одного, не трогая соседа по столу', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    const b = history.createPerson('Катя', '2026-08-26')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [
+        { counterId: 'c1', name: 'Ваня', personId: a },
+        { counterId: 'c2', name: 'Катя', personId: b },
+      ],
+    });
+
+    expect(history.forgetPerson(a)).toBe(true);
+    expect(history.listPeople()).toEqual([{ id: b, name: 'Катя', games: 1 }]);
+  });
+
+  it('возвращает false на несуществующего человека, база цела', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    expect(history.forgetPerson(999)).toBe(false);
+    expect(history.listPeople()).toEqual([{ id: a, name: 'Ваня', games: 0 }]);
+  });
+});
+
 describe('GameHistory.mergePeople', () => {
   it('перепривязывает состав и удаляет лишнюю запись', () => {
     const history = makeHistory();

@@ -26,8 +26,10 @@ import {
 } from './generatorProfile.js';
 import { TAG_REASONS } from './protocol.js';
 import type { ProfileAggregateSource, PeopleAdmin } from './history.js';
-import { parsePlayerCard } from './playerCard.js';
+import { parsePlayerCard, sameName } from './playerCard.js';
 import {
+  deletePlayerCard,
+  readPlayerCard,
   readPlayerList,
   savePlayerCard,
   savePlayerStats,
@@ -294,6 +296,27 @@ export function createServer(options: CreateServerOptions): GameServer {
         err,
       );
     }
+  }
+
+  // Список анкет для /admin вместе с числом партий каждого имени в истории.
+  // Число нужно диалогу удаления: он обязан сказать, сколько записей исчезнет
+  // вместе с анкетой, а не спрашивать «вы уверены?» (спека анкет, «Удаление —
+  // человек целиком»).
+  //
+  // Сложение по всем совпавшим людям, а не по первому: пока расщепившиеся
+  // профили одного человека не слиты, их в истории двое, и удаление заберёт
+  // обоих — значит и считать надо обоих.
+  async function playersView(
+    path: string,
+  ): Promise<{ name: string; date: string; games: number }[]> {
+    const players = await readPlayerList(path);
+    const people = history?.listPeople() ?? [];
+    return players.map((player) => ({
+      ...player,
+      games: people
+        .filter((person) => sameName(person.name, player.name))
+        .reduce((sum, person) => sum + person.games, 0),
+    }));
   }
 
   // Сборка записи жалобы для handleReportQuestion — единственного
@@ -744,7 +767,7 @@ export function createServer(options: CreateServerOptions): GameServer {
         if (!playersPath) return;
         send(ws, {
           type: 'admin-players',
-          players: await readPlayerList(playersPath),
+          players: await playersView(playersPath),
         });
       }
 
@@ -753,7 +776,27 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.code === 'string' &&
         typeof message.replace === 'boolean'
       ) {
-        await handleSavePlayer(message.code, message.replace);
+        await handleSavePlayer(
+          message.code,
+          message.replace,
+          typeof message.originalName === 'string'
+            ? message.originalName
+            : undefined,
+        );
+      }
+
+      if (
+        message.type === 'admin-get-player' &&
+        typeof message.name === 'string'
+      ) {
+        await handleGetPlayer(message.name);
+      }
+
+      if (
+        message.type === 'admin-delete-player' &&
+        typeof message.name === 'string'
+      ) {
+        await handleDeletePlayer(message.name);
       }
 
       if (
@@ -953,6 +996,7 @@ export function createServer(options: CreateServerOptions): GameServer {
       async function handleSavePlayer(
         code: string,
         replace: boolean,
+        originalName?: string,
       ): Promise<void> {
         if (!playersPath) return;
         const parsed = parsePlayerCard(code);
@@ -961,18 +1005,31 @@ export function createServer(options: CreateServerOptions): GameServer {
           return;
         }
         try {
+          // Правка своей же анкеты — не конфликт: раздел с этим именем и
+          // есть тот, который правят. Спрашивать про замену тут значило бы
+          // требовать подтверждения у человека, который только что нажал
+          // «Редактировать» именно на нём.
+          const editingSelf =
+            originalName !== undefined &&
+            sameName(originalName, parsed.card.name);
           const conflict = await withPlayersWriteLock(async () => {
             const existing = await readPlayerList(playersPath);
-            const same = existing.find(
-              (player) =>
-                player.name.toLowerCase() === parsed.card.name.toLowerCase(),
+            const same = existing.find((player) =>
+              sameName(player.name, parsed.card.name),
             );
-            if (same && !replace) return same.name;
+            if (same && !replace && !editingSelf) return same.name;
             await savePlayerCard(
               playersPath,
               parsed.card,
               new Date().toISOString().slice(0, 10),
             );
+            // Переименование: новый раздел уже записан, старый убирается
+            // здесь же, под тем же замком. Иначе между записью и удалением
+            // в файле лежали бы два раздела одного человека, и партия,
+            // дошедшая до game-end в этот момент, увидела бы их оба.
+            if (originalName !== undefined && !editingSelf) {
+              await deletePlayerCard(playersPath, originalName);
+            }
             return null;
           });
           if (conflict !== null) {
@@ -981,7 +1038,7 @@ export function createServer(options: CreateServerOptions): GameServer {
           }
           send(ws, {
             type: 'admin-players',
-            players: await readPlayerList(playersPath),
+            players: await playersView(playersPath),
           });
         } catch (err) {
           send(ws, {
@@ -990,6 +1047,76 @@ export function createServer(options: CreateServerOptions): GameServer {
               (err as NodeJS.ErrnoException).code === 'ENOENT'
                 ? 'файл анкет не найден'
                 : 'не удалось сохранить анкету',
+          });
+        }
+      }
+
+      // Анкета для формы правки. Отсутствие раздела — не ошибка сервера, а
+      // устаревший список у ведущего: анкету могли удалить с другого
+      // устройства, пока он смотрел на экран.
+      async function handleGetPlayer(name: string): Promise<void> {
+        if (!playersPath) return;
+        const found = await readPlayerCard(playersPath, name);
+        if (!found) {
+          send(ws, {
+            type: 'admin-player-error',
+            reason: 'такой анкеты уже нет — обнови список',
+          });
+          return;
+        }
+        send(ws, {
+          type: 'admin-player',
+          card: found.card,
+          extraLines: found.extraLines,
+        });
+      }
+
+      // Удаление человека целиком: анкета и все его записи в истории партий.
+      // Сыгранные вопросы и оценки не трогаются — они привязаны к вопросу, а
+      // не к человеку (спека анкет, «Удаление — человек целиком, и это
+      // сказано прямо»).
+      //
+      // Связь анкеты с историей — по имени, тем же сравнением, каким ищется
+      // раздел для замены. Другой связи между ними нет и не было: раздел
+      // «Показывает в игре» сходится с анкетой тоже по имени.
+      async function handleDeletePlayer(name: string): Promise<void> {
+        if (!playersPath) return;
+        // Пока партия идёт, человек связан с участником и счётчиком за
+        // столом — ровно та же причина, по которой запрещено слияние.
+        if (room.hasActiveGame()) {
+          send(ws, {
+            type: 'admin-player-error',
+            reason: 'нельзя удалять анкету, пока идёт партия',
+          });
+          return;
+        }
+        try {
+          await withPlayersWriteLock(() => deletePlayerCard(playersPath, name));
+          if (history) {
+            for (const person of history
+              .listPeople()
+              .filter((candidate) => sameName(candidate.name, name))) {
+              history.forgetPerson(person.id);
+            }
+            // Пересчёт сразу, а не после следующей партии: иначе имя
+            // удалённого осталось бы в «Показывает в игре» — то есть в том
+            // самом файле, из которого его только что убрали.
+            await refreshPlayerStats();
+          }
+          send(ws, {
+            type: 'admin-players',
+            players: await playersView(playersPath),
+          });
+          if (history) {
+            send(ws, { type: 'admin-people', people: history.listPeople() });
+          }
+        } catch (err) {
+          send(ws, {
+            type: 'admin-player-error',
+            reason:
+              (err as NodeJS.ErrnoException).code === 'ENOENT'
+                ? 'файл анкет не найден'
+                : 'не удалось удалить анкету',
           });
         }
       }

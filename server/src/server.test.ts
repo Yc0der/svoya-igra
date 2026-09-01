@@ -3298,7 +3298,7 @@ describe('createServer player questionnaire', () => {
     const message = await admin.nextMessage();
     expect(message).toEqual({
       type: 'admin-players',
-      players: [{ name: 'Ваня', date: expect.any(String) }],
+      players: [{ name: 'Ваня', date: expect.any(String), games: 0 }],
     });
     const content = await readFile(playersPath, 'utf8');
     expect(content).toContain('- **Спорт:** Формула-1');
@@ -3441,15 +3441,181 @@ describe('createServer player questionnaire', () => {
     expect(content).toContain('## Катя');
     admin.ws.close();
   });
+  it('admin-get-player отдаёт анкету и ручные строки раздела', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+    const withNote = (await readFile(playersPath, 'utf8')).replace(
+      '- **Спорт:** Формула-1',
+      '- **Спорт:** Формула-1\nПометка ведущего.',
+    );
+    await writeFile(playersPath, withNote, 'utf8');
+
+    admin.ws.send(JSON.stringify({ type: 'admin-get-player', name: 'ваня' }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-player',
+      card: {
+        name: 'Ваня',
+        interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+        boring: [],
+      },
+      extraLines: ['Пометка ведущего.'],
+    });
+    admin.ws.close();
+  });
+
+  it('admin-get-player на незнакомое имя отдаёт ошибку, а не пустую анкету', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(JSON.stringify({ type: 'admin-get-player', name: 'Пётр' }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-player-error',
+      reason: 'такой анкеты уже нет — обнови список',
+    });
+    admin.ws.close();
+  });
+
+  it('правка с тем же именем заменяет раздел, а не заводит второй', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+
+    const edited = JSON.stringify({
+      version: 1,
+      name: 'Ваня',
+      interests: [{ area: 'Спорт', examples: ['хоккей'] }],
+      boring: ['Мода'],
+    });
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: edited,
+        replace: true,
+        originalName: 'Ваня',
+      }),
+    );
+    const message = (await admin.nextMessage()) as {
+      players: { name: string }[];
+    };
+    expect(message.players).toHaveLength(1);
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).toContain('- **Спорт:** хоккей');
+    expect(content).not.toContain('Формула-1');
+    admin.ws.close();
+  });
+
+  it('смена имени в форме переименовывает, а не заводит вторую анкету', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+
+    const renamed = JSON.stringify({
+      version: 1,
+      name: 'Иван',
+      interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+      boring: [],
+    });
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: renamed,
+        replace: true,
+        originalName: 'Ваня',
+      }),
+    );
+    const message = (await admin.nextMessage()) as {
+      players: { name: string }[];
+    };
+    expect(message.players).toEqual([
+      { name: 'Иван', date: expect.any(String), games: 0 },
+    ]);
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).not.toContain('## Ваня');
+    admin.ws.close();
+  });
+
+  it('переименование в занятое имя без подтверждения не трогает файл', async () => {
+    const admin = await connectAdmin(baseUrl);
+    for (const name of ['Ваня', 'Катя']) {
+      admin.ws.send(
+        JSON.stringify({
+          type: 'admin-save-player',
+          code: JSON.stringify({
+            version: 1,
+            name,
+            interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+            boring: [],
+          }),
+          replace: false,
+        }),
+      );
+      await admin.nextMessage();
+    }
+    const before = await readFile(playersPath, 'utf8');
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: JSON.stringify({
+          version: 1,
+          name: 'Катя',
+          interests: [{ area: 'Игры', examples: ['дота'] }],
+          boring: [],
+        }),
+        replace: false,
+        originalName: 'Ваня',
+      }),
+    );
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-player-exists',
+      name: 'Катя',
+    });
+    expect(await readFile(playersPath, 'utf8')).toBe(before);
+    admin.ws.close();
+  });
+
+  it('admin-delete-player убирает анкету и отдаёт обновлённый список', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-player', name: 'ваня' }),
+    );
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-players',
+      players: [],
+    });
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).not.toContain('## Ваня');
+    expect(content).toContain('Вводный текст.');
+    admin.ws.close();
+  });
 });
 
-// Раздел «Показывает в игре» (задача 5, sdd/2026-08-26-player-identity).
-// Собственный history — GameHistory(':memory:'), как и в 'game-end
-// пересчитывает «Автособранное»' выше: playerStats() читает настоящий SQLite,
-// а не заглушку, и оба участника заходят через join-as с personId из
-// history.createPerson — только так они попадают в game_people, откуда
-// playerStats() вообще берёт людей (участник, зашедший обычным join, там не
-// появится, см. history.ts, startGame).
 describe('createServer game-end player stats', () => {
   it('game-end пересчитывает «Показывает в игре» реальными числами партии', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -3853,6 +4019,143 @@ describe('createServer admin merge people', () => {
     );
 
     admin.ws.close();
+  });
+});
+
+describe('createServer admin delete player', () => {
+  let server: GameServer;
+  let dir: string;
+  let baseUrl: string;
+  let history: GameHistory;
+  let playersPath: string;
+
+  const CODE = JSON.stringify({
+    version: 1,
+    name: 'Ваня',
+    interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+    boring: [],
+  });
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-delete-player-'));
+    history = new GameHistory(':memory:');
+    playersPath = join(dir, 'players.md');
+    await writeFile(
+      playersPath,
+      `# Анкеты игроков\n\nВводный текст.\n`,
+      'utf8',
+    );
+    const room = new Room(
+      undefined,
+      TEST_PACK,
+      undefined,
+      'test.json',
+      history,
+    );
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+      playersPath,
+      history,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    history.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function saveVanya(admin: {
+    ws: WebSocket;
+    nextMessage: () => Promise<unknown>;
+  }): Promise<void> {
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-save-player', code: CODE, replace: false }),
+    );
+    await admin.nextMessage();
+  }
+
+  it('удаление убирает и человека из истории, и его блок «Показывает в игре»', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'test.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    });
+    const admin = await connectAdmin(baseUrl);
+    await saveVanya(admin);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-player', name: 'Ваня' }),
+    );
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-players',
+      players: [],
+    });
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people',
+      people: [],
+    });
+    expect(history.listPeople()).toEqual([]);
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).not.toContain('## Ваня');
+    expect(content).not.toContain('### Ваня');
+    admin.ws.close();
+  });
+
+  it('число партий в списке считается по имени, с поправкой на регистр', async () => {
+    const vanyaId = history.createPerson('  вАНЯ ', '2026-08-01')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'test.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    });
+    const admin = await connectAdmin(baseUrl);
+    await saveVanya(admin);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-get-players' }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-players',
+      players: [{ name: 'Ваня', date: expect.any(String), games: 1 }],
+    });
+    admin.ws.close();
+  });
+
+  it('во время идущей партии отказывает и ничего не трогает', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const admin = await connectAdmin(baseUrl);
+    await saveVanya(admin);
+    const before = await readFile(playersPath, 'utf8');
+
+    const a = await joinPlayer(baseUrl, 'Игрок 1');
+    await admin.nextMessage();
+    const b = await joinPlayer(baseUrl, 'Игрок 2');
+    await admin.nextMessage();
+    await a.nextMessage();
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-player', name: 'Ваня' }),
+    );
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-player-error',
+      reason: 'нельзя удалять анкету, пока идёт партия',
+    });
+    expect(await readFile(playersPath, 'utf8')).toBe(before);
+    expect(history.listPeople().map((person) => person.id)).toContain(vanyaId);
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
   });
 });
 

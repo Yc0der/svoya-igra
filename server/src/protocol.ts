@@ -2,6 +2,7 @@ import type { Phase } from './engine.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
 import type { Pack, Question } from './pack.js';
+import type { PlayerCard } from './playerCard.js';
 
 export interface ParticipantView {
   id: string;
@@ -261,7 +262,18 @@ export type ClientMessage =
       // подтвердил замену. Подтверждение спрашивается один раз и на стороне
       // клиента, чтобы сервер оставался без состояния между сообщениями.
       replace: boolean;
+      // Правка через форму в /admin: имя, под которым анкета лежала до
+      // правки. Если ведущий сменил имя в форме, это переименование — старый
+      // раздел уходит, новый встаёт на его место. Форма шлёт тот же код
+      // анкеты, что приходит с телефона, ровно затем, чтобы разбор, проверки
+      // и экранирование остались в одном месте на оба источника.
+      originalName?: string;
     }
+  // Форма правки: отдать анкету так, как она лежит в файле.
+  | { type: 'admin-get-player'; name: string }
+  // Удаление человека целиком — и анкета, и его записи в истории партий.
+  // Сервер сам проверяет, что партия не идёт, как и при слиянии.
+  | { type: 'admin-delete-player'; name: string }
   // Слияние расщепившихся профилей одного человека (design.md,
   // 2026-08-26-player-identity, «Слияние профилей») — направление указывает
   // ведущий: fromId исчезает, intoId остаётся. Сервер сам проверяет, что
@@ -388,7 +400,22 @@ export type ServerMessage =
     }
   // Отдаётся и на admin-get-players, и как подтверждение успешной записи —
   // список всегда актуальный, клиенту не нужно догадываться, что изменилось.
-  | { type: 'admin-players'; players: { name: string; date: string }[] }
+  | {
+      type: 'admin-players';
+      // games — сколько партий этого имени лежит в истории. Нужен диалогу
+      // удаления: «анкета и 4 партии» честнее, чем «вы уверены?». Ноль
+      // значит и «человек не играл», и «в истории он назвался иначе» — по
+      // спеке ведущий обязан видеть это до удаления, а не гадать.
+      players: { name: string; date: string; games: number }[];
+    }
+  // Ответ на admin-get-player: анкета как она лежит в файле. extraLines —
+  // строки раздела, которых форма не знает (ручные пометки): форма их
+  // показывает как есть и возвращает серверу нетронутыми.
+  | {
+      type: 'admin-player';
+      card: PlayerCard;
+      extraLines: string[];
+    }
   | { type: 'admin-player-exists'; name: string }
   | { type: 'admin-player-error'; reason: string }
   // Ответ на admin-merge-people: обновлённый список, той же формы, что и

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   listPlayers,
+  parsePlayerSection,
+  removePlayerSection,
   oneLine,
   parsePlayerCard,
   renderPlayerSection,
@@ -290,5 +292,134 @@ describe('listPlayers', () => {
 
   it('на файле без игроков отдаёт пустой список', () => {
     expect(listPlayers('# Анкеты игроков\n\nВводный текст.\n')).toEqual([]);
+  });
+  it('не считает машинный раздел «Показывает в игре» анкетой', () => {
+    const file = [
+      '## Ваня',
+      '',
+      '- **Спорт:** хоккей',
+      '',
+      '## Показывает в игре',
+      '',
+      '### Ваня',
+      '',
+      'Всего: нажимал 1 из 2.',
+      '',
+    ].join('\n');
+    expect(listPlayers(file).map((player) => player.name)).toEqual(['Ваня']);
+  });
+});
+
+describe('parsePlayerSection', () => {
+  it('разбирает обратно то, что записал renderPlayerSection', () => {
+    const file = upsertPlayerSection(FILE, CARD, '2026-08-26');
+    const parsed = parsePlayerSection(file, CARD.name);
+    expect(parsed?.card).toEqual(CARD);
+    expect(parsed?.extraLines).toEqual([]);
+  });
+
+  it('ручную пометку кладёт в extraLines, а не в интересы', () => {
+    const file = [
+      '## Ваня',
+      '',
+      '_Анкета от 2026-08-01._',
+      '',
+      '- **Спорт:** хоккей',
+      'Пришёл через Катю, спросить про сериалы.',
+      '',
+    ].join('\n');
+    const parsed = parsePlayerSection(file, 'Ваня');
+    expect(parsed?.card.interests).toEqual([
+      { area: 'Спорт', examples: ['хоккей'] },
+    ]);
+    expect(parsed?.extraLines).toEqual([
+      'Пришёл через Катю, спросить про сериалы.',
+    ]);
+  });
+
+  it('«Скучно» попадает в boring, а не в интересы', () => {
+    const file = [
+      '## Ваня',
+      '',
+      '- **Спорт:** хоккей',
+      '- **Скучно:** Мода, Политика',
+      '',
+    ].join('\n');
+    const parsed = parsePlayerSection(file, 'Ваня');
+    expect(parsed?.card.boring).toEqual(['Мода', 'Политика']);
+    expect(parsed?.card.interests).toEqual([
+      { area: 'Спорт', examples: ['хоккей'] },
+    ]);
+  });
+
+  it('имя сравнивает нечувствительно к регистру и лишним пробелам', () => {
+    expect(parsePlayerSection(FILE, '  вАНЯ ')?.card.name).toBe('Ваня');
+  });
+
+  it('не отдаёт чужой раздел по префиксу имени', () => {
+    const file = ['## Ваня и Катя', '', '- **Спорт:** хоккей', ''].join('\n');
+    expect(parsePlayerSection(file, 'Ваня')).toBeNull();
+  });
+
+  it('на незнакомое имя отдаёт null', () => {
+    expect(parsePlayerSection(FILE, 'Пётр')).toBeNull();
+  });
+});
+
+describe('removePlayerSection', () => {
+  it('вырезает раздел, не трогая соседей и вводную часть', () => {
+    const result = removePlayerSection(FILE, 'Ваня');
+    expect(result).toContain('Вводный текст.');
+    expect(result).toContain('## Катя');
+    expect(result).not.toContain('## Ваня');
+    expect(result).not.toContain('- **Спорт:** старое');
+  });
+
+  it('вырезает все разделы с этим именем, а не только первый', () => {
+    const doubled = `${FILE}
+## Ваня
+
+- **Игры:** дота
+`;
+    const result = removePlayerSection(doubled, 'Ваня');
+    expect(result).not.toContain('## Ваня');
+    expect(result).not.toContain('- **Игры:** дота');
+  });
+
+  it('на незнакомое имя оставляет файл байт в байт', () => {
+    expect(removePlayerSection(FILE, 'Пётр')).toBe(FILE);
+  });
+
+  it('не оставляет за собой хвост из пустых строк', () => {
+    const result = removePlayerSection(FILE, 'Катя');
+    expect(result.endsWith('\n\n\n')).toBe(false);
+  });
+});
+
+describe('renderPlayerSection с extraLines', () => {
+  it('возвращает нераспознанные строки в конец раздела', () => {
+    const section = renderPlayerSection(CARD, '2026-08-26', ['Пометка.']);
+    expect(section.split('\n').at(-1)).toBe('Пометка.');
+  });
+
+  it('переживает круг разбор → правка → запись', () => {
+    const file = [
+      '## Ваня',
+      '',
+      '_Анкета от 2026-08-01._',
+      '',
+      '- **Спорт:** хоккей',
+      'Пометка ведущего.',
+      '',
+    ].join('\n');
+    const parsed = parsePlayerSection(file, 'Ваня');
+    const updated = upsertPlayerSection(
+      file,
+      { ...parsed!.card, boring: ['Мода'] },
+      '2026-09-02',
+      parsed!.extraLines,
+    );
+    expect(updated).toContain('- **Скучно:** Мода');
+    expect(updated).toContain('Пометка ведущего.');
   });
 });

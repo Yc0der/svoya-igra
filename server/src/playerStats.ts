@@ -1,11 +1,11 @@
 import type { PersonStats, PlayerStats } from './history.js';
 import { findSectionRange } from './markdownSection.js';
-import { oneLine } from './playerCard.js';
+import { oneLine, STATS_HEADING } from './playerCard.js';
 
 // Заголовок раздела. spliceStatsSection ищет по нему границы заменяемого
 // куска, поэтому это одна константа на оба места (задача 3, profileSection.ts
 // со своим AUTO_HEADING — тот же приём).
-export const STATS_HEADING = '## Показывает в игре';
+export { STATS_HEADING };
 
 // Ограничение ПОКАЗА, а не порог вывода: человек, сыгравший десятки партий,
 // может набрать сотни разных тем, и полный список не поместился бы в разумный

@@ -1,5 +1,14 @@
 import { sectionEnd } from './markdownSection.js';
 
+/**
+ * Заголовок машинного раздела в конце docs/players.md: его пишет сервер по
+ * сыгранным партиям (playerStats.ts), а не ведущий. Живёт здесь, а не там,
+ * потому что это часть структуры файла, которую разбирает этот модуль:
+ * listPlayers обязан отличать его от анкеты, иначе «Показывает в игре»
+ * появляется в /admin как игрок, которого можно править и удалять.
+ */
+export const STATS_HEADING = '## Показывает в игре';
+
 export interface PlayerInterest {
   area: string;
   examples: string[];
@@ -41,7 +50,7 @@ export function oneLine(value: string): string {
 // Строже, чем Room.normalizeName (trim + toLowerCase, внутренние пробелы не
 // трогает): здесь сравнивается ровно то значение, что попадёт в заголовок
 // раздела, а туда оно уже приходит схлопнутым.
-function sameName(a: string, b: string): boolean {
+export function sameName(a: string, b: string): boolean {
   return oneLine(a).toLowerCase() === oneLine(b).toLowerCase();
 }
 
@@ -105,7 +114,11 @@ export function parsePlayerCard(code: string): ParsedCard {
  * вставка. Дата приходит параметром: модуль не обращается к часам, тот же
  * приём, что в generatorProfile.ts.
  */
-export function renderPlayerSection(card: PlayerCard, date: string): string {
+export function renderPlayerSection(
+  card: PlayerCard,
+  date: string,
+  extraLines: string[] = [],
+): string {
   const lines = [`## ${oneLine(card.name)}`, '', `_Анкета от ${date}._`, ''];
   for (const interest of card.interests) {
     lines.push(
@@ -115,6 +128,11 @@ export function renderPlayerSection(card: PlayerCard, date: string): string {
   if (card.boring.length > 0) {
     lines.push(`- **Скучно:** ${card.boring.map(oneLine).join(', ')}`);
   }
+  // Строки, которых форма не знает (ручные пометки ведущего), возвращаются на
+  // место как есть — иначе правка анкеты через /admin молча стирала бы то,
+  // что человек дописал в файл руками. Экранирование им не нужно и вредно:
+  // это текст, который ведущий уже написал прямо в markdown.
+  lines.push(...extraLines.map(oneLine));
   return lines.join('\n');
 }
 
@@ -127,6 +145,7 @@ export function upsertPlayerSection(
   fileText: string,
   card: PlayerCard,
   date: string,
+  extraLines: string[] = [],
 ): string {
   const lines = fileText.split('\n');
   // Все разделы с этим именем, а не только первый: файл заявлен как правимый
@@ -144,7 +163,7 @@ export function upsertPlayerSection(
       starts.push(index);
     }
   });
-  const section = renderPlayerSection(card, date).split('\n');
+  const section = renderPlayerSection(card, date, extraLines).split('\n');
   if (starts.length > 0) {
     const result: string[] = [];
     let cursor = 0;
@@ -172,7 +191,12 @@ export function listPlayers(
 ): { name: string; date: string }[] {
   const lines = fileText.split('\n');
   const players: { name: string; date: string }[] = [];
-  lines.forEach((line, index) => {
+  // Всё ниже машинного раздела — не анкеты: там числа по партиям, и раздел
+  // всегда последний в файле (spliceStatsSection). Поэтому не «пропустить
+  // один заголовок», а остановиться: анкет за ним не бывает по построению.
+  const statsAt = lines.findIndex((line) => line.trim() === STATS_HEADING);
+  const end = statsAt === -1 ? lines.length : statsAt;
+  lines.slice(0, end).forEach((line, index) => {
     if (!line.startsWith('## ')) return;
     const name = oneLine(line.slice(3));
     if (name === '') return;
@@ -188,4 +212,83 @@ export function listPlayers(
     players.push({ name, date });
   });
   return players;
+}
+
+/**
+ * Раздел одного игрока обратно в анкету — то, чем форма правки в /admin
+ * заполняет свои поля. Обратная сторона renderPlayerSection: круговой тест
+ * «отрендерили → разобрали → то же самое» держит их в согласии.
+ *
+ * `extraLines` — всё непустое, чего форма не знает: файл заявлен как правимый
+ * руками, и ведущий мог дописать в раздел свою пометку. Она возвращается на
+ * место при записи, а не пропадает от того, что кто-то нажал «Сохранить».
+ * Строка «_Анкета от …._» служебная — её пишет рендер, и в extraLines ей
+ * делать нечего, иначе она задваивалась бы с каждой правкой.
+ *
+ * Примеры разбираются делением по запятой — ровно так же, как рендер их
+ * склеивает. Пример с запятой внутри («Кино, которое я люблю») разъедется на
+ * два; в формате файла эти два случая неразличимы в принципе, и выбирать
+ * приходится между потерей запятой и потерей читаемости файла. Файл важнее.
+ */
+export function parsePlayerSection(
+  fileText: string,
+  name: string,
+): { card: PlayerCard; extraLines: string[] } | null {
+  const lines = fileText.split('\n');
+  const start = lines.findIndex(
+    (line) => line.startsWith('## ') && sameName(line.slice(3), name),
+  );
+  if (start === -1) return null;
+  const end = sectionEnd(lines, start);
+  const interests: PlayerInterest[] = [];
+  const boring: string[] = [];
+  const extraLines: string[] = [];
+  for (let i = start + 1; i < end; i += 1) {
+    const line = lines[i].trim();
+    if (line === '') continue;
+    if (/^_Анкета от (.+)\._$/.test(line)) continue;
+    const bullet = /^- \*\*(.+?):\*\*\s*(.*)$/.exec(line);
+    if (!bullet) {
+      extraLines.push(line);
+      continue;
+    }
+    const area = oneLine(bullet[1]);
+    const values = bullet[2]
+      .split(',')
+      .map(oneLine)
+      .filter((value) => value !== '');
+    if (sameName(area, 'Скучно')) {
+      boring.push(...values);
+      continue;
+    }
+    interests.push({ area, examples: values });
+  }
+  return {
+    card: { name: oneLine(lines[start].slice(3)), interests, boring },
+    extraLines,
+  };
+}
+
+/**
+ * Убирает разделы игрока из файла. Все с этим именем, а не первый — по той же
+ * причине, что и в upsertPlayerSection: файл правится руками, и «## Ваня»
+ * может оказаться в нём дважды. Оставить нижнюю копию значило бы показать
+ * ведущему, что анкета удалена, и продолжать кормить ею генератор.
+ *
+ * Соседние разделы и вводная часть не трогаются: вырезаются ровно границы
+ * раздела, которые sectionEnd и так считает для всех остальных операций.
+ */
+export function removePlayerSection(fileText: string, name: string): string {
+  const lines = fileText.split('\n');
+  const result: string[] = [];
+  let cursor = 0;
+  lines.forEach((line, index) => {
+    if (index < cursor) return;
+    if (!line.startsWith('## ') || !sameName(line.slice(3), name)) return;
+    result.push(...lines.slice(cursor, index));
+    cursor = sectionEnd(lines, index);
+  });
+  if (cursor === 0) return fileText;
+  result.push(...lines.slice(cursor));
+  return result.join('\n');
 }

@@ -281,6 +281,7 @@ export interface PlayerStats {
 export interface PeopleAdmin {
   listPeople(): PersonSummary[];
   mergePeople(fromId: number, intoId: number): boolean;
+  forgetPerson(id: number): boolean;
   playerStats(): PlayerStats;
 }
 
@@ -916,6 +917,40 @@ export class GameHistory
       }
     } catch (err) {
       console.error('История: не удалось слить игроков —', err);
+      return false;
+    }
+  }
+
+  /**
+   * Забывает человека: убирает его из состава всех партий и удаляет саму
+   * запись. Возвращает false, если такого человека нет.
+   *
+   * Порядок обязателен и тот же, что в mergePeople: внешние ключи включены,
+   * и удаление человека, на которого ещё ссылается game_people, провалилось
+   * бы. Разница со слиянием в том, что состав никуда не перепривязывается —
+   * партия остаётся, но игравший в ней человек больше не назван.
+   *
+   * Сыгранные вопросы, оценки и жалобы не трогаются намеренно: они привязаны
+   * к вопросу, а не к человеку, обезличены с самого начала, и удалять их
+   * значило бы портить обучение генератора ради данных, в которых человека и
+   * так нет (спека анкет, «Удаление — человек целиком, и это сказано прямо»).
+   */
+  forgetPerson(id: number): boolean {
+    try {
+      this.db.exec('BEGIN');
+      try {
+        this.db.prepare(`DELETE FROM game_people WHERE person_id = ?`).run(id);
+        const deleted = this.db
+          .prepare(`DELETE FROM people WHERE id = ?`)
+          .run(id);
+        this.db.exec('COMMIT');
+        return Number(deleted.changes) > 0;
+      } catch (err) {
+        this.db.exec('ROLLBACK');
+        throw err;
+      }
+    } catch (err) {
+      console.error('История: не удалось забыть игрока —', err);
       return false;
     }
   }
