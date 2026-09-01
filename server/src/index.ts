@@ -9,6 +9,7 @@ import { createServer } from './server.js';
 import { loadPack } from './pack.js';
 import { listAvailablePacks } from './packs.js';
 import { GameHistory } from './history.js';
+import { ensurePlayersFile } from './playersFile.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
@@ -30,6 +31,10 @@ const PROFILE_PATH =
   process.env.PROFILE_PATH ?? './docs/pack-generator-profile.md';
 // docs/players.md — анкеты интересов (design.md, 2026-08-26).
 const PLAYERS_PATH = process.env.PLAYERS_PATH ?? './docs/players.md';
+// Самих анкет в репозитории нет — это личные данные (см. .gitignore). В гите
+// лежит только пустой шаблон, из которого файл создаётся при первом запуске.
+const PLAYERS_TEMPLATE_PATH =
+  process.env.PLAYERS_TEMPLATE_PATH ?? './docs/players.template.md';
 // Разовая добавка к hiddenInterfaces из LAN_HOST_CONFIG_PATH ниже — для
 // одного запуска, не заводя постоянную запись в файл. Список интерфейсов,
 // не адресов: у заведомо бесполезных на этой машине адаптеров (VPN,
@@ -180,6 +185,8 @@ async function main(): Promise<void> {
       console.error(`Не удалось сохранить ${LAN_HOST_CONFIG_PATH}:`, err);
     });
   });
+
+  await ensurePlayersFile(PLAYERS_PATH, PLAYERS_TEMPLATE_PATH);
 
   const { httpServer } = createServer({
     room,

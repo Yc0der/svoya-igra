@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  ensurePlayersFile,
   readPlayerList,
   savePlayerCard,
   savePlayerStats,
@@ -15,6 +16,11 @@ const CARD: PlayerCard = {
   interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
   boring: ['Мода'],
 };
+
+const TEMPLATE = `# Анкеты игроков
+
+Пока пусто.
+`;
 
 const STATS: PlayerStats = {
   games: 1,
@@ -91,5 +97,27 @@ describe('playersFile', () => {
     await savePlayerStats(playersPath, STATS);
     const second = await stat(playersPath);
     expect(second.mtimeMs).toBe(first.mtimeMs);
+  });
+  it('создаёт файл анкет из шаблона, если его ещё нет', async () => {
+    const templatePath = join(dir, 'players.template.md');
+    await writeFile(templatePath, TEMPLATE, 'utf8');
+    const missing = join(dir, 'нет-такого.md');
+    await ensurePlayersFile(missing, templatePath);
+    expect(await readFile(missing, 'utf8')).toBe(TEMPLATE);
+  });
+
+  it('не трогает уже существующий файл анкет', async () => {
+    const templatePath = join(dir, 'players.template.md');
+    await writeFile(templatePath, TEMPLATE, 'utf8');
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    await ensurePlayersFile(playersPath, templatePath);
+    expect(await readFile(playersPath, 'utf8')).toContain('## Ваня');
+  });
+
+  it('без шаблона не падает — сервер обязан подняться и без него', async () => {
+    const missing = join(dir, 'нет-такого.md');
+    await expect(
+      ensurePlayersFile(missing, join(dir, 'нет-шаблона.md')),
+    ).resolves.toBeUndefined();
   });
 });

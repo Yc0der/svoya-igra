@@ -68,3 +68,10 @@ lan-host.local.json.tmp
 
 # Состояние хука точек выхода (.claude/scripts/checkpoint.mjs) — на сессию, не на репозиторий
 .claude/state/
+
+# Анкеты игроков (docs/players.md) — имена и интересы реальных людей плюс раздел
+# «Показывает в игре», который сервер считает из game-history.db. Личным данным
+# в репозитории не место: в гите лежит только пустой шаблон
+# docs/players.template.md, сервер копирует его при первом запуске.
+docs/players.md
+docs/players.md.tmp

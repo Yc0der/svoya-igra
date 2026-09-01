@@ -75,6 +75,8 @@ pnpm-монорепозиторий, две рабочие области: `serv
 - `docs/superpowers/specs/2026-08-03-svoya-igra-design.md` — что строим и почему
 - `docs/ideas.md` — что сознательно не строим, с причинами
 - `docs/lifecycle.md` — цикл разработки под этот проект
-- `docs/players.md`, `docs/pack-generator-profile.md` — анкеты игроков и профиль генератора
+- `docs/players.md`, `docs/pack-generator-profile.md` — анкеты игроков и профиль генератора.
+  Первого в git нет — это личные данные, в репозитории лежит только пустой шаблон
+  `docs/players.template.md`, сервер копирует его при первом запуске
 - `docs/superpowers/plans/` — планы вех, там же секции «Состояние» от `/handoff`
 - `CONTRIBUTING.md` — ветки и коммиты

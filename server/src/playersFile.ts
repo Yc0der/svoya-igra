@@ -1,4 +1,5 @@
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { copyFile, readFile, rename, writeFile } from 'node:fs/promises';
 import {
   listPlayers,
   upsertPlayerSection,
@@ -60,5 +61,29 @@ export async function readPlayerList(
     return listPlayers(await readFile(playersPath, 'utf8'));
   } catch {
     return [];
+  }
+}
+
+/**
+ * Создаёт файл анкет из шаблона, если его ещё нет.
+ *
+ * Анкеты — имена и интересы живых людей, поэтому docs/players.md не в git: в
+ * репозитории лежит только пустой docs/players.template.md. На свежем клоне
+ * файла анкет нет вовсе, а savePlayerCard читает его перед записью — без
+ * этого шага первая же вставка анкеты в /admin падала бы с ENOENT.
+ *
+ * Ничего не делает, если файл уже есть (EEXIST) — затереть чужие анкеты
+ * шаблоном хуже, чем не создать файл. Отсутствие шаблона (ENOENT) тоже не
+ * повод не стартовать: сервер поднимается, админка открывается пустым
+ * списком.
+ */
+export async function ensurePlayersFile(
+  playersPath: string,
+  templatePath: string,
+): Promise<void> {
+  try {
+    await copyFile(templatePath, playersPath, constants.COPYFILE_EXCL);
+  } catch {
+    // Оба случая штатные — см. комментарий выше.
   }
 }
