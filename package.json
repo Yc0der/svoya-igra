@@ -9,6 +9,7 @@
     "test:scripts": "node --test \".claude/scripts/**/*.test.mjs\"",
     "build": "pnpm -r run build",
     "start": "node server/dist/index.js",
+    "anketa:screens": "node scripts/anketa-screens.mjs",
     "test:e2e": "pnpm run build && playwright test",
     "prepare": "husky"
   },
