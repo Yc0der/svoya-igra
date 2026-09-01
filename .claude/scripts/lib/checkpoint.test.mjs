@@ -247,6 +247,41 @@ test('главный git-путь: красный прогон проверок 
   });
 });
 
+test('главный git-путь: добавленный план напоминает А2, вторая галочка в нём — молчит', async () => {
+  await withTempCwd((cwd) => {
+    initGitRepo(cwd);
+    commitFile(cwd, 'docs/superpowers/plans/x.md', '# план\n\n- [ ] шаг 1\n');
+
+    const commitEvent = (message) =>
+      JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: `git commit -m "${message}"` },
+        cwd,
+        session_id: 'git-path-plan-checkbox-session',
+      });
+
+    const onAdd = runHook(commitEvent('docs: план'), cwd);
+    assert.match(onAdd, /А2/);
+
+    // Реальная регрессия I1: следующий коммит просто отмечает галочку в уже
+    // существующем плане — это не «план дописан», добавления файла тут нет.
+    writeFileSync(
+      join(cwd, 'docs/superpowers/plans/x.md'),
+      '# план\n\n- [x] шаг 1\n',
+      'utf8',
+    );
+    execFileSync('git', ['add', 'docs/superpowers/plans/x.md'], gitOpts(cwd));
+    execFileSync(
+      'git',
+      ['commit', '--quiet', '-m', 'docs: отметить шаг 1'],
+      gitOpts(cwd),
+    );
+
+    const onCheckbox = runHook(commitEvent('docs: отметить шаг 1'), cwd);
+    assert.equal(onCheckbox, '');
+  });
+});
+
 test('главный git-путь: отсутствующий транскрипт не даёт классу Б сработать', async () => {
   await withTempCwd((cwd) => {
     initGitRepo(cwd);

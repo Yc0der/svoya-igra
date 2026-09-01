@@ -166,11 +166,22 @@ async function main() {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
+  // Отдельно от changedPaths: только пути, добавленные именно этим коммитом.
+  // Решение (А1/А2 требуют «добавлен, не изменён») принимает checkpointReminder —
+  // здесь только факт из git.
+  const addedPaths = (
+    git(cwd, ['show', '--diff-filter=A', '--name-only', '--format=', 'HEAD']) ??
+    ''
+  )
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
 
   const text = checkpointReminder({
     event,
     commitSha,
     changedPaths,
+    addedPaths,
     worktreeClean,
     contextTokens: await contextTokens(payload, cwd),
     checks: state.checks ?? 'unknown',

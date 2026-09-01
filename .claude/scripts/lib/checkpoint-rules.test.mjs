@@ -82,11 +82,11 @@ test('checksVerdict читает вывод прогона', () => {
 });
 
 test('класс А1: закоммиченная спека — чистим без порога по контексту', () => {
+  const path = 'docs/superpowers/specs/2026-08-30-token-budget-design.md';
   const text = checkpointReminder(
     facts({
-      changedPaths: [
-        'docs/superpowers/specs/2026-08-30-token-budget-design.md',
-      ],
+      changedPaths: [path],
+      addedPaths: [path],
       contextTokens: 40_000,
     }),
   );
@@ -95,12 +95,57 @@ test('класс А1: закоммиченная спека — чистим б�
 });
 
 test('класс А2: закоммиченный план', () => {
+  const path = 'docs/superpowers/plans/2026-08-30-token-budget.md';
   const text = checkpointReminder(
-    facts({
-      changedPaths: ['docs/superpowers/plans/2026-08-30-token-budget.md'],
-    }),
+    facts({ changedPaths: [path], addedPaths: [path] }),
   );
   assert.match(text, /А2/);
+});
+
+test('класс А2: галочка в уже существующем плане не даёт напоминания (файл изменён, не добавлен)', () => {
+  const path = 'docs/superpowers/plans/2026-08-30-token-budget.md';
+  // Контекст ниже порога Б и здесь специально: тест проверяет именно то, что
+  // А2 не срабатывает на правку — а не что ничего вообще не сработает.
+  const text = checkpointReminder(
+    facts({ changedPaths: [path], addedPaths: [], contextTokens: 40_000 }),
+  );
+  assert.equal(text, null);
+});
+
+test('класс А1: правка уже существующей спеки не даёт напоминания (файл изменён, не добавлен)', () => {
+  const path = 'docs/superpowers/specs/2026-08-30-token-budget-design.md';
+  const text = checkpointReminder(
+    facts({ changedPaths: [path], addedPaths: [], contextTokens: 40_000 }),
+  );
+  assert.equal(text, null);
+});
+
+test('класс А2: смешанный коммит (новый план + код) — не конец writing-plans, класс Б решает дальше', () => {
+  const planPath = 'docs/superpowers/plans/2026-08-30-token-budget.md';
+  const codePath = 'server/src/example.ts';
+  const text = checkpointReminder(
+    facts({
+      changedPaths: [planPath, codePath],
+      addedPaths: [planPath, codePath],
+    }),
+  );
+  // Не А2: план не единственное, что принёс этот коммит. Контекст в facts() по
+  // умолчанию выше порога и проверки зелёные — коммит падает в класс Б, как обычный.
+  assert.doesNotMatch(text ?? '', /А2/);
+  assert.match(text, /Б/);
+});
+
+test('класс А1: смешанный коммит (новая спека + код) — не конец writing-plans', () => {
+  const specPath = 'docs/superpowers/specs/x-design.md';
+  const codePath = 'server/src/example.ts';
+  const text = checkpointReminder(
+    facts({
+      changedPaths: [specPath, codePath],
+      addedPaths: [specPath, codePath],
+    }),
+  );
+  assert.doesNotMatch(text ?? '', /А1/);
+  assert.match(text, /Б/);
 });
 
 test('класс А3: смёрженный PR', () => {
@@ -190,12 +235,10 @@ test('грязное рабочее дерево глушит все класс�
 
 test('неизвестный размер контекста глушит класс Б, но не класс А', () => {
   assert.equal(checkpointReminder(facts({ contextTokens: null })), null);
+  const path = 'docs/superpowers/specs/x-design.md';
   assert.match(
     checkpointReminder(
-      facts({
-        contextTokens: null,
-        changedPaths: ['docs/superpowers/specs/x-design.md'],
-      }),
+      facts({ contextTokens: null, changedPaths: [path], addedPaths: [path] }),
     ),
     /А1/,
   );
@@ -207,8 +250,14 @@ test('по одному и тому же коммиту напоминаем о�
 
 test('любое напоминание короче 90 символов — бюджет не абзац, а фраза', () => {
   const cases = [
-    facts({ changedPaths: ['docs/superpowers/specs/x-design.md'] }),
-    facts({ changedPaths: ['docs/superpowers/plans/x.md'] }),
+    facts({
+      changedPaths: ['docs/superpowers/specs/x-design.md'],
+      addedPaths: ['docs/superpowers/specs/x-design.md'],
+    }),
+    facts({
+      changedPaths: ['docs/superpowers/plans/x.md'],
+      addedPaths: ['docs/superpowers/plans/x.md'],
+    }),
     facts({ event: 'merge' }),
     facts({ event: 'artifact', changedPaths: ['packs/x.json'] }),
     facts({}),

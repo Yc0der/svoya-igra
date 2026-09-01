@@ -80,10 +80,21 @@ export function checkpointReminder(facts) {
   if (facts.commitSha && facts.commitSha === facts.remindedSha) return null;
 
   const paths = (facts.changedPaths ?? []).map(slashes);
+  const addedPaths = (facts.addedPaths ?? []).map(slashes);
 
   if (facts.event === 'merge') return TEXTS.А3;
-  if (paths.some((p) => PLAN_PATH.test(p))) return TEXTS.А2;
-  if (paths.some((p) => SPEC_PATH.test(p))) return TEXTS.А1;
+
+  // А1/А2 — «дописана и закоммичена»: это конец writing-plans/спеки, а не отметка
+  // галочки в уже существующем файле. Путь обязан быть добавлен именно этим коммитом
+  // (git diff-filter=A), а не просто входить в список изменённых — иначе коммит,
+  // который правит чек-бокс посреди выполнения плана, тоже засчитался бы. Плюс коммит
+  // не должен быть смешанным: если рядом с новым файлом плана/спеки в том же коммите
+  // едет ещё что-то (код, другой файл), это уже не «конец writing-plans» в чистом виде,
+  // а коммит, который заодно прихватил документ — план тут не единственный смысл коммита.
+  const solePath = paths.length === 1 ? paths[0] : null;
+  const isSoleAdded = solePath !== null && addedPaths.includes(solePath);
+  if (isSoleAdded && PLAN_PATH.test(solePath)) return TEXTS.А2;
+  if (isSoleAdded && SPEC_PATH.test(solePath)) return TEXTS.А1;
   if (paths.some((p) => PACK_PATH.test(p))) return TEXTS.А4;
 
   if (facts.event !== 'commit') return null;
