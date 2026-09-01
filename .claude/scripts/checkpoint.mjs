@@ -14,6 +14,12 @@ import {
   readTail,
 } from './lib/transcript.mjs';
 
+// И git, и чтение stdin в норме занимают миллисекунды. Но «в норме» — не гарантия:
+// зависший git-процесс или родитель, не закрывший stdin, не должны держать вызов
+// инструмента до внешнего timeout из settings.json (10 с) — свой предел на порядок
+// меньше, чтобы отказ был дешёвым, а не просто менее дорогим, чем ничего.
+const IO_TIMEOUT_MS = 2000;
+
 /** Единственный выход из скрипта. Молчание — тоже допустимый ответ. */
 function emit(text) {
   if (text) {
@@ -29,10 +35,28 @@ function emit(text) {
   process.exit(0);
 }
 
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  return Buffer.concat(chunks).toString('utf8');
+/** null — вход не пришёл вовремя; тогда правильный ответ такой же, как на пустой вход. */
+function readStdin(timeoutMs) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+
+    (async () => {
+      try {
+        const chunks = [];
+        for await (const chunk of process.stdin) chunks.push(chunk);
+        finish(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        finish(null);
+      }
+    })();
+  });
 }
 
 function git(cwd, args) {
@@ -41,6 +65,7 @@ function git(cwd, args) {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: IO_TIMEOUT_MS,
     });
   } catch {
     return null;
@@ -51,7 +76,7 @@ async function loadState(path) {
   try {
     return JSON.parse(await readFile(path, 'utf8'));
   } catch {
-    return { checks: 'unknown', remindedSha: null, artifactReminded: false };
+    return { checks: 'unknown', remindedSha: null, remindedArtifacts: [] };
   }
 }
 
@@ -88,9 +113,12 @@ async function contextTokens(payload, cwd) {
 }
 
 async function main() {
+  const raw = await readStdin(IO_TIMEOUT_MS);
+  if (raw === null) return emit(null); // вход не подоспел вовремя
+
   let payload;
   try {
-    payload = JSON.parse(await readStdin());
+    payload = JSON.parse(raw);
   } catch {
     return emit(null);
   }
@@ -114,13 +142,18 @@ async function main() {
   }
 
   if (event === 'artifact') {
-    // Класс А4 намеренно не проходит дедуп по коммиту в checkpoint-rules.mjs
-    // (записанный пак сам делает дерево грязным — требовать чистоты нечестно).
-    // Поэтому дедуп — здесь, на уровне сессии: одно напоминание про артефакт
-    // за сессию, а не на каждую правку одного и того же пака.
-    if (state.artifactReminded) return emit(null);
-    await saveState(stateDir, statePath, { ...state, artifactReminded: true });
-    return emit(checkpointReminder({ event }));
+    // Решение (в том числе дедуп по пути) принимает checkpointReminder — здесь
+    // только факты: какой путь и что уже напоминали в этой сессии. А4 не зависит
+    // от git, поэтому дальше обращений к git для неё нет.
+    const artifactPath = payload.tool_input?.file_path ?? null;
+    const remindedArtifacts = state.remindedArtifacts ?? [];
+    const text = checkpointReminder({ event, artifactPath, remindedArtifacts });
+    if (text)
+      await saveState(stateDir, statePath, {
+        ...state,
+        remindedArtifacts: [...remindedArtifacts, artifactPath],
+      });
+    return emit(text);
   }
 
   const status = git(cwd, ['status', '--porcelain']);

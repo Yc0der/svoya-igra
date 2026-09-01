@@ -29,6 +29,29 @@ test('classifyEvent узнаёт коммит, мёрж и прогон пров
   assert.equal(classifyEvent(bash('ls -la')), null);
 });
 
+test('classifyEvent не путает упоминание слияния в данных с реальным вызовом', () => {
+  const bash = (command) => ({ tool_name: 'Bash', tool_input: { command } });
+  // Реальный вызов — в начале команды или после разделителя.
+  assert.equal(classifyEvent(bash('gh pr merge 42 --squash')), 'merge');
+  assert.equal(
+    classifyEvent(bash('pnpm build && gh pr merge 42 --squash')),
+    'merge',
+  );
+  // Упоминание внутри данных — посередине чужой подкоманды — не событие.
+  assert.equal(
+    classifyEvent(
+      bash(
+        'echo \'{"tool_input":{"command":"gh pr merge 1 --squash"}}\' | node hook.mjs',
+      ),
+    ),
+    null,
+  );
+  assert.equal(
+    classifyEvent(bash('echo "не забыть про gh pr merge после ревью"')),
+    null,
+  );
+});
+
 test('classifyEvent считает событием только запись пака', () => {
   const write = (file_path) => ({
     tool_name: 'Write',
@@ -97,6 +120,46 @@ test('класс А4: записанный пак — даже при грязн
     }),
   );
   assert.match(text, /А4/);
+});
+
+test('класс А4: повтор по тому же пути артефакта глушится', () => {
+  const text = checkpointReminder(
+    facts({
+      event: 'artifact',
+      commitSha: null,
+      worktreeClean: false,
+      changedPaths: [],
+      artifactPath: 'packs/kino.json',
+      remindedArtifacts: ['packs/kino.json'],
+    }),
+  );
+  assert.equal(text, null);
+});
+
+test('класс А4: другой путь артефакта в той же сессии — законный повод напомнить', () => {
+  const text = checkpointReminder(
+    facts({
+      event: 'artifact',
+      commitSha: null,
+      worktreeClean: false,
+      changedPaths: [],
+      artifactPath: 'packs/sport.json',
+      remindedArtifacts: ['packs/kino.json'],
+    }),
+  );
+  assert.match(text, /А4/);
+});
+
+test('класс А4: сравнение пути нечувствительно к виду слэшей', () => {
+  const text = checkpointReminder(
+    facts({
+      event: 'artifact',
+      worktreeClean: false,
+      artifactPath: 'packs\\kino.json',
+      remindedArtifacts: ['packs/kino.json'],
+    }),
+  );
+  assert.equal(text, null);
 });
 
 test('класс Б: коммит без спеки и плана — только выше порога', () => {

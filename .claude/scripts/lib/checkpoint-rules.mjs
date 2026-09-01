@@ -6,6 +6,16 @@ const PLAN_PATH = /^docs\/superpowers\/plans\/.+\.md$/;
 
 const slashes = (path) => (path ?? '').replace(/\\/g, '/');
 
+// Разбивает команду на подкоманды по shell-разделителям, чтобы упоминание
+// «gh pr merge» как данных (в кавычках, в heredoc, в чужом аргументе)
+// не засчиталось за реальный вызов — реальный вызов стоит в начале своей
+// подкоманды, а не где-то посередине текста.
+const commandSegments = (command) =>
+  command
+    .split(/&&|\|\||;|\||\n/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
 /** Что за событие только что произошло. null — повод ничего не делать и выйти. */
 export function classifyEvent(payload) {
   const tool = payload?.tool_name;
@@ -18,7 +28,8 @@ export function classifyEvent(payload) {
 
   if (tool !== 'Bash') return null;
   const command = payload.tool_input?.command ?? '';
-  if (/\bgh\s+pr\s+merge\b/.test(command)) return 'merge';
+  if (commandSegments(command).some((s) => /^gh\s+pr\s+merge\b/.test(s)))
+    return 'merge';
   if (/\bgit\s+commit\b/.test(command)) return 'commit';
   if (/\bpnpm\b[^|;&]*\b(test|typecheck)\b/.test(command)) return 'checks';
   return null;
@@ -52,8 +63,18 @@ const classB = (checks) =>
 
 /** Факты → текст напоминания или null. Класс В остаётся на усмотрение модели. */
 export function checkpointReminder(facts) {
-  // Записанный пак сам и делает дерево грязным — требовать чистоты тут нечестно.
-  if (facts?.event === 'artifact') return TEXTS.А4;
+  if (facts?.event === 'artifact') {
+    // Записанный пак сам и делает дерево грязным — требовать чистоты тут нечестно,
+    // поэтому класс А4 не проходит дедуп по коммиту, как прочие классы. Дедуп у
+    // него свой: по пути конкретного артефакта в рамках сессии — повтор по тому
+    // же файлу не напоминаем второй раз, а другой файл в той же сессии остаётся
+    // законным поводом напомнить.
+    const path = slashes(facts.artifactPath);
+    const alreadyReminded = (facts.remindedArtifacts ?? [])
+      .map(slashes)
+      .includes(path);
+    return alreadyReminded ? null : TEXTS.А4;
+  }
 
   if (!facts?.worktreeClean) return null;
   if (facts.commitSha && facts.commitSha === facts.remindedSha) return null;

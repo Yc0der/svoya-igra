@@ -87,7 +87,7 @@ test('класс А4: первая запись пака напоминает, �
         'utf8',
       ),
     );
-    assert.equal(state.artifactReminded, true);
+    assert.deepEqual(state.remindedArtifacts, ['packs/kino.json']);
   });
 });
 
