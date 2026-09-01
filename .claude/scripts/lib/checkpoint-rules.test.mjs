@@ -288,3 +288,32 @@ test('любое напоминание короче 90 символов — б�
     assert.ok(text.length <= 90, `слишком длинно: ${text.length}`);
   }
 });
+
+test('classifyEvent узнаёт мёрж через MCP-инструмент, а не только через gh', () => {
+  // На машине без gh мёрж идёт инструментом GitHub MCP, и текста команды у него нет
+  // вообще — событие видно только по имени инструмента.
+  assert.equal(
+    classifyEvent({
+      tool_name: 'mcp__plugin_github_github__merge_pull_request',
+      tool_input: { pullNumber: 44 },
+    }),
+    'merge',
+  );
+});
+
+test('classifyEvent не считает мёржем прочие инструменты GitHub MCP', () => {
+  // Префикс сервера зависит от того, как установлен плагин, поэтому правило смотрит
+  // на хвост имени. Хвост обязан совпасть целиком: чтение PR или ещё не случившееся
+  // слияние ветки в PR точкой выхода не являются.
+  for (const tool of [
+    'mcp__plugin_github_github__pull_request_read',
+    'mcp__plugin_github_github__update_pull_request_branch',
+    'mcp__plugin_github_github__merge_pull_request_dry_run',
+  ]) {
+    assert.equal(
+      classifyEvent({ tool_name: tool, tool_input: {} }),
+      null,
+      tool,
+    );
+  }
+});
