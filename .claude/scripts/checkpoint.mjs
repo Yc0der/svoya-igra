@@ -23,17 +23,18 @@ const IO_TIMEOUT_MS = 2000;
 
 /** Единственный выход из скрипта. Молчание — тоже допустимый ответ. */
 function emit(text) {
-  if (text) {
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'PostToolUse',
-          additionalContext: text,
-        },
-      }),
-    );
-  }
-  process.exit(0);
+  if (!text) return process.exit(0);
+  // exit(0) сразу после write может усечь вывод в pipe на Windows — ждём callback
+  // записи, а не полагаемся на то, что процесс не завершится раньше неё.
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: text,
+      },
+    }),
+    () => process.exit(0),
+  );
 }
 
 /** null — вход не пришёл вовремя; тогда правильный ответ такой же, как на пустой вход. */

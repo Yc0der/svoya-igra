@@ -30,7 +30,8 @@ export function classifyEvent(payload) {
   const command = payload.tool_input?.command ?? '';
   if (commandSegments(command).some((s) => /^gh\s+pr\s+merge\b/.test(s)))
     return 'merge';
-  if (/\bgit\s+commit\b/.test(command)) return 'commit';
+  if (commandSegments(command).some((s) => /^git\s+commit\b/.test(s)))
+    return 'commit';
   if (/\bpnpm\b[^|;&]*\b(test|typecheck)\b/.test(command)) return 'checks';
   return null;
 }

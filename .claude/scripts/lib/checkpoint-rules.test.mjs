@@ -52,6 +52,22 @@ test('classifyEvent не путает упоминание слияния в д�
   );
 });
 
+test('classifyEvent не путает упоминание коммита в данных с реальным вызовом', () => {
+  const bash = (command) => ({ tool_name: 'Bash', tool_input: { command } });
+  // Упоминание внутри текста — не в начале подкоманды — не событие.
+  assert.equal(classifyEvent(bash('echo "как сделать git commit"')), null);
+  assert.equal(
+    classifyEvent(bash('cat <<EOF\nдля примера: git commit -m x\nEOF')),
+    null,
+  );
+  // Реальный вызов — в начале команды или после разделителя — событие.
+  assert.equal(classifyEvent(bash('git commit -m "feat: x"')), 'commit');
+  assert.equal(
+    classifyEvent(bash('pnpm build && git commit -m "feat: x"')),
+    'commit',
+  );
+});
+
 test('classifyEvent считает событием только запись пака', () => {
   const write = (file_path) => ({
     tool_name: 'Write',
@@ -212,6 +228,9 @@ test('класс Б: коммит без спеки и плана — тольк
   const text = checkpointReminder(facts({ contextTokens: 250_000 }));
   assert.match(text, /Б/);
   assert.match(text, /\/handoff/);
+  // Метка класса одна на оба варианта текста (зелёный/unknown) — без этой проверки
+  // мутация «всегда отвечать веткой unknown» осталась бы незамеченной.
+  assert.match(text, /200k/);
 });
 
 test('класс Б молчит, когда проверки красные или не прогонялись', () => {
