@@ -89,7 +89,11 @@ type ServerMessage =
       questionId: string;
       reason: string;
     }
-  | { type: 'admin-players'; players: { name: string; date: string }[] }
+  | {
+      type: 'admin-players';
+      players: { name: string; date: string; games: number }[];
+    }
+  | { type: 'admin-player'; card: PlayerCardView; extraLines: string[] }
   | { type: 'admin-player-exists'; name: string }
   | { type: 'admin-player-error'; reason: string }
   | {
@@ -135,8 +139,25 @@ type ClientMessage =
       complaint: string;
     }
   | { type: 'admin-get-players' }
-  | { type: 'admin-save-player'; code: string; replace: boolean }
+  | { type: 'admin-get-player'; name: string }
+  | { type: 'admin-delete-player'; name: string }
+  | {
+      type: 'admin-save-player';
+      code: string;
+      replace: boolean;
+      // Есть только у правки через форму: имя до правки. Отсутствие поля и
+      // означает «это вставка кода, а не правка».
+      originalName?: string;
+    }
   | { type: 'admin-merge-people'; fromId: number; intoId: number };
+
+// Анкета в том виде, в каком её отдаёт сервер, — форма правки заполняется
+// ею и из неё же собирает код обратно.
+export interface PlayerCardView {
+  name: string;
+  interests: { area: string; examples: string[] }[];
+  boring: string[];
+}
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -214,13 +235,23 @@ export interface AdminConnection {
   // уже заведённых игроков и обратная связь по последней попытке вставить
   // код. Отдельного «ок» на успешную запись сервер не шлёт — успех виден по
   // приходу нового admin-players (см. players ниже).
-  players: { name: string; date: string }[];
+  // games — сколько партий этого имени лежит в истории: диалог удаления
+  // обязан сказать, сколько записей исчезнет вместе с анкетой.
+  players: { name: string; date: string; games: number }[];
+  // Анкета, запрошенная для правки. null — форма закрыта или ответ ещё не
+  // пришёл: заполнять её пустышкой нельзя, иначе «Сохранить» сотрёт то, что
+  // не успело приехать.
+  playerCard: { card: PlayerCardView; extraLines: string[] } | null;
   playerError: string | null;
   // Имя игрока, чья анкета уже есть — сервер ничего не записал и ждёт
   // повторной отправки того же кода с replace: true.
   playerConflictName: string | null;
   clearPlayerFeedback(): void;
-  savePlayer(code: string, replace: boolean): void;
+  savePlayer(code: string, replace: boolean, originalName?: string): void;
+  getPlayer(name: string): void;
+  clearPlayerCard(): void;
+  // Удаление человека целиком: анкета и его записи в истории партий.
+  deletePlayer(name: string): void;
   // Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity)
   // — тот же список людей, что и в лобби (задача 2/3), для двух <select> в
   // подразделе «Один и тот же человек». Обновляется и обычным 'state', и
@@ -280,7 +311,13 @@ export function useAdminConnection(
     useState<StartGameErrorReason | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportAckVersion, setReportAckVersion] = useState(0);
-  const [players, setPlayers] = useState<{ name: string; date: string }[]>([]);
+  const [players, setPlayers] = useState<
+    { name: string; date: string; games: number }[]
+  >([]);
+  const [playerCard, setPlayerCard] = useState<{
+    card: PlayerCardView;
+    extraLines: string[];
+  } | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [playerConflictName, setPlayerConflictName] = useState<string | null>(
     null,
@@ -358,6 +395,10 @@ export function useAdminConnection(
           // пришёл — значит всё сохранилось.
           setPlayerError(null);
           setPlayerConflictName(null);
+        }
+        if (message.type === 'admin-player') {
+          setPlayerCard({ card: message.card, extraLines: message.extraLines });
+          setPlayerError(null);
         }
         if (message.type === 'admin-player-exists') {
           setPlayerConflictName(message.name);
@@ -465,8 +506,16 @@ export function useAdminConnection(
       setPlayerError(null);
       setPlayerConflictName(null);
     },
-    savePlayer: (code, replace) =>
-      send({ type: 'admin-save-player', code, replace }),
+    playerCard,
+    savePlayer: (code, replace, originalName) =>
+      send(
+        originalName === undefined
+          ? { type: 'admin-save-player', code, replace }
+          : { type: 'admin-save-player', code, replace, originalName },
+      ),
+    getPlayer: (name) => send({ type: 'admin-get-player', name }),
+    clearPlayerCard: () => setPlayerCard(null),
+    deletePlayer: (name) => send({ type: 'admin-delete-player', name }),
     people,
     peopleError,
     clearPeopleError: () => setPeopleError(null),

@@ -375,6 +375,15 @@ code {
   border-color: var(--accent);
 }
 
+/* Необратимое действие — удаление человека вместе с историей. Единственная
+   кнопка в панели, которая стирает данные живого человека, и выглядеть как
+   соседние «Обновить» и «Редактировать» она не должна. */
+.button--danger {
+  background: #b5432a;
+  color: white;
+  border-color: #b5432a;
+}
+
 .button--buzz {
   font-size: 40px;
   padding: 40px 64px;
@@ -871,6 +880,25 @@ code {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.admin-players li .admin-actions {
+  margin-top: 0;
+  margin-left: auto;
+}
+
+.admin-player-form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 500px;
+  margin-top: 16px;
+}
+
+.admin-player-form label {
+  font-size: 14px;
+  color: var(--text);
+  margin-top: 8px;
 }
 
 .admin-player-name {

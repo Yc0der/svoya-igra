@@ -1022,6 +1022,9 @@ export function createServer(options: CreateServerOptions): GameServer {
               playersPath,
               parsed.card,
               new Date().toISOString().slice(0, 10),
+              // При переименовании пометки ищутся под старым именем: раздел
+              // под новым либо чужой, либо его ещё нет.
+              originalName ?? parsed.card.name,
             );
             // Переименование: новый раздел уже записан, старый убирается
             // здесь же, под тем же замком. Иначе между записью и удалением

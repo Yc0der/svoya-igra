@@ -121,4 +121,38 @@ describe('playersFile', () => {
     const second = await stat(playersPath);
     expect(second.mtimeMs).toBe(first.mtimeMs);
   });
+  it('ручные строки раздела переживают замену анкеты', async () => {
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    const withNote = (await readFile(playersPath, 'utf8')).replace(
+      '- **Скучно:** Мода',
+      '- **Скучно:** Мода\nПометка ведущего.',
+    );
+    await writeFile(playersPath, withNote, 'utf8');
+
+    await savePlayerCard(
+      playersPath,
+      { ...CARD, boring: ['Политика'] },
+      '2026-09-02',
+    );
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).toContain('- **Скучно:** Политика');
+    expect(content).toContain('Пометка ведущего.');
+  });
+
+  it('при переименовании ручные строки переезжают со старым именем', async () => {
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    const withNote = (await readFile(playersPath, 'utf8')).replace(
+      '- **Скучно:** Мода',
+      '- **Скучно:** Мода\nПометка ведущего.',
+    );
+    await writeFile(playersPath, withNote, 'utf8');
+
+    await savePlayerCard(
+      playersPath,
+      { ...CARD, name: 'Иван' },
+      '2026-09-02',
+      'Ваня',
+    );
+    expect(await readFile(playersPath, 'utf8')).toContain('Пометка ведущего.');
+  });
 });

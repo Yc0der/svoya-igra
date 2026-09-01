@@ -21,9 +21,20 @@ export async function savePlayerCard(
   playersPath: string,
   card: PlayerCard,
   date: string,
+  // Имя, под которым анкета лежит в файле сейчас: при переименовании оно не
+  // совпадает с card.name. По нему находятся ручные строки старого раздела —
+  // они переезжают в новый, а не пропадают от того, что ведущий нажал
+  // «Сохранить» (спека анкет, «Правка — форма, а не сырой markdown»).
+  keepNotesFrom: string = card.name,
 ): Promise<void> {
   const current = await readFile(playersPath, 'utf8');
-  const updated = upsertPlayerSection(current, card, date);
+  const previous = parsePlayerSection(current, keepNotesFrom);
+  const updated = upsertPlayerSection(
+    current,
+    card,
+    date,
+    previous?.extraLines ?? [],
+  );
   // Ведущий может вставить один и тот же код дважды — тогда менять нечего и
   // трогать файл незачем.
   if (updated === current) return;

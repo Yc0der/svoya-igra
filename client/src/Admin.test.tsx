@@ -90,8 +90,12 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     players: [],
     playerError: null,
     playerConflictName: null,
+    playerCard: null,
     clearPlayerFeedback: vi.fn(),
     savePlayer: vi.fn(),
+    getPlayer: vi.fn(),
+    clearPlayerCard: vi.fn(),
+    deletePlayer: vi.fn(),
     people: [],
     peopleError: null,
     clearPeopleError: vi.fn(),
@@ -1330,7 +1334,7 @@ describe('Admin — анкеты игроков', () => {
     const savePlayer = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
-        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
         savePlayer,
       }),
     );
@@ -1490,5 +1494,134 @@ describe('Admin — слияние профилей', () => {
 
     await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
     expect(clearPeopleError).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Admin — правка и удаление анкеты', () => {
+  const VANYA = {
+    name: 'Ваня',
+    interests: [{ area: 'Спорт', examples: ['Формула-1', 'хоккей'] }],
+    boring: ['Мода'],
+  };
+
+  it('«Редактировать» запрашивает анкету у сервера', async () => {
+    const getPlayer = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
+        getPlayer,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать анкету/i }),
+    );
+    expect(getPlayer).toHaveBeenCalledWith('Ваня');
+  });
+
+  it('форма открывается заполненной и сохраняет правку с originalName', async () => {
+    const savePlayer = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
+        playerCard: { card: VANYA, extraLines: [] },
+        savePlayer,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать анкету/i }),
+    );
+
+    expect(screen.getByLabelText('Имя')).toHaveValue('Ваня');
+    expect(screen.getByLabelText('Спорт')).toHaveValue('Формула-1, хоккей');
+    expect(screen.getByLabelText('Скучно')).toHaveValue('Мода');
+
+    await userEvent.clear(screen.getByLabelText('Спорт'));
+    await userEvent.type(screen.getByLabelText('Спорт'), 'биатлон');
+    await userEvent.click(
+      screen.getByRole('button', { name: /сохранить правку/i }),
+    );
+
+    expect(savePlayer).toHaveBeenCalledTimes(1);
+    const [code, replace, originalName] = savePlayer.mock.calls[0];
+    expect(replace).toBe(true);
+    expect(originalName).toBe('Ваня');
+    expect(JSON.parse(code as string)).toEqual({
+      version: 1,
+      name: 'Ваня',
+      interests: [{ area: 'Спорт', examples: ['биатлон'] }],
+      boring: ['Мода'],
+    });
+  });
+
+  it('предупреждает про строки не из формы', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
+        playerCard: { card: VANYA, extraLines: ['Пометка ведущего.'] },
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать анкету/i }),
+    );
+    expect(screen.getByText(/строки не из формы/i)).toBeInTheDocument();
+  });
+
+  it('диалог удаления называет число партий и удаляет только по подтверждению', async () => {
+    const deletePlayer = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 4 }],
+        deletePlayer,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /удалить анкету/i }),
+    );
+
+    expect(screen.getByText(/4 партии/)).toBeInTheDocument();
+    expect(deletePlayer).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /удалить навсегда/i }),
+    );
+    expect(deletePlayer).toHaveBeenCalledWith('Ваня');
+  });
+
+  it('без записей в истории диалог говорит об этом прямо', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /удалить анкету/i }),
+    );
+    expect(
+      screen.getByText(/записей под этим именем нет/i),
+    ).toBeInTheDocument();
+  });
+
+  it('«Отмена» в диалоге удаления ничего не удаляет', async () => {
+    const deletePlayer = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 1 }],
+        deletePlayer,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /удалить анкету/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /не удалять/i }));
+    expect(deletePlayer).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: /удалить навсегда/i }),
+    ).not.toBeInTheDocument();
   });
 });

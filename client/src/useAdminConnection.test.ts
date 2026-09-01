@@ -552,12 +552,70 @@ describe('useAdminConnection', () => {
     act(() =>
       socket.emitMessage({
         type: 'admin-players',
-        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
       }),
     );
     expect(result.current.players).toEqual([
-      { name: 'Ваня', date: '2026-08-26' },
+      { name: 'Ваня', date: '2026-08-26', games: 0 },
     ]);
+  });
+
+  it('savePlayer с originalName шлёт переименование', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.savePlayer('{"...":1}', true, 'Ваня'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: '{"...":1}',
+        replace: true,
+        originalName: 'Ваня',
+      }),
+    );
+  });
+
+  it('getPlayer запрашивает анкету, admin-player кладёт её в playerCard', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.getPlayer('Ваня'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-get-player', name: 'Ваня' }),
+    );
+
+    const card = {
+      name: 'Ваня',
+      interests: [{ area: 'Спорт', examples: ['хоккей'] }],
+      boring: [],
+    };
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-player',
+        card,
+        extraLines: ['Пометка.'],
+      }),
+    );
+    expect(result.current.playerCard).toEqual({
+      card,
+      extraLines: ['Пометка.'],
+    });
+
+    act(() => result.current.clearPlayerCard());
+    expect(result.current.playerCard).toBeNull();
+  });
+
+  it('deletePlayer отправляет admin-delete-player', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.deletePlayer('Ваня'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-delete-player', name: 'Ваня' }),
+    );
   });
 
   it('admin-players гасит и playerError, и playerConflictName', () => {
