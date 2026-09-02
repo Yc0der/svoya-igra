@@ -91,7 +91,7 @@ type ServerMessage =
     }
   | {
       type: 'admin-players';
-      players: { name: string; date: string; games: number }[];
+      players: { name: string; date: string }[];
     }
   | { type: 'admin-player'; card: PlayerCardView; extraLines: string[] }
   | { type: 'admin-player-exists'; name: string }
@@ -236,9 +236,7 @@ export interface AdminConnection {
   // уже заведённых игроков и обратная связь по последней попытке вставить
   // код. Отдельного «ок» на успешную запись сервер не шлёт — успех виден по
   // приходу нового admin-players (см. players ниже).
-  // games — сколько партий этого имени лежит в истории: диалог удаления
-  // обязан сказать, сколько записей исчезнет вместе с анкетой.
-  players: { name: string; date: string; games: number }[];
+  players: { name: string; date: string }[];
   // Анкета, запрошенная для правки. null — форма закрыта или ответ ещё не
   // пришёл: заполнять её пустышкой нельзя, иначе «Сохранить» сотрёт то, что
   // не успело приехать.
@@ -316,9 +314,7 @@ export function useAdminConnection(
     useState<StartGameErrorReason | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportAckVersion, setReportAckVersion] = useState(0);
-  const [players, setPlayers] = useState<
-    { name: string; date: string; games: number }[]
-  >([]);
+  const [players, setPlayers] = useState<{ name: string; date: string }[]>([]);
   const [playerCard, setPlayerCard] = useState<{
     card: PlayerCardView;
     extraLines: string[];

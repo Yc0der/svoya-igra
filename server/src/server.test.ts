@@ -3298,7 +3298,7 @@ describe('createServer player questionnaire', () => {
     const message = await admin.nextMessage();
     expect(message).toEqual({
       type: 'admin-players',
-      players: [{ name: 'Ваня', date: expect.any(String), games: 0 }],
+      players: [{ name: 'Ваня', date: expect.any(String) }],
     });
     const content = await readFile(playersPath, 'utf8');
     expect(content).toContain('- **Спорт:** Формула-1');
@@ -3544,7 +3544,7 @@ describe('createServer player questionnaire', () => {
       players: { name: string }[];
     };
     expect(message.players).toEqual([
-      { name: 'Иван', date: expect.any(String), games: 0 },
+      { name: 'Иван', date: expect.any(String) },
     ]);
     const content = await readFile(playersPath, 'utf8');
     expect(content).not.toContain('## Ваня');
@@ -4105,25 +4105,6 @@ describe('createServer admin delete player', () => {
       { id: vanyaId, name: 'Ваня', games: 1 },
     ]);
     expect(await readFile(playersPath, 'utf8')).not.toMatch(/^## Ваня$/m);
-    admin.ws.close();
-  });
-
-  it('число партий в списке считается по имени, с поправкой на регистр', async () => {
-    const vanyaId = history.createPerson('  вАНЯ ', '2026-08-01')!;
-    history.startGame({
-      startedAt: '2026-08-26',
-      packFilename: 'test.json',
-      packTitle: 'Пак',
-      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
-    });
-    const admin = await connectAdmin(baseUrl);
-    await saveVanya(admin);
-
-    admin.ws.send(JSON.stringify({ type: 'admin-get-players' }));
-    expect(await admin.nextMessage()).toEqual({
-      type: 'admin-players',
-      players: [{ name: 'Ваня', date: expect.any(String), games: 1 }],
-    });
     admin.ws.close();
   });
 

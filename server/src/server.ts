@@ -298,27 +298,6 @@ export function createServer(options: CreateServerOptions): GameServer {
     }
   }
 
-  // Список анкет для /admin вместе с числом партий каждого имени в истории.
-  // Число нужно диалогу удаления: он обязан сказать, сколько записей исчезнет
-  // вместе с анкетой, а не спрашивать «вы уверены?» (спека анкет, «Удаление —
-  // человек целиком»).
-  //
-  // Сложение по всем совпавшим людям, а не по первому: пока расщепившиеся
-  // профили одного человека не слиты, их в истории двое, и удаление заберёт
-  // обоих — значит и считать надо обоих.
-  async function playersView(
-    path: string,
-  ): Promise<{ name: string; date: string; games: number }[]> {
-    const players = await readPlayerList(path);
-    const people = history?.listPeople() ?? [];
-    return players.map((player) => ({
-      ...player,
-      games: people
-        .filter((person) => sameName(person.name, player.name))
-        .reduce((sum, person) => sum + person.games, 0),
-    }));
-  }
-
   // Сборка записи жалобы для handleReportQuestion — единственного
   // вызывающего: кнопки «Пожаловаться» в редакторе пакетов. Разбор в конце
   // партии сюда не заходит (финальное ревью ветки, п. 4) — его оценки
@@ -767,7 +746,7 @@ export function createServer(options: CreateServerOptions): GameServer {
         if (!playersPath) return;
         send(ws, {
           type: 'admin-players',
-          players: await playersView(playersPath),
+          players: await readPlayerList(playersPath),
         });
       }
 
@@ -1078,7 +1057,7 @@ export function createServer(options: CreateServerOptions): GameServer {
           }
           send(ws, {
             type: 'admin-players',
-            players: await playersView(playersPath),
+            players: await readPlayerList(playersPath),
           });
         } catch (err) {
           send(ws, {
@@ -1120,7 +1099,7 @@ export function createServer(options: CreateServerOptions): GameServer {
           await withPlayersWriteLock(() => deletePlayerCard(playersPath, name));
           send(ws, {
             type: 'admin-players',
-            players: await playersView(playersPath),
+            players: await readPlayerList(playersPath),
           });
         } catch (err) {
           send(ws, {

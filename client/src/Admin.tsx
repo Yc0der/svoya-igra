@@ -130,9 +130,9 @@ export function Admin() {
     areas: Record<string, string>;
     boring: string;
   } | null>(null);
-  // Удаление необратимо и уносит человека целиком, вместе с историей партий,
-  // — отдельный диалог, а не перелейбл кнопки: в тексте обязано быть видно,
-  // что именно исчезнет (спека анкет, «Удаление — человек целиком»).
+  // Удаление анкеты необратимо, но истории партий не касается — отдельный
+  // диалог, а не перелейбл кнопки: в тексте обязано быть видно, что именно
+  // исчезнет (sdd/2026-09-02-split-card-and-person-delete).
   const [deletingName, setDeletingName] = useState<string | null>(null);
   // Удаление человека из истории партий — отдельный диалог от удаления
   // анкеты (deletingName выше): разные операции, разные подтверждения
@@ -727,18 +727,10 @@ export function Admin() {
         {deletingName !== null && (
           <div className="admin-player-conflict">
             <p>
-              Удалить «{deletingName}» полностью?{' '}
-              {(players.find((player) => player.name === deletingName)?.games ??
-                0) > 0
-                ? `Исчезнет анкета и всё, что о нём знает история партий: ${
-                    players.find((player) => player.name === deletingName)
-                      ?.games ?? 0
-                  } ${gamesWord(
-                    players.find((player) => player.name === deletingName)
-                      ?.games ?? 0,
-                  )}.`
-                : 'Исчезнет анкета. В истории партий записей под этим именем нет — если человек играл под другим, сначала слей профили ниже.'}{' '}
-              Сыгранные вопросы и статистика паков останутся: они обезличены.
+              Убрать анкету «{deletingName}»? Записи о партиях останутся — сам
+              человек и его игры убираются ниже, в разделе «Люди в истории».
+              Сыгранные вопросы и статистика паков тоже останутся: они
+              обезличены.
             </p>
             <div className="admin-actions">
               <button
@@ -746,7 +738,7 @@ export function Admin() {
                 className="button"
                 onClick={() => setDeletingName(null)}
               >
-                Не удалять
+                Не убирать
               </button>
               <button
                 type="button"
@@ -756,7 +748,7 @@ export function Admin() {
                   setDeletingName(null);
                 }}
               >
-                Удалить навсегда
+                Убрать анкету
               </button>
             </div>
           </div>

@@ -1335,7 +1335,7 @@ describe('Admin — анкеты игроков', () => {
     const savePlayer = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
-        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
         savePlayer,
       }),
     );
@@ -1558,7 +1558,7 @@ describe('Admin — правка и удаление анкеты', () => {
     const getPlayer = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
-        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
         getPlayer,
       }),
     );
@@ -1573,7 +1573,7 @@ describe('Admin — правка и удаление анкеты', () => {
     const savePlayer = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
-        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
         playerCard: { card: VANYA, extraLines: [] },
         savePlayer,
       }),
@@ -1608,7 +1608,7 @@ describe('Admin — правка и удаление анкеты', () => {
   it('предупреждает про строки не из формы', async () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({
-        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
         playerCard: { card: VANYA, extraLines: ['Пометка ведущего.'] },
       }),
     );
@@ -1619,11 +1619,11 @@ describe('Admin — правка и удаление анкеты', () => {
     expect(screen.getByText(/строки не из формы/i)).toBeInTheDocument();
   });
 
-  it('диалог удаления называет число партий и удаляет только по подтверждению', async () => {
+  it('диалог удаления анкеты обещает только анкету и удаляет по подтверждению', async () => {
     const deletePlayerCard = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
-        players: [{ name: 'Ваня', date: '2026-08-26', games: 4 }],
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
         deletePlayerCard,
       }),
     );
@@ -1632,35 +1632,20 @@ describe('Admin — правка и удаление анкеты', () => {
       screen.getByRole('button', { name: /удалить анкету/i }),
     );
 
-    expect(screen.getByText(/4 партии/)).toBeInTheDocument();
+    expect(screen.getByText(/записи о партиях останутся/i)).toBeInTheDocument();
     expect(deletePlayerCard).not.toHaveBeenCalled();
 
     await userEvent.click(
-      screen.getByRole('button', { name: /удалить навсегда/i }),
+      screen.getByRole('button', { name: 'Убрать анкету' }),
     );
     expect(deletePlayerCard).toHaveBeenCalledWith('Ваня');
   });
 
-  it('без записей в истории диалог говорит об этом прямо', async () => {
-    mockedUseAdminConnection.mockReturnValue(
-      connection({
-        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
-      }),
-    );
-    render(<Admin />);
-    await userEvent.click(
-      screen.getByRole('button', { name: /удалить анкету/i }),
-    );
-    expect(
-      screen.getByText(/записей под этим именем нет/i),
-    ).toBeInTheDocument();
-  });
-
-  it('«Отмена» в диалоге удаления ничего не удаляет', async () => {
+  it('«Не убирать» в диалоге анкеты ничего не удаляет', async () => {
     const deletePlayerCard = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
-        players: [{ name: 'Ваня', date: '2026-08-26', games: 1 }],
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
         deletePlayerCard,
       }),
     );
@@ -1668,10 +1653,10 @@ describe('Admin — правка и удаление анкеты', () => {
     await userEvent.click(
       screen.getByRole('button', { name: /удалить анкету/i }),
     );
-    await userEvent.click(screen.getByRole('button', { name: /не удалять/i }));
+    await userEvent.click(screen.getByRole('button', { name: /не убирать/i }));
     expect(deletePlayerCard).not.toHaveBeenCalled();
     expect(
-      screen.queryByRole('button', { name: /удалить навсегда/i }),
+      screen.queryByRole('button', { name: 'Убрать анкету' }),
     ).not.toBeInTheDocument();
   });
 });
