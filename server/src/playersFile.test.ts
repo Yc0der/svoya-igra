@@ -121,6 +121,18 @@ describe('playersFile', () => {
     const second = await stat(playersPath);
     expect(second.mtimeMs).toBe(first.mtimeMs);
   });
+  it('удаление анкеты не трогает раздел «Показывает в игре»', async () => {
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    await savePlayerStats(playersPath, STATS);
+
+    expect(await deletePlayerCard(playersPath, 'Ваня')).toBe(true);
+
+    const content = await readFile(playersPath, 'utf8');
+    // Заголовки различаются уровнем: анкета — «## Ваня», блок статистики —
+    // «### Ваня». Проверять подстрокой нельзя: «### Ваня» содержит «## Ваня».
+    expect(content).not.toMatch(/^## Ваня$/m);
+    expect(content).toMatch(/^### Ваня$/m);
+  });
   it('ручные строки раздела переживают замену анкеты', async () => {
     await savePlayerCard(playersPath, CARD, '2026-08-26');
     const withNote = (await readFile(playersPath, 'utf8')).replace(

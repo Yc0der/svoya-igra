@@ -95,7 +95,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     savePlayer: vi.fn(),
     getPlayer: vi.fn(),
     clearPlayerCard: vi.fn(),
-    deletePlayer: vi.fn(),
+    deletePlayerCard: vi.fn(),
     people: [],
     peopleError: null,
     clearPeopleError: vi.fn(),
@@ -1570,11 +1570,11 @@ describe('Admin — правка и удаление анкеты', () => {
   });
 
   it('диалог удаления называет число партий и удаляет только по подтверждению', async () => {
-    const deletePlayer = vi.fn();
+    const deletePlayerCard = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
         players: [{ name: 'Ваня', date: '2026-08-26', games: 4 }],
-        deletePlayer,
+        deletePlayerCard,
       }),
     );
     render(<Admin />);
@@ -1583,12 +1583,12 @@ describe('Admin — правка и удаление анкеты', () => {
     );
 
     expect(screen.getByText(/4 партии/)).toBeInTheDocument();
-    expect(deletePlayer).not.toHaveBeenCalled();
+    expect(deletePlayerCard).not.toHaveBeenCalled();
 
     await userEvent.click(
       screen.getByRole('button', { name: /удалить навсегда/i }),
     );
-    expect(deletePlayer).toHaveBeenCalledWith('Ваня');
+    expect(deletePlayerCard).toHaveBeenCalledWith('Ваня');
   });
 
   it('без записей в истории диалог говорит об этом прямо', async () => {
@@ -1607,11 +1607,11 @@ describe('Admin — правка и удаление анкеты', () => {
   });
 
   it('«Отмена» в диалоге удаления ничего не удаляет', async () => {
-    const deletePlayer = vi.fn();
+    const deletePlayerCard = vi.fn();
     mockedUseAdminConnection.mockReturnValue(
       connection({
         players: [{ name: 'Ваня', date: '2026-08-26', games: 1 }],
-        deletePlayer,
+        deletePlayerCard,
       }),
     );
     render(<Admin />);
@@ -1619,7 +1619,7 @@ describe('Admin — правка и удаление анкеты', () => {
       screen.getByRole('button', { name: /удалить анкету/i }),
     );
     await userEvent.click(screen.getByRole('button', { name: /не удалять/i }));
-    expect(deletePlayer).not.toHaveBeenCalled();
+    expect(deletePlayerCard).not.toHaveBeenCalled();
     expect(
       screen.queryByRole('button', { name: /удалить навсегда/i }),
     ).not.toBeInTheDocument();

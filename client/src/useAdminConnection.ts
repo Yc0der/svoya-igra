@@ -140,7 +140,7 @@ type ClientMessage =
     }
   | { type: 'admin-get-players' }
   | { type: 'admin-get-player'; name: string }
-  | { type: 'admin-delete-player'; name: string }
+  | { type: 'admin-delete-player-card'; name: string }
   | {
       type: 'admin-save-player';
       code: string;
@@ -250,8 +250,9 @@ export interface AdminConnection {
   savePlayer(code: string, replace: boolean, originalName?: string): void;
   getPlayer(name: string): void;
   clearPlayerCard(): void;
-  // Удаление человека целиком: анкета и его записи в истории партий.
-  deletePlayer(name: string): void;
+  // Убирает только анкету. Человека из истории партий убирает forgetPerson
+  // (задача 3 слайса) — это разные действия и разные кнопки.
+  deletePlayerCard(name: string): void;
   // Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity)
   // — тот же список людей, что и в лобби (задача 2/3), для двух <select> в
   // подразделе «Один и тот же человек». Обновляется и обычным 'state', и
@@ -515,7 +516,8 @@ export function useAdminConnection(
       ),
     getPlayer: (name) => send({ type: 'admin-get-player', name }),
     clearPlayerCard: () => setPlayerCard(null),
-    deletePlayer: (name) => send({ type: 'admin-delete-player', name }),
+    deletePlayerCard: (name) =>
+      send({ type: 'admin-delete-player-card', name }),
     people,
     peopleError,
     clearPeopleError: () => setPeopleError(null),

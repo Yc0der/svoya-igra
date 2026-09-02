@@ -607,14 +607,14 @@ describe('useAdminConnection', () => {
     expect(result.current.playerCard).toBeNull();
   });
 
-  it('deletePlayer отправляет admin-delete-player', () => {
+  it('deletePlayerCard отправляет admin-delete-player-card', () => {
     const { result } = renderHook(() => useAdminConnection(factory));
     const socket = FakeWebSocket.instances[0];
     act(() => socket.emitOpen());
 
-    act(() => result.current.deletePlayer('Ваня'));
+    act(() => result.current.deletePlayerCard('Ваня'));
     expect(socket.sent).toContainEqual(
-      JSON.stringify({ type: 'admin-delete-player', name: 'Ваня' }),
+      JSON.stringify({ type: 'admin-delete-player-card', name: 'Ваня' }),
     );
   });
 

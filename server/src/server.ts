@@ -793,10 +793,10 @@ export function createServer(options: CreateServerOptions): GameServer {
       }
 
       if (
-        message.type === 'admin-delete-player' &&
+        message.type === 'admin-delete-player-card' &&
         typeof message.name === 'string'
       ) {
-        await handleDeletePlayer(message.name);
+        await handleDeletePlayerCard(message.name);
       }
 
       if (
@@ -1074,45 +1074,17 @@ export function createServer(options: CreateServerOptions): GameServer {
         });
       }
 
-      // Удаление человека целиком: анкета и все его записи в истории партий.
-      // Сыгранные вопросы и оценки не трогаются — они привязаны к вопросу, а
-      // не к человеку (спека анкет, «Удаление — человек целиком, и это
-      // сказано прямо»).
-      //
-      // Связь анкеты с историей — по имени, тем же сравнением, каким ищется
-      // раздел для замены. Другой связи между ними нет и не было: раздел
-      // «Показывает в игре» сходится с анкетой тоже по имени.
-      async function handleDeletePlayer(name: string): Promise<void> {
+      async function handleDeletePlayerCard(name: string): Promise<void> {
         if (!playersPath) return;
-        // Пока партия идёт, человек связан с участником и счётчиком за
-        // столом — ровно та же причина, по которой запрещено слияние.
-        if (room.hasActiveGame()) {
-          send(ws, {
-            type: 'admin-player-error',
-            reason: 'нельзя удалять анкету, пока идёт партия',
-          });
-          return;
-        }
+        // Проверки «идёт ли партия» здесь нет намеренно: удаление анкеты, как и её
+        // правка, трогает файл, а не состояние игры. С партией связан человек в
+        // истории — его убирает admin-forget-person, и вот там запрет на месте.
         try {
           await withPlayersWriteLock(() => deletePlayerCard(playersPath, name));
-          if (history) {
-            for (const person of history
-              .listPeople()
-              .filter((candidate) => sameName(candidate.name, name))) {
-              history.forgetPerson(person.id);
-            }
-            // Пересчёт сразу, а не после следующей партии: иначе имя
-            // удалённого осталось бы в «Показывает в игре» — то есть в том
-            // самом файле, из которого его только что убрали.
-            await refreshPlayerStats();
-          }
           send(ws, {
             type: 'admin-players',
             players: await playersView(playersPath),
           });
-          if (history) {
-            send(ws, { type: 'admin-people', people: history.listPeople() });
-          }
         } catch (err) {
           send(ws, {
             type: 'admin-player-error',

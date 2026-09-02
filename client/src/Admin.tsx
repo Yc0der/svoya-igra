@@ -102,7 +102,7 @@ export function Admin() {
     savePlayer,
     getPlayer,
     clearPlayerCard,
-    deletePlayer,
+    deletePlayerCard,
     people,
     peopleError,
     clearPeopleError,
@@ -745,7 +745,7 @@ export function Admin() {
                 type="button"
                 className="button button--danger"
                 onClick={() => {
-                  deletePlayer(deletingName);
+                  deletePlayerCard(deletingName);
                   setDeletingName(null);
                 }}
               >
