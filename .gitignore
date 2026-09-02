@@ -68,3 +68,25 @@ lan-host.local.json.tmp
 
 # Состояние хука точек выхода (.claude/scripts/checkpoint.mjs) — на сессию, не на репозиторий
 .claude/state/
+
+# Данные конкретной компании, а не проекта. В гите от каждого файла остаётся
+# только `*.example.*`, рабочий сервер заводит из примера при первом запуске
+# (ensureFileFromExample, server/src/fileFromExample.ts).
+#
+# Анкеты игроков — имена и интересы реальных людей плюс раздел «Показывает в
+# игре», который сервер считает из game-history.db.
+docs/players.md
+docs/players.md.tmp
+
+# Профиль генератора — «Автособранное» по партиям этой компании и жалобы,
+# текст которых ведущий печатает руками (туда легко попадает имя).
+docs/pack-generator-profile.md
+docs/pack-generator-profile.md.tmp
+
+# Пакеты вопросов: личный пак — это анкеты, разложенные по темам, а его медиа
+# вполне могут быть фотографиями тех же людей. Примеры в гите остаются.
+packs/*.json
+packs/*.json.tmp
+!packs/*.example.json
+packs/media/*
+!packs/media/photo-test/

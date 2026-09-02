@@ -411,4 +411,136 @@ describe('useRoomConnection', () => {
       JSON.stringify({ type: 'assign-cat', recipientParticipantId: 'p2' }),
     );
   });
+
+  it('складывает список людей из состояния', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() =>
+      socket.emitMessage({
+        type: 'state',
+        participants: [],
+        people: [
+          { id: 7, name: 'Ваня', games: 5 },
+          { id: 3, name: 'Оля', games: 2 },
+        ],
+      }),
+    );
+
+    expect(result.current.people).toEqual([
+      { id: 7, name: 'Ваня', games: 5 },
+      { id: 3, name: 'Оля', games: 2 },
+    ]);
+  });
+
+  it('joinAs отправляет join-as и запоминает человека в localStorage', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => result.current.joinAs(7));
+
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'join-as', personId: 7 }),
+    );
+    expect(result.current.status).toBe('joining');
+    expect(localStorage.getItem('svoya-igra-person')).toBeNull();
+
+    act(() =>
+      socket.emitMessage({
+        type: 'joined',
+        participantId: 'p1',
+        token: 'tok-1',
+        name: 'Ваня',
+      }),
+    );
+
+    expect(localStorage.getItem('svoya-igra-person')).toBe('7');
+  });
+
+  it('обычный join по успеху чистит запомненного человека', () => {
+    localStorage.setItem('svoya-igra-person', '7');
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => result.current.join('Ваня'));
+    act(() =>
+      socket.emitMessage({
+        type: 'joined',
+        participantId: 'p1',
+        token: 'tok-1',
+        name: 'Ваня',
+      }),
+    );
+
+    expect(localStorage.getItem('svoya-igra-person')).toBeNull();
+  });
+
+  it('rememberedPersonId читается из localStorage при монтировании', () => {
+    localStorage.setItem('svoya-igra-person', '7');
+    const { result } = renderHook(() => useRoomConnection(factory));
+
+    expect(result.current.rememberedPersonId).toBe(7);
+  });
+
+  it('игнорирует мусорное значение svoya-igra-person в localStorage', () => {
+    localStorage.setItem('svoya-igra-person', 'бред');
+    const { result } = renderHook(() => useRoomConnection(factory));
+
+    expect(result.current.rememberedPersonId).toBeNull();
+  });
+
+  it('person-taken переводит статус в отдельное состояние, не в name-taken', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => result.current.joinAs(7));
+    act(() => socket.emitMessage({ type: 'person-taken' }));
+
+    expect(result.current.status).toBe('person-taken');
+    expect(result.current.status).not.toBe('name-taken');
+  });
+
+  it('person-unknown переводит статус в отдельное состояние', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => result.current.joinAs(999));
+    act(() => socket.emitMessage({ type: 'person-unknown' }));
+
+    expect(result.current.status).toBe('person-unknown');
+  });
+
+  // Финальное ревью ветки, п. 5 (Minor): сокет отвалился МЕЖДУ отправкой
+  // join-as и ответом joined (токена ещё нет — TOKEN_KEY не записан). Раньше
+  // обработчик 'open' ретраил только pendingNameRef, и статус навсегда
+  // оставался 'joining' — все кнопки имён заблокированы, тревоги нет.
+  // Единственный выход для игрока был «Меня тут нет» и ручной ввод имени —
+  // новый расщеплённый профиль, ровно то, против чего лобби и затевалось.
+  it('переотправляет join-as при переоткрытии сокета, если joined ещё не пришёл', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => result.current.joinAs(7));
+    expect(result.current.status).toBe('joining');
+
+    // Сокет отваливается до ответа joined — токена ещё нет в localStorage.
+    act(() => socket.close());
+    act(() => vi.advanceTimersByTime(2000));
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    const reopened = FakeWebSocket.instances[1];
+    act(() => reopened.emitOpen());
+
+    expect(reopened.sent).toContainEqual(
+      JSON.stringify({ type: 'join-as', personId: 7 }),
+    );
+    expect(result.current.status).toBe('joining');
+  });
 });

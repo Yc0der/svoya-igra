@@ -42,7 +42,7 @@ describe('GameHistory', () => {
       startedAt: '2026-08-20T18:00:00.000Z',
       packFilename: 'sport-kino.json',
       packTitle: 'Спорт и кино',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
+      participants: [{ counterId: 'p1', name: 'Ваня', personId: null }],
     });
     expect(id).not.toBeNull();
     expect(history.allGames()).toEqual([
@@ -51,7 +51,7 @@ describe('GameHistory', () => {
         startedAt: '2026-08-20T18:00:00.000Z',
         packFilename: 'sport-kino.json',
         packTitle: 'Спорт и кино',
-        participants: [{ counterId: 'p1', name: 'Ваня' }],
+        participants: [{ counterId: 'p1', name: 'Ваня', personId: null }],
         finalScores: null,
       },
     ]);
@@ -426,7 +426,7 @@ describe('GameHistory: оценки вопросов', () => {
       startedAt: '2026-08-21T18:00:00.000Z',
       packFilename: 'p.json',
       packTitle: 'П',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
+      participants: [{ counterId: 'p1', name: 'Ваня', personId: null }],
     })!;
     history.recordQuestion(id, QUESTION);
     return id;
@@ -709,13 +709,13 @@ describe('GameHistory.profileAggregate', () => {
       startedAt: '2026-08-01',
       packFilename: 'pack.json',
       packTitle: 'Пак',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
+      participants: [{ counterId: 'p1', name: 'Ваня', personId: null }],
     })!;
     const g2 = history.startGame({
       startedAt: '2026-08-02',
       packFilename: 'pack.json',
       packTitle: 'Пак',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
+      participants: [{ counterId: 'p1', name: 'Ваня', personId: null }],
     })!;
     history.recordQuestion(g1, QUESTION);
     history.recordQuestion(g2, QUESTION);
@@ -764,7 +764,7 @@ describe('GameHistory.profileAggregate', () => {
       startedAt: '2026-08-01',
       packFilename: 'pack.json',
       packTitle: 'Пак',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
+      participants: [{ counterId: 'p1', name: 'Ваня', personId: null }],
     })!;
     history.recordQuestion(gameId, QUESTION);
     history.recordTag(gameId, {
@@ -787,8 +787,8 @@ describe('GameHistory.profileAggregate', () => {
       packFilename: 'pack.json',
       packTitle: 'Пак',
       participants: [
-        { counterId: 'p1', name: 'Ваня' },
-        { counterId: 'p2', name: 'Катя' },
+        { counterId: 'p1', name: 'Ваня', personId: null },
+        { counterId: 'p2', name: 'Катя', personId: null },
       ],
     })!;
     history.recordQuestion(gameId, QUESTION);
@@ -823,7 +823,7 @@ describe('GameHistory.profileAggregate', () => {
       startedAt: '2026-08-01',
       packFilename: 'pack.json',
       packTitle: 'Пак',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
+      participants: [{ counterId: 'p1', name: 'Ваня', personId: null }],
     })!;
     // Верный, неверный, никто не нажал, ведущий отменил после нажатия.
     history.recordQuestion(gameId, {
@@ -861,7 +861,7 @@ describe('GameHistory.profileAggregate', () => {
       startedAt: '2026-08-01',
       packFilename: 'pack.json',
       packTitle: 'Пак',
-      participants: [{ counterId: 'p1', name: 'Ваня' }],
+      participants: [{ counterId: 'p1', name: 'Ваня', personId: null }],
     })!;
     history.recordQuestion(gameId, {
       ...QUESTION,
@@ -894,8 +894,8 @@ describe('GameHistory.profileAggregate', () => {
       packFilename: 'pack.json',
       packTitle: 'Пак',
       participants: [
-        { counterId: 'p1', name: 'Ваня' },
-        { counterId: 'p2', name: 'Катя' },
+        { counterId: 'p1', name: 'Ваня', personId: null },
+        { counterId: 'p2', name: 'Катя', personId: null },
       ],
     })!;
     history.recordQuestion(gameId, QUESTION);
@@ -937,6 +937,340 @@ describe('GameHistory.profileAggregate', () => {
       downTagged: [],
       prices: [],
       boringThemes: [],
+    });
+  });
+});
+
+describe('люди и состав партии', () => {
+  it('заводит человека и возвращает его в списке', () => {
+    const history = makeHistory();
+    const id = history.createPerson('Ваня', '2026-08-26');
+    expect(id).not.toBeNull();
+    expect(history.listPeople()).toEqual([{ id, name: 'Ваня', games: 0 }]);
+  });
+
+  it('сортирует список по числу партий убыванием', () => {
+    const history = makeHistory();
+    const vanya = history.createPerson('Ваня', '2026-08-26')!;
+    const katya = history.createPerson('Катя', '2026-08-26')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Катя', personId: katya }],
+    });
+    expect(history.listPeople().map((p) => p.name)).toEqual(['Катя', 'Ваня']);
+    expect(history.listPeople()[0].games).toBe(1);
+    expect(vanya).not.toBe(katya);
+  });
+
+  it('пишет состав только для участников с человеком', () => {
+    const history = makeHistory();
+    const vanya = history.createPerson('Ваня', '2026-08-26')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [
+        { counterId: 'c1', name: 'Ваня', personId: vanya },
+        { counterId: 'c2', name: 'Гость', personId: null },
+      ],
+    });
+    expect(history.listPeople()).toEqual([
+      { id: vanya, name: 'Ваня', games: 1 },
+    ]);
+  });
+
+  // Ревью задачи 1, Important 1: запись games уже состоялась к моменту
+  // записи состава, и сбой при записи состава (здесь — нарушение внешнего
+  // ключа на несуществующий personId, ровно то, что могло бы случиться со
+  // слитым и удалённым человеком в задаче 2) не должен ронять уже заведённую
+  // партию — иначе Room получила бы null и перестала бы писать в неё вопросы,
+  // оценки и итог, при живой строке games в базе.
+  it('сбой при записи состава не мешает startGame вернуть id партии', () => {
+    const history = makeHistory();
+    const id = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: 999 }],
+    });
+    expect(id).not.toBeNull();
+    expect(history.allGames()).toHaveLength(1);
+    // Состав при этом не записался — personId 999 не существовал.
+    expect(history.listPeople()).toEqual([]);
+  });
+
+  // Финальное ревью ветки, п. 1 (Critical): discardGame() не знал про
+  // game_people. Внешние ключи в node:sqlite включены по умолчанию, и
+  // DELETE FROM games при живой ссылке из game_people бросает FOREIGN KEY
+  // constraint failed — ошибка ловится и уходит в лог, а строка games и
+  // состав партии остаются. Итог: выброшенная партия продолжает считаться
+  // сыгранной — фантомная партия в listPeople() у человека, которого
+  // ведущий явно выбросил из истории.
+  it('выброшенная партия с составом людей удаляется полностью — призрака в listPeople не остаётся', () => {
+    const history = makeHistory();
+    const vanya = history.createPerson('Ваня', '2026-08-26')!;
+    const id = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanya }],
+    })!;
+    history.discardGame(id);
+    expect(history.allGames()).toEqual([]);
+    expect(history.listPeople()).toEqual([
+      { id: vanya, name: 'Ваня', games: 0 },
+    ]);
+  });
+
+  // Финальное ревью ветки, п. 2 (Important), часть (а): участники живут в
+  // лобби между партиями дольше, чем действует блокировка слияния (та
+  // держит только идущую партию) — personId может протухнуть между слиянием
+  // профилей и следующим стартом. Раньше вставка состава шла под ОДНИМ
+  // try/catch на весь цикл: сбой на протухшем personId одного участника
+  // прерывал цикл целиком и терял ВСЕХ участников ПОСЛЕ него, даже с живым
+  // personId.
+  it('сбойный personId одного участника не мешает записать остальных после него', () => {
+    const history = makeHistory();
+    const vanya = history.createPerson('Ваня', '2026-08-26')!;
+    const id = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [
+        // Протухший personId (человек уже слит/удалён) — идёт ПЕРВЫМ.
+        { counterId: 'c1', name: 'Призрак', personId: 999 },
+        { counterId: 'c2', name: 'Ваня', personId: vanya },
+      ],
+    });
+    expect(id).not.toBeNull();
+    // Ваня — участник ПОСЛЕ сбойного — обязан попасть в состав, несмотря на
+    // то что перед ним стоял участник с несуществующим personId.
+    expect(history.listPeople()).toEqual([
+      { id: vanya, name: 'Ваня', games: 1 },
+    ]);
+  });
+});
+
+describe('GameHistory.playerStats', () => {
+  // Готовит партию: Ваня берёт два вопроса из трёх по «Истории», один верно.
+  function seed() {
+    const history = makeHistory();
+    const vanya = history.createPerson('Ваня', '2026-08-26')!;
+    const gameId = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanya }],
+    })!;
+    const base = { ...QUESTION, themeName: 'История' };
+    history.recordQuestion(gameId, {
+      ...base,
+      questionId: 'q1',
+      answeredByCounterId: 'c1',
+      correct: true,
+    });
+    history.recordQuestion(gameId, {
+      ...base,
+      questionId: 'q2',
+      answeredByCounterId: 'c1',
+      correct: false,
+    });
+    history.recordQuestion(gameId, {
+      ...base,
+      questionId: 'q3',
+      answeredBy: null,
+      answeredByCounterId: null,
+      correct: null,
+    });
+    return { history, vanya, gameId };
+  }
+
+  it('считает нажатия и верные ответы по теме', () => {
+    const { history, vanya } = seed();
+    const stats = history.playerStats();
+    expect(stats.games).toBe(1);
+    expect(stats.people).toEqual([
+      {
+        id: vanya,
+        name: 'Ваня',
+        games: 1,
+        played: 3,
+        buzzes: 2,
+        correct: 1,
+        themes: [{ themeName: 'История', played: 3, buzzes: 2, correct: 1 }],
+      },
+    ]);
+  });
+
+  it('не считает вопросы партий, в которых человека не было', () => {
+    const { history, vanya } = seed();
+    const other = history.createPerson('Катя', '2026-08-26')!;
+    const second = history.startGame({
+      startedAt: '2026-08-27',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c9', name: 'Катя', personId: other }],
+    })!;
+    history.recordQuestion(second, { ...QUESTION, questionId: 'q9' });
+
+    const vanyaStats = history.playerStats().people.find((p) => p.id === vanya);
+    expect(vanyaStats?.played).toBe(3);
+  });
+
+  it('исключает финальные вопросы', () => {
+    const { history, gameId, vanya } = seed();
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'final',
+      roundIndex: -1,
+      price: 0,
+      themeName: 'Финал',
+      answeredByCounterId: 'c1',
+      correct: true,
+    });
+    const stats = history.playerStats().people.find((p) => p.id === vanya);
+    expect(stats?.played).toBe(3);
+    expect(stats?.themes.map((t) => t.themeName)).toEqual(['История']);
+  });
+
+  it('не печатает людей без единой партии', () => {
+    const { history } = seed();
+    history.createPerson('Никогда не играл', '2026-08-26');
+    expect(history.playerStats().people).toHaveLength(1);
+  });
+});
+
+describe('GameHistory.forgetPerson', () => {
+  it('убирает человека из списка и из статистики, не трогая партию', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    const gameId = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: a }],
+    })!;
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'q1',
+      answeredByCounterId: 'c1',
+      correct: true,
+    });
+
+    expect(history.forgetPerson(a)).toBe(true);
+    expect(history.listPeople()).toEqual([]);
+    expect(history.playerStats().people).toEqual([]);
+    // Вопрос остаётся: он обезличен и нужен генератору (спека анкет,
+    // «Удаление анкеты — это удаление анкеты»).
+    expect(history.allPlayedQuestions()).toHaveLength(1);
+  });
+
+  it('забывает одного, не трогая соседа по столу', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    const b = history.createPerson('Катя', '2026-08-26')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [
+        { counterId: 'c1', name: 'Ваня', personId: a },
+        { counterId: 'c2', name: 'Катя', personId: b },
+      ],
+    });
+
+    expect(history.forgetPerson(a)).toBe(true);
+    expect(history.listPeople()).toEqual([{ id: b, name: 'Катя', games: 1 }]);
+  });
+
+  it('возвращает false на несуществующего человека, база цела', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    expect(history.forgetPerson(999)).toBe(false);
+    expect(history.listPeople()).toEqual([{ id: a, name: 'Ваня', games: 0 }]);
+  });
+});
+
+describe('GameHistory.mergePeople', () => {
+  it('перепривязывает состав и удаляет лишнюю запись', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    const b = history.createPerson('ваня', '2026-08-26')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: a }],
+    });
+    history.startGame({
+      startedAt: '2026-08-27',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c2', name: 'ваня', personId: b }],
+    });
+
+    expect(history.mergePeople(b, a)).toBe(true);
+    expect(history.listPeople()).toEqual([{ id: a, name: 'Ваня', games: 2 }]);
+  });
+
+  it('отказывается сливать человека с самим собой', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    expect(history.mergePeople(a, a)).toBe(false);
+    expect(history.listPeople()).toHaveLength(1);
+  });
+
+  // Ревью задачи 1, Minor 3: докстринг обещает false, если сливать нечего —
+  // несуществующий fromId как раз этот случай (DELETE трогает ноль строк,
+  // исключения нет).
+  it('возвращает false, если fromId не существует — сливать нечего', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    expect(history.mergePeople(999, a)).toBe(false);
+    expect(history.listPeople()).toHaveLength(1);
+  });
+
+  it('переживает случай, когда оба были за одним столом', () => {
+    const history = makeHistory();
+    const a = history.createPerson('Ваня', '2026-08-26')!;
+    const b = history.createPerson('ваня', '2026-08-26')!;
+    const gameId = history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'pack.json',
+      packTitle: 'Пак',
+      participants: [
+        { counterId: 'c1', name: 'Ваня', personId: a },
+        { counterId: 'c2', name: 'ваня', personId: b },
+      ],
+    })!;
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'q1',
+      answeredByCounterId: 'c1',
+      correct: true,
+    });
+    history.recordQuestion(gameId, {
+      ...QUESTION,
+      questionId: 'q2',
+      answeredByCounterId: 'c2',
+      correct: false,
+    });
+
+    expect(history.mergePeople(b, a)).toBe(true);
+    expect(history.listPeople()).toEqual([{ id: a, name: 'Ваня', games: 1 }]);
+
+    // Ревью задачи 1, Minor 4: после слияния у человека a — два счётчика
+    // (c1 и c2) одной партии, соединение gp × played_questions выдаёт каждый
+    // вопрос дважды, и без COUNT(DISTINCT ...) числа задвоились бы (played
+    // стал бы 4 вместо 2, buzzes — 4 вместо 2).
+    const stats = history.playerStats().people.find((p) => p.id === a);
+    expect(stats).toMatchObject({
+      games: 1,
+      played: 2,
+      buzzes: 2,
+      correct: 1,
     });
   });
 });

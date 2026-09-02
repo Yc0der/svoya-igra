@@ -552,12 +552,70 @@ describe('useAdminConnection', () => {
     act(() =>
       socket.emitMessage({
         type: 'admin-players',
-        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        players: [{ name: 'Ваня', date: '2026-08-26', games: 0 }],
       }),
     );
     expect(result.current.players).toEqual([
-      { name: 'Ваня', date: '2026-08-26' },
+      { name: 'Ваня', date: '2026-08-26', games: 0 },
     ]);
+  });
+
+  it('savePlayer с originalName шлёт переименование', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.savePlayer('{"...":1}', true, 'Ваня'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: '{"...":1}',
+        replace: true,
+        originalName: 'Ваня',
+      }),
+    );
+  });
+
+  it('getPlayer запрашивает анкету, admin-player кладёт её в playerCard', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.getPlayer('Ваня'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-get-player', name: 'Ваня' }),
+    );
+
+    const card = {
+      name: 'Ваня',
+      interests: [{ area: 'Спорт', examples: ['хоккей'] }],
+      boring: [],
+    };
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-player',
+        card,
+        extraLines: ['Пометка.'],
+      }),
+    );
+    expect(result.current.playerCard).toEqual({
+      card,
+      extraLines: ['Пометка.'],
+    });
+
+    act(() => result.current.clearPlayerCard());
+    expect(result.current.playerCard).toBeNull();
+  });
+
+  it('deletePlayerCard отправляет admin-delete-player-card', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.deletePlayerCard('Ваня'));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-delete-player-card', name: 'Ваня' }),
+    );
   });
 
   it('admin-players гасит и playerError, и playerConflictName', () => {
@@ -618,5 +676,84 @@ describe('useAdminConnection', () => {
     act(() => result.current.clearPlayerFeedback());
     expect(result.current.playerConflictName).toBeNull();
     expect(result.current.playerError).toBeNull();
+  });
+
+  // Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity).
+  it('picks up people from state broadcasts', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'state',
+        participants: [],
+        hostParticipantId: null,
+        game: null,
+        lanUrl: 'http://192.168.1.5:8080/',
+        lanCandidates: [],
+        people: [
+          { id: 1, name: 'Ваня', games: 5 },
+          { id: 2, name: 'Катя', games: 1 },
+        ],
+      }),
+    );
+
+    expect(result.current.people).toEqual([
+      { id: 1, name: 'Ваня', games: 5 },
+      { id: 2, name: 'Катя', games: 1 },
+    ]);
+  });
+
+  it('mergePeople отправляет admin-merge-people с fromId/intoId', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.mergePeople(1, 2));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({ type: 'admin-merge-people', fromId: 1, intoId: 2 }),
+    );
+  });
+
+  it('admin-people кладёт обновлённый список и гасит peopleError', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-people-error',
+        reason: 'нельзя сливать игроков, пока идёт партия',
+      }),
+    );
+    expect(result.current.peopleError).toBe(
+      'нельзя сливать игроков, пока идёт партия',
+    );
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-people',
+        people: [{ id: 2, name: 'Катя', games: 6 }],
+      }),
+    );
+    expect(result.current.people).toEqual([{ id: 2, name: 'Катя', games: 6 }]);
+    expect(result.current.peopleError).toBeNull();
+  });
+
+  it('admin-people-error кладёт причину в peopleError', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'admin-people-error',
+        reason: 'не удалось слить — выбраны один и тот же игрок?',
+      }),
+    );
+    expect(result.current.peopleError).toBe(
+      'не удалось слить — выбраны один и тот же игрок?',
+    );
   });
 });

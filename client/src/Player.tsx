@@ -18,6 +18,9 @@ export function Player() {
   const {
     status,
     join,
+    joinAs,
+    people,
+    rememberedPersonId,
     game,
     selfId,
     participants,
@@ -51,6 +54,23 @@ export function Player() {
     selectPack,
   } = useRoomConnection();
   const [name, setName] = useState('');
+  // «Меня тут нет» переключает список знакомых на старое поле ввода имени
+  // (Task 3). Не участвует в разметке, когда people пуст — тогда поле ввода
+  // и так показано сразу, это единственный откат на случай, если лобби со
+  // списком не приживётся на живой партии.
+  const [showNameForm, setShowNameForm] = useState(false);
+  // Гасит УЖЕ показанную тревогу отказа входа (name-taken/person-taken/
+  // person-unknown) при чисто локальной навигации между списком и формой —
+  // `status` в хуке меняется только сообщением сервера или новым
+  // join()/joinAs(), а переключение веток рендера само по себе до хука не
+  // доходит (дефект ревью задачи 3: два тапа между списком и формой
+  // возвращали устаревшую тревогу без новой попытки входа). Сбрасывается
+  // обратно в false ниже, как только status снова становится 'joining' —
+  // это и есть признак настоящей новой попытки, а не навигации.
+  const [errorDismissed, setErrorDismissed] = useState(false);
+  useEffect(() => {
+    if (status === 'joining') setErrorDismissed(false);
+  }, [status]);
   const [myVote, setMyVote] = useState<boolean | null>(null);
   // Ведущий в финале судит нескольких счётчиков по очереди в любом порядке —
   // одного myVote (как в base-round judging) не хватает, нужна отметка на
@@ -181,6 +201,49 @@ export function Player() {
   }
 
   if (status !== 'joined') {
+    // Пустой people — единственный сигнал «история выключена» (задача 2:
+    // отдельного флага нет). Это заявленный откат всей вехи: ровно старое
+    // поведение, поле имени и «Войти», без списка и без лишних надписей.
+    if (people.length > 0 && !showNameForm) {
+      return (
+        <div className="player player--join">
+          <h1>Своя игра</h1>
+          {status === 'person-taken' && !errorDismissed && (
+            <p className="player-alert" role="alert">
+              Этим игроком уже вошли с другого телефона
+            </p>
+          )}
+          {status === 'person-unknown' && !errorDismissed && (
+            <p className="player-alert" role="alert">
+              Такого игрока больше нет, выбери другого или введи имя
+            </p>
+          )}
+          <ul className="player-people">
+            {people.map((p) => (
+              <li key={p.id}>
+                <button
+                  className={`button${p.id === rememberedPersonId ? ' is-selected' : ''}`}
+                  onClick={() => joinAs(p.id)}
+                  disabled={status === 'joining'}
+                >
+                  <span>{p.name}</span>
+                  <span className="player-person-games">{p.games}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            className="button"
+            onClick={() => {
+              setShowNameForm(true);
+              setErrorDismissed(true);
+            }}
+          >
+            Меня тут нет
+          </button>
+        </div>
+      );
+    }
     return (
       <form className="player player--join" onSubmit={handleSubmit}>
         <h1>Своя игра</h1>
@@ -198,10 +261,27 @@ export function Player() {
         >
           Войти
         </button>
-        {status === 'name-taken' && (
+        {status === 'name-taken' && !errorDismissed && (
           <p className="player-alert" role="alert">
             Это имя уже занято, выбери другое
           </p>
+        )}
+        {people.length > 0 && (
+          // Без пути назад случайный тап по «Меня тут нет» уводит в обычный
+          // join(name), который на сервере заводит НОВОГО человека — то самое
+          // расщепление профиля, ради предотвращения которого затеяно лобби
+          // со списком (замечание ревью). Скрыта при пустом people: при
+          // выключенной истории возвращаться некуда.
+          <button
+            type="button"
+            className="button"
+            onClick={() => {
+              setShowNameForm(false);
+              setErrorDismissed(true);
+            }}
+          >
+            Назад к списку
+          </button>
         )}
       </form>
     );

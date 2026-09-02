@@ -2,6 +2,7 @@ import type { Phase } from './engine.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
 import type { Pack, Question } from './pack.js';
+import type { PlayerCard } from './playerCard.js';
 
 export interface ParticipantView {
   id: string;
@@ -130,6 +131,11 @@ export interface GameStateView {
 
 export type ClientMessage =
   | { type: 'join'; name: string }
+  // Вход «я — вот этот из списка» (design.md, 2026-08-26-player-identity,
+  // «Лобби») — вместо ввода имени руками участник выбирает себя среди уже
+  // известных людей (room.ts, Room.joinAsPerson). Имя сервер берёт у самого
+  // человека, клиент его не присылает.
+  | { type: 'join-as'; personId: number }
   | { type: 'reconnect'; token: string }
   | { type: 'start-game' }
   | { type: 'toggle-host' }
@@ -256,7 +262,31 @@ export type ClientMessage =
       // подтвердил замену. Подтверждение спрашивается один раз и на стороне
       // клиента, чтобы сервер оставался без состояния между сообщениями.
       replace: boolean;
-    };
+      // Правка через форму в /admin: имя, под которым анкета лежала до
+      // правки. Если ведущий сменил имя в форме, это переименование — старый
+      // раздел уходит, новый встаёт на его место. Форма шлёт тот же код
+      // анкеты, что приходит с телефона, ровно затем, чтобы разбор, проверки
+      // и экранирование остались в одном месте на оба источника.
+      originalName?: string;
+    }
+  // Форма правки: отдать анкету так, как она лежит в файле.
+  | { type: 'admin-get-player'; name: string }
+  // Удаление анкеты — и только анкеты. Человек в истории партий, его участие в
+  // играх и его блок в «Показывает в игре» остаются: их убирает
+  // admin-forget-person (спека анкет, «Удаление анкеты — это удаление анкеты»).
+  // Во время партии разрешено: трогается файл, а не состояние игры.
+  | { type: 'admin-delete-player-card'; name: string }
+  // Слияние расщепившихся профилей одного человека (design.md,
+  // 2026-08-26-player-identity, «Слияние профилей») — направление указывает
+  // ведущий: fromId исчезает, intoId остаётся. Сервер сам проверяет, что
+  // партия сейчас не идёт (Room.hasActiveGame) — клиент этого не решает.
+  | { type: 'admin-merge-people'; fromId: number; intoId: number }
+  // Удаление человека из истории партий по id из списка «Люди в истории»
+  // (спека идентичности, «Список людей истории»). По id, а не по имени:
+  // человек, назвавшийся в партиях иначе, чем в анкете, по имени не находился
+  // вовсе. Анкету не трогает; сервер сам проверяет, что партия не идёт, — тем
+  // же правилом, что и слияние.
+  | { type: 'admin-forget-person'; id: number };
 
 export type StartGameErrorReason =
   | 'not-enough-players'
@@ -296,12 +326,22 @@ export const TAG_REASONS = [
 export type ServerMessage =
   | { type: 'joined'; participantId: string; token: string; name: string }
   | { type: 'name-taken' }
+  // Отдельные от name-taken отказы join-as (room.ts, Room.joinAsPerson) —
+  // причины разные (этим человеком уже кто-то вошёл / человека с таким id
+  // нет), и текст, который увидит игрок, тоже должен быть разным.
+  | { type: 'person-taken' }
+  | { type: 'person-unknown' }
   | { type: 'invalid-token' }
   | {
       type: 'state';
       participants: ParticipantView[];
       hostParticipantId: string | null;
       game: GameStateView | null;
+      // Список постоянных людей для входа «я — вот этот из списка» (room.ts,
+      // Room.getPeople). Пустой массив, когда история выключена — заявленный
+      // откат всей вехи: клиент показывает обычное поле ввода имени
+      // (design.md, 2026-08-26-player-identity, «Лобби»).
+      people: { id: number; name: string; games: number }[];
       // Живой, не разовый: пересчитывается на каждой рассылке (server.ts,
       // stateMessageFor) из room.getLanInfo(), а не отправляется один раз
       // при подключении — иначе уже подключённые табло/админка не увидели
@@ -368,6 +408,30 @@ export type ServerMessage =
     }
   // Отдаётся и на admin-get-players, и как подтверждение успешной записи —
   // список всегда актуальный, клиенту не нужно догадываться, что изменилось.
-  | { type: 'admin-players'; players: { name: string; date: string }[] }
+  // Числа партий здесь нет: удаление анкеты их не трогает, а честный счётчик
+  // живёт в admin-people, где человека находят по id, а не по совпадению имени.
+  | {
+      type: 'admin-players';
+      players: { name: string; date: string }[];
+    }
+  // Ответ на admin-get-player: анкета как она лежит в файле. extraLines —
+  // строки раздела, которых форма не знает (ручные пометки): форма их
+  // показывает как есть и возвращает серверу нетронутыми.
+  | {
+      type: 'admin-player';
+      card: PlayerCard;
+      extraLines: string[];
+    }
   | { type: 'admin-player-exists'; name: string }
-  | { type: 'admin-player-error'; reason: string };
+  | { type: 'admin-player-error'; reason: string }
+  // Ответ на admin-merge-people: обновлённый список, той же формы, что и
+  // state.people (форма зеркалит PersonSummary из history.ts). Тот же приём,
+  // что admin-players — список всегда актуальный, клиенту не нужно
+  // догадываться, что изменилось.
+  | {
+      type: 'admin-people';
+      people: { id: number; name: string; games: number }[];
+    }
+  // Отказ admin-merge-people: партия ещё идёт, либо fromId/intoId совпали или
+  // fromId не существует (history.mergePeople вернул false).
+  | { type: 'admin-people-error'; reason: string };

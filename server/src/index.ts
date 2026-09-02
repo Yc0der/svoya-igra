@@ -9,10 +9,16 @@ import { createServer } from './server.js';
 import { loadPack } from './pack.js';
 import { listAvailablePacks } from './packs.js';
 import { GameHistory } from './history.js';
+import { ensureFileFromExample } from './fileFromExample.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
 const PACK_PATH = process.env.PACK_PATH ?? './packs/current.json';
+// Паков компании в репозитории нет — личные темы собираются из анкет (см.
+// .gitignore). В гите лежат только `packs/*.example.json`, и текущий пакет
+// заводится из примера при первом запуске, иначе серверу нечего загружать.
+const PACK_EXAMPLE_PATH =
+  process.env.PACK_EXAMPLE_PATH ?? './packs/current.example.json';
 // Резолвится от import.meta.url, а не от cwd (тем же приёмом, что и
 // CLIENT_DIST_PATH ниже) — иначе дефолт молча разъезжается с тем, что
 // использует server/scripts/*.ts (те запускаются из server/, а не из
@@ -28,8 +34,17 @@ const LAN_HOST_CONFIG_PATH =
   process.env.LAN_HOST_CONFIG_PATH ?? './lan-host.local.json';
 const PROFILE_PATH =
   process.env.PROFILE_PATH ?? './docs/pack-generator-profile.md';
+// Профиль тоже не в гите: жалобы и «Автособранное» — это про конкретную
+// компанию, а текст жалобы печатает ведущий руками.
+const PROFILE_EXAMPLE_PATH =
+  process.env.PROFILE_EXAMPLE_PATH ??
+  './docs/pack-generator-profile.example.md';
 // docs/players.md — анкеты интересов (design.md, 2026-08-26).
 const PLAYERS_PATH = process.env.PLAYERS_PATH ?? './docs/players.md';
+// Самих анкет в репозитории нет — это личные данные (см. .gitignore). В гите
+// лежит только пустой пример, из которого файл создаётся при первом запуске.
+const PLAYERS_EXAMPLE_PATH =
+  process.env.PLAYERS_EXAMPLE_PATH ?? './docs/players.example.md';
 // Разовая добавка к hiddenInterfaces из LAN_HOST_CONFIG_PATH ниже — для
 // одного запуска, не заводя постоянную запись в файл. Список интерфейсов,
 // не адресов: у заведомо бесполезных на этой машине адаптеров (VPN,
@@ -66,6 +81,12 @@ async function main(): Promise<void> {
       err,
     );
   }
+  // Все три рабочих файла заводятся из примеров: пакет — до загрузки, анкеты и
+  // профиль — до старта сервера, который в них пишет.
+  await ensureFileFromExample(PACK_PATH, PACK_EXAMPLE_PATH);
+  await ensureFileFromExample(PLAYERS_PATH, PLAYERS_EXAMPLE_PATH);
+  await ensureFileFromExample(PROFILE_PATH, PROFILE_EXAMPLE_PATH);
+
   let pack;
   try {
     pack = await loadPack(PACK_PATH);

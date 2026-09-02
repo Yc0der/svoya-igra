@@ -25,9 +25,15 @@ import {
   type ComplaintEntry,
 } from './generatorProfile.js';
 import { TAG_REASONS } from './protocol.js';
-import type { ProfileAggregateSource } from './history.js';
-import { parsePlayerCard } from './playerCard.js';
-import { readPlayerList, savePlayerCard } from './playersFile.js';
+import type { ProfileAggregateSource, PeopleAdmin } from './history.js';
+import { parsePlayerCard, sameName } from './playerCard.js';
+import {
+  deletePlayerCard,
+  readPlayerCard,
+  readPlayerList,
+  savePlayerCard,
+  savePlayerStats,
+} from './playersFile.js';
 
 export interface CreateServerOptions {
   room: Room;
@@ -39,8 +45,9 @@ export interface CreateServerOptions {
   // путь не нужен вовсе — сервер без него просто не может принимать жалобы
   // (тихий no-op, см. handleReportQuestion).
   profilePath?: string;
-  // Только чтение сводки — записывать в историю может лишь Room.
-  history?: ProfileAggregateSource;
+  // Только чтение сводки и слияние профилей людей — записывать сыгранные
+  // партии в историю может лишь Room (задача 4, sdd/2026-08-26-player-identity).
+  history?: ProfileAggregateSource & PeopleAdmin;
   // docs/players.md — анкеты интересов (design.md, 2026-08-26).
   playersPath?: string;
 }
@@ -143,6 +150,7 @@ export function createServer(options: CreateServerOptions): GameServer {
       participants: toParticipantView(room.getState()),
       hostParticipantId: room.getState().hostParticipantId,
       game: room.toGameStateView(viewerId),
+      people: room.getPeople(),
       lanUrl: lanUrlFor(lan.address, port),
       lanCandidates: lan.candidates,
       availablePacks: packInfo.available,
@@ -195,6 +203,7 @@ export function createServer(options: CreateServerOptions): GameServer {
     const phase = state.game?.phase ?? null;
     if (phase === 'game-end' && previousPhase !== 'game-end') {
       void refreshAutoSection();
+      void refreshPlayerStats();
     }
     previousPhase = phase;
   });
@@ -245,7 +254,12 @@ export function createServer(options: CreateServerOptions): GameServer {
   const withPackWriteLock = createWriteLock();
   const withProfileWriteLock = createWriteLock();
   // Анкеты игроков живут в своём файле (docs/players.md) — сериализовать
-  // его запись с профилем генератора незачем, файлы разные.
+  // его запись с профилем генератора незачем, файлы разные. Этот же замок
+  // держит и savePlayerCard (admin-save-player), и savePlayerStats
+  // (refreshPlayerStats ниже) — оба пишут в один и тот же players.md, и без
+  // общего замка партия, дошедшая до game-end одновременно с сохранением
+  // анкеты, теряла бы одну из двух правок тем же способом, каким это уже
+  // объяснено у withPackWriteLock.
   const withPlayersWriteLock = createWriteLock();
 
   // Пересчёт раздела «Автособранное» (design.md, 2026-08-25). Ошибки
@@ -260,6 +274,27 @@ export function createServer(options: CreateServerOptions): GameServer {
       );
     } catch (err) {
       console.error('Не удалось пересчитать «Автособранное» в профиле:', err);
+    }
+  }
+
+  // Пересчёт раздела «Показывает в игре» (design.md, 2026-08-26-player-identity,
+  // задача 5). Две точки вызова: game-end (вместе с refreshAutoSection) и
+  // слияние профилей в admin-merge-people ниже — после слияния числа обязаны
+  // сойтись сразу, ведущий ради этого его и делает.
+  //
+  // А вот на разбор причины, в отличие от «Автособранного», пересчитывать
+  // смысла нет: playerStats() строится из game_people и played_questions, до
+  // которых оценкам (question_tags) дела нет — эти числа на них не меняются.
+  async function refreshPlayerStats(): Promise<void> {
+    if (!playersPath || !history) return;
+    try {
+      const stats = history.playerStats();
+      await withPlayersWriteLock(() => savePlayerStats(playersPath, stats));
+    } catch (err) {
+      console.error(
+        'Не удалось пересчитать «Показывает в игре» в анкетах:',
+        err,
+      );
     }
   }
 
@@ -312,6 +347,22 @@ export function createServer(options: CreateServerOptions): GameServer {
         const result = room.join(message.name);
         if ('error' in result) {
           send(ws, { type: 'name-taken' });
+          return;
+        }
+        connections.set(ws, result.participant.id);
+        owners.set(result.participant.id, ws);
+        send(ws, {
+          type: 'joined',
+          participantId: result.participant.id,
+          token: result.participant.token,
+          name: result.participant.name,
+        });
+      }
+
+      if (message.type === 'join-as' && typeof message.personId === 'number') {
+        const result = room.joinAsPerson(message.personId);
+        if ('error' in result) {
+          send(ws, { type: result.error });
           return;
         }
         connections.set(ws, result.participant.id);
@@ -704,7 +755,136 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.code === 'string' &&
         typeof message.replace === 'boolean'
       ) {
-        await handleSavePlayer(message.code, message.replace);
+        await handleSavePlayer(
+          message.code,
+          message.replace,
+          typeof message.originalName === 'string'
+            ? message.originalName
+            : undefined,
+        );
+      }
+
+      if (
+        message.type === 'admin-get-player' &&
+        typeof message.name === 'string'
+      ) {
+        await handleGetPlayer(message.name);
+      }
+
+      if (
+        message.type === 'admin-delete-player-card' &&
+        typeof message.name === 'string'
+      ) {
+        await handleDeletePlayerCard(message.name);
+      }
+
+      if (
+        message.type === 'admin-merge-people' &&
+        typeof message.fromId === 'number' &&
+        typeof message.intoId === 'number'
+      ) {
+        if (!history) return;
+        // Пока партия идёт, человек связан с участником и счётчиком за
+        // столом; перепривязка под ногами у идущей игры — класс ошибок,
+        // которого проще не заводить (design.md, «Слияние профилей»).
+        if (room.hasActiveGame()) {
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'нельзя сливать игроков, пока идёт партия',
+          });
+          return;
+        }
+        if (message.fromId === message.intoId) {
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'не удалось слить — выбраны один и тот же игрок?',
+          });
+          return;
+        }
+        // Проверяем существование ДО вызова mergePeople и отдельно от
+        // совпадения id выше — причина отказа обязана быть честной (ревью
+        // задачи 4, Important 1). Если кого-то из двоих уже слили с другого
+        // устройства между тем, как ведущий открыл диалог, и тем, как
+        // подтвердил его, mergePeople(fromId, intoId) тоже вернёт false —
+        // но «выбран один и тот же игрок» тут была бы неправдой: ведущий
+        // только что видел в диалоге два разных имени.
+        const existingIds = new Set(history.listPeople().map((p) => p.id));
+        if (
+          !existingIds.has(message.fromId) ||
+          !existingIds.has(message.intoId)
+        ) {
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'такого игрока уже нет — обнови список',
+          });
+          return;
+        }
+        const merged = history.mergePeople(message.fromId, message.intoId);
+        if (!merged) {
+          // Существование и несовпадение id уже проверены выше — сюда
+          // попадает только настоящий сбой mergePeople (ошибка БД).
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'не удалось слить — попробуй ещё раз',
+          });
+          return;
+        }
+        // Перепривязываем живых участников комнаты со слитого fromId на
+        // intoId (финальное ревью ветки, п. 2, Important, часть б) — иначе
+        // участник, оставшийся в лобби со старым personId, сломает следующий
+        // startGame() и позволит второму телефону войти тем же человеком
+        // через joinAsPerson (room.ts, reassignPerson).
+        room.reassignPerson(message.fromId, message.intoId);
+        // Пересчитываем «Показывает в игре» сразу после слияния (финальное
+        // ревью ветки, п. 3, Important) — иначе ведущий сливает профили
+        // именно затем, чтобы числа сошлись, а файл до конца следующей
+        // партии продолжает показывать два раздела со старыми числами,
+        // один из которых принадлежит уже удалённому человеку.
+        void refreshPlayerStats();
+        // Список уже едет в обычном состоянии комнаты (stateMessageFor
+        // кладёт room.getPeople() → history.listPeople()) —
+        // broadcastState() разносит свежий список всем: другим открытым
+        // админкам и, важнее, лобби на телефонах игроков, где список виден
+        // для входа «я — вот этот из списка» (ревью задачи 4, Important 2).
+        broadcastState();
+        send(ws, { type: 'admin-people', people: history.listPeople() });
+      }
+
+      if (
+        message.type === 'admin-forget-person' &&
+        typeof message.id === 'number'
+      ) {
+        if (!history) return;
+        // Дословно та же причина, что у слияния: человек за столом связан с
+        // участником и счётчиком, и трогать эту связь под ногами у идущей партии —
+        // класс ошибок, которого проще не заводить.
+        if (room.hasActiveGame()) {
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'нельзя удалять человека, пока идёт партия',
+          });
+          return;
+        }
+        if (!history.forgetPerson(message.id)) {
+          // forgetPerson возвращает false и когда человека уже нет (его убрали с
+          // другого устройства, пока ведущий смотрел на список), и при сбое базы.
+          // Для ведущего ответ один и тот же: список у него устарел.
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'такого игрока уже нет — обнови список',
+          });
+          return;
+        }
+        // Пересчёт «Показывает в игре» сразу, а не после следующей партии, — иначе
+        // имя удалённого осталось бы в файле. В отличие от слияния его здесь ждём:
+        // ведущий открывает файл сразу после удаления, и порядок «ответ ушёл, файл
+        // ещё старый» видно глазами.
+        await refreshPlayerStats();
+        // Список людей едет и в обычном состоянии комнаты: лобби на телефонах
+        // показывает его для входа «я — вот этот из списка» (та же причина, по
+        // которой broadcastState стоит в слиянии).
+        broadcastState();
+        send(ws, { type: 'admin-people', people: history.listPeople() });
       }
 
       // Сырые сообщения Node (ENOENT: ... open 'C:\...\packs\ghost.json') не
@@ -832,6 +1012,7 @@ export function createServer(options: CreateServerOptions): GameServer {
       async function handleSavePlayer(
         code: string,
         replace: boolean,
+        originalName?: string,
       ): Promise<void> {
         if (!playersPath) return;
         const parsed = parsePlayerCard(code);
@@ -840,18 +1021,34 @@ export function createServer(options: CreateServerOptions): GameServer {
           return;
         }
         try {
+          // Правка своей же анкеты — не конфликт: раздел с этим именем и
+          // есть тот, который правят. Спрашивать про замену тут значило бы
+          // требовать подтверждения у человека, который только что нажал
+          // «Редактировать» именно на нём.
+          const editingSelf =
+            originalName !== undefined &&
+            sameName(originalName, parsed.card.name);
           const conflict = await withPlayersWriteLock(async () => {
             const existing = await readPlayerList(playersPath);
-            const same = existing.find(
-              (player) =>
-                player.name.toLowerCase() === parsed.card.name.toLowerCase(),
+            const same = existing.find((player) =>
+              sameName(player.name, parsed.card.name),
             );
-            if (same && !replace) return same.name;
+            if (same && !replace && !editingSelf) return same.name;
             await savePlayerCard(
               playersPath,
               parsed.card,
               new Date().toISOString().slice(0, 10),
+              // При переименовании пометки ищутся под старым именем: раздел
+              // под новым либо чужой, либо его ещё нет.
+              originalName ?? parsed.card.name,
             );
+            // Переименование: новый раздел уже записан, старый убирается
+            // здесь же, под тем же замком. Иначе между записью и удалением
+            // в файле лежали бы два раздела одного человека, и партия,
+            // дошедшая до game-end в этот момент, увидела бы их оба.
+            if (originalName !== undefined && !editingSelf) {
+              await deletePlayerCard(playersPath, originalName);
+            }
             return null;
           });
           if (conflict !== null) {
@@ -869,6 +1066,48 @@ export function createServer(options: CreateServerOptions): GameServer {
               (err as NodeJS.ErrnoException).code === 'ENOENT'
                 ? 'файл анкет не найден'
                 : 'не удалось сохранить анкету',
+          });
+        }
+      }
+
+      // Анкета для формы правки. Отсутствие раздела — не ошибка сервера, а
+      // устаревший список у ведущего: анкету могли удалить с другого
+      // устройства, пока он смотрел на экран.
+      async function handleGetPlayer(name: string): Promise<void> {
+        if (!playersPath) return;
+        const found = await readPlayerCard(playersPath, name);
+        if (!found) {
+          send(ws, {
+            type: 'admin-player-error',
+            reason: 'такой анкеты уже нет — обнови список',
+          });
+          return;
+        }
+        send(ws, {
+          type: 'admin-player',
+          card: found.card,
+          extraLines: found.extraLines,
+        });
+      }
+
+      async function handleDeletePlayerCard(name: string): Promise<void> {
+        if (!playersPath) return;
+        // Проверки «идёт ли партия» здесь нет намеренно: удаление анкеты, как и её
+        // правка, трогает файл, а не состояние игры. С партией связан человек в
+        // истории — его убирает admin-forget-person, и вот там запрет на месте.
+        try {
+          await withPlayersWriteLock(() => deletePlayerCard(playersPath, name));
+          send(ws, {
+            type: 'admin-players',
+            players: await readPlayerList(playersPath),
+          });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-player-error',
+            reason:
+              (err as NodeJS.ErrnoException).code === 'ENOENT'
+                ? 'файл анкет не найден'
+                : 'не удалось удалить анкету',
           });
         }
       }

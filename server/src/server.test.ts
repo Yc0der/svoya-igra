@@ -13,6 +13,7 @@ import {
 import type { ServerMessage } from './protocol.js';
 import type { Pack } from './pack.js';
 import { GameHistory, type HistoryRecorder } from './history.js';
+import { savePlayerStats } from './playersFile.js';
 import {
   REVEAL_TIMER_MS,
   VOTE_TIMER_MS,
@@ -98,6 +99,7 @@ describe('createServer', () => {
       participants: [],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -140,6 +142,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -201,6 +204,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -235,6 +239,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -355,6 +360,7 @@ describe('createServer', () => {
       participants: [],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -411,6 +417,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -451,6 +458,7 @@ describe('createServer', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -565,6 +573,8 @@ describe('createServer history recording honesty', () => {
       clearTag: () => {},
       recordTagReason: () => false,
       downTagsForReview: () => [],
+      createPerson: () => nextId++,
+      listPeople: () => [],
     };
     const room = new Room(
       undefined,
@@ -626,6 +636,63 @@ describe('createServer history recording honesty', () => {
     a.ws.close();
     b.ws.close();
     admin.ws.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+// Отдельный describe по той же причине, что и history recording honesty
+// выше: тесту нужен рекордер, который знает конкретного человека (id 7 =
+// «Ваня») — комната describe('createServer', ...) выше собрана вообще без
+// рекордера, room.getPeople() у неё всегда пуст.
+describe('createServer join-as', () => {
+  it('входит человеком из списка и отклоняет второго под тем же человеком', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-join-as-'));
+    const history: HistoryRecorder = {
+      startGame: () => null,
+      recordQuestion: () => {},
+      finishGame: () => {},
+      discardGame: () => {},
+      recordTag: () => {},
+      clearTag: () => {},
+      recordTagReason: () => false,
+      downTagsForReview: () => [],
+      createPerson: () => null,
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    };
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const first = new WebSocket(url);
+    const nextFirstMessage = collectMessages(first);
+    await waitForOpen(first);
+    await nextFirstMessage(); // стартовое state
+
+    first.send(JSON.stringify({ type: 'join-as', personId: 7 }));
+    const joined = await nextFirstMessage();
+    expect(joined).toMatchObject({ type: 'joined', name: 'Ваня' });
+
+    const second = new WebSocket(url);
+    const nextSecondMessage = collectMessages(second);
+    await waitForOpen(second);
+    await nextSecondMessage(); // стартовое state
+
+    second.send(JSON.stringify({ type: 'join-as', personId: 7 }));
+    const rejection = await nextSecondMessage();
+    expect(rejection).toEqual({ type: 'person-taken' });
+
+    first.close();
+    second.close();
     await new Promise<void>((resolve) =>
       server.httpServer.close(() => resolve()),
     );
@@ -700,6 +767,7 @@ describe('createServer heartbeat', () => {
       ],
       hostParticipantId: null,
       game: null,
+      people: [],
       lanUrl: 'http://localhost:8080/',
       lanCandidates: [],
       availablePacks: [],
@@ -780,6 +848,31 @@ async function joinPlayer(baseUrl: string, name: string) {
     nextMessage,
     participantId: joined.participantId,
     token: joined.token,
+  };
+}
+
+// Тот же протокол, что и joinPlayer, но 'join-as' вместо 'join' — заходит
+// уже опознанным человеком (задача 5, sdd/2026-08-26-player-identity): нужно
+// там, где тест проверяет playerStats(), а она строится из game_people, куда
+// участник без personId никогда не попадает (history.ts, startGame).
+async function joinPlayerAs(baseUrl: string, personId: number) {
+  const ws = new WebSocket(baseUrl);
+  const nextMessage = collectMessages(ws);
+  await waitForOpen(ws);
+  await nextMessage(); // state
+  ws.send(JSON.stringify({ type: 'join-as', personId }));
+  const joined = (await nextMessage()) as {
+    participantId: string;
+    token: string;
+    name: string;
+  };
+  await nextMessage(); // сборос состояния лобби после join, которое видит сам подключившийся
+  return {
+    ws,
+    nextMessage,
+    participantId: joined.participantId,
+    token: joined.token,
+    name: joined.name,
   };
 }
 
@@ -3348,6 +3441,810 @@ describe('createServer player questionnaire', () => {
     expect(content).toContain('## Ваня');
     expect(content).toContain('## Катя');
     admin.ws.close();
+  });
+  it('admin-get-player отдаёт анкету и ручные строки раздела', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+    const withNote = (await readFile(playersPath, 'utf8')).replace(
+      '- **Спорт:** Формула-1',
+      '- **Спорт:** Формула-1\nПометка ведущего.',
+    );
+    await writeFile(playersPath, withNote, 'utf8');
+
+    admin.ws.send(JSON.stringify({ type: 'admin-get-player', name: 'ваня' }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-player',
+      card: {
+        name: 'Ваня',
+        interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+        boring: [],
+      },
+      extraLines: ['Пометка ведущего.'],
+    });
+    admin.ws.close();
+  });
+
+  it('admin-get-player на незнакомое имя отдаёт ошибку, а не пустую анкету', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(JSON.stringify({ type: 'admin-get-player', name: 'Пётр' }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-player-error',
+      reason: 'такой анкеты уже нет — обнови список',
+    });
+    admin.ws.close();
+  });
+
+  it('правка с тем же именем заменяет раздел, а не заводит второй', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+
+    const edited = JSON.stringify({
+      version: 1,
+      name: 'Ваня',
+      interests: [{ area: 'Спорт', examples: ['хоккей'] }],
+      boring: ['Мода'],
+    });
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: edited,
+        replace: true,
+        originalName: 'Ваня',
+      }),
+    );
+    const message = (await admin.nextMessage()) as {
+      players: { name: string }[];
+    };
+    expect(message.players).toHaveLength(1);
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).toContain('- **Спорт:** хоккей');
+    expect(content).not.toContain('Формула-1');
+    admin.ws.close();
+  });
+
+  it('смена имени в форме переименовывает, а не заводит вторую анкету', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+
+    const renamed = JSON.stringify({
+      version: 1,
+      name: 'Иван',
+      interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+      boring: [],
+    });
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: renamed,
+        replace: true,
+        originalName: 'Ваня',
+      }),
+    );
+    const message = (await admin.nextMessage()) as {
+      players: { name: string }[];
+    };
+    expect(message.players).toEqual([
+      { name: 'Иван', date: expect.any(String) },
+    ]);
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).not.toContain('## Ваня');
+    admin.ws.close();
+  });
+
+  it('переименование в занятое имя без подтверждения не трогает файл', async () => {
+    const admin = await connectAdmin(baseUrl);
+    for (const name of ['Ваня', 'Катя']) {
+      admin.ws.send(
+        JSON.stringify({
+          type: 'admin-save-player',
+          code: JSON.stringify({
+            version: 1,
+            name,
+            interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+            boring: [],
+          }),
+          replace: false,
+        }),
+      );
+      await admin.nextMessage();
+    }
+    const before = await readFile(playersPath, 'utf8');
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: JSON.stringify({
+          version: 1,
+          name: 'Катя',
+          interests: [{ area: 'Игры', examples: ['дота'] }],
+          boring: [],
+        }),
+        replace: false,
+        originalName: 'Ваня',
+      }),
+    );
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-player-exists',
+      name: 'Катя',
+    });
+    expect(await readFile(playersPath, 'utf8')).toBe(before);
+    admin.ws.close();
+  });
+
+  it('admin-delete-player-card убирает анкету и отдаёт обновлённый список', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-save-player',
+        code: VANYA_CODE,
+        replace: false,
+      }),
+    );
+    await admin.nextMessage();
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-player-card', name: 'ваня' }),
+    );
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-players',
+      players: [],
+    });
+    const content = await readFile(playersPath, 'utf8');
+    expect(content).not.toContain('## Ваня');
+    expect(content).toContain('Вводный текст.');
+    admin.ws.close();
+  });
+});
+
+describe('createServer game-end player stats', () => {
+  it('game-end пересчитывает «Показывает в игре» реальными числами партии', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-player-stats-'));
+      const playersPath = join(dir, 'players.md');
+      await writeFile(
+        playersPath,
+        '# Анкеты игроков\n\nВводный текст.\n',
+        'utf8',
+      );
+      const history = new GameHistory(':memory:');
+      const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+      const katyaId = history.createPerson('Катя', '2026-08-02')!;
+      const room = new Room(
+        undefined,
+        TEST_PACK,
+        undefined,
+        'test.json',
+        history,
+      );
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        port: 8080,
+        packsDir: dir,
+        playersPath,
+        history,
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } = server.httpServer.address() as AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const a = await joinPlayerAs(url, vanyaId);
+      const b = await joinPlayerAs(url, katyaId);
+      await a.nextMessage(); // трансляция лобби после join второго
+
+      a.ws.send(JSON.stringify({ type: 'start-game' }));
+      const aState = (await settle(a, b, a)) as {
+        game: { phase: string; turnParticipantId: string };
+      };
+      expect(aState.game.phase).toBe('selecting');
+
+      const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+      const other = picker === a ? b : a;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(a, b, picker); // question-reveal
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      await settle(a, b, picker); // question-open
+
+      picker.ws.send(JSON.stringify({ type: 'buzz' }));
+      await settle(a, b, picker); // buzzed
+      picker.ws.send(JSON.stringify({ type: 'said-answer' }));
+      await settle(a, b, picker); // judging
+
+      other.ws.send(JSON.stringify({ type: 'vote', correct: true }));
+      await settle(a, b, picker); // голос учтён, вердикт ещё не подведён
+
+      let remaining = VOTE_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterVote = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterVote.game.phase).toBe('reveal');
+
+      // TEST_PACK — единственный раунд с единственным вопросом, без финала:
+      // reveal доигрывает прямо в game-end, минуя round-end/selecting.
+      remaining = REVEAL_TIMER_MS;
+      while (remaining > 0) {
+        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
+        await vi.advanceTimersByTimeAsync(step);
+        remaining -= step;
+      }
+      const afterReveal = (await settle(a, b, picker)) as {
+        game: { phase: string };
+      };
+      expect(afterReveal.game.phase).toBe('game-end');
+
+      const content = await waitForFileContent(
+        playersPath,
+        '## Показывает в игре',
+      );
+      expect(content).toContain('Вводный текст.'); // анкеты выше не тронуты
+      expect(content).toContain(`### ${picker.name}`);
+      expect(content).toContain(
+        'Всего: нажимал 1 из 1 сыгранных при нём вопросов, верно 1.',
+      );
+      expect(content).toContain(
+        '- **Тема** — нажимал 1 из 1 вопросов темы, верно 1',
+      );
+      // Второй участник тоже сыграл вопрос, но не нажимал и не отвечал —
+      // это разные числа для одного и того же вопроса, и раздел обязан
+      // показывать их по каждому человеку отдельно, а не одной общей строкой.
+      expect(content).toContain(`### ${other.name}`);
+      expect(content).toContain(
+        'Всего: нажимал 0 из 1 сыгранных при нём вопросов, верно 0.',
+      );
+
+      a.ws.close();
+      b.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity,
+// design.md «Слияние профилей»). Собственный history — GameHistory(':memory:'),
+// а не заглушка: mergePeople/listPeople реально трогают SQLite, и тест обязан
+// проверять настоящую перепривязку, а не то, что заглушка была вызвана.
+describe('createServer admin merge people', () => {
+  let server: GameServer;
+  let dir: string;
+  let baseUrl: string;
+  let history: GameHistory;
+  let playersPath: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-merge-people-'));
+    history = new GameHistory(':memory:');
+    // playersPath — для задачи 3 (финальное ревью ветки, Important): слияние
+    // обязано пересчитывать «Показывает в игре», не только базу.
+    playersPath = join(dir, 'players.md');
+    await writeFile(
+      playersPath,
+      '# Анкеты игроков\n\nВводный текст.\n',
+      'utf8',
+    );
+    // Тот же history — и в Room (откуда room.getPeople() берёт список для
+    // обычной рассылки state), и в createServer (откуда его берёт прямой
+    // обработчик admin-merge-people). В реальной сборке (index.ts) это один
+    // и тот же объект; развести их здесь — значит проверять не ту схему
+    // подключения, что работает на самом деле (тот же паттерн, что и в
+    // остальных тестах файла с настоящим GameHistory, например
+    // «tag-reason доносит причину до комнаты…» выше).
+    const room = new Room(
+      undefined,
+      TEST_PACK,
+      undefined,
+      'test.json',
+      history,
+    );
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+      history,
+      playersPath,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('сливает двух людей и отдаёт обновлённый список', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const admin = await connectAdmin(baseUrl);
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people',
+      people: [{ id: katyaId, name: 'Катя', games: 0 }],
+    });
+    expect(history.listPeople()).toEqual([
+      { id: katyaId, name: 'Катя', games: 0 },
+    ]);
+    // Слияние отвечает раньше, чем ложится файл: refreshPlayerStats()
+    // вызывается из обработчика через void и пишет players.md уже после
+    // ответа. Без этого ожидания afterEach сносит каталог одновременно с
+    // записью «players.md.tmp» — на Linux rmdir падает с ENOTEMPTY, и тест
+    // краснеет в CI, оставаясь зелёным на Windows (ba49aeb, прогон CI).
+    await waitForFileContent(playersPath, '## Показывает в игре');
+    admin.ws.close();
+  });
+
+  it('во время идущей партии отдаёт ошибку и ничего не меняет', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const admin = await connectAdmin(baseUrl);
+    const a = await joinPlayer(baseUrl, 'Игрок 1');
+    await admin.nextMessage(); // рассылка после join a
+    const b = await joinPlayer(baseUrl, 'Игрок 2');
+    await admin.nextMessage(); // рассылка после join b
+    await a.nextMessage(); // та же рассылка, но у a
+
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+
+    // Снимок списка людей ДО попытки слияния — join() двух игроков в этом
+    // тесте сам заводит им записи людей (Room делит history с сервером — см.
+    // beforeEach), так что в базе есть и другие записи, к делу не
+    // относящиеся, и перечислять их поимённо незачем (финальное ревью ветки,
+    // п. 9): снимок и точное сравнение с ним после дают полную гарантию
+    // «ничего не изменилось» без arrayContaining, который проверял бы только
+    // отсутствие пропажи, но не появление лишнего и не смену состава.
+    const before = history.listPeople();
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people-error',
+      reason: 'нельзя сливать игроков, пока идёт партия',
+    });
+    expect(history.listPeople()).toEqual(before);
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
+  });
+
+  it('слияние человека с самим собой отдаёт ошибку', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const admin = await connectAdmin(baseUrl);
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: vanyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people-error',
+      reason: 'не удалось слить — выбраны один и тот же игрок?',
+    });
+    expect(history.listPeople()).toEqual([
+      { id: vanyaId, name: 'Ваня', games: 0 },
+    ]);
+    admin.ws.close();
+  });
+
+  // Ревью задачи 4, Important 1: сообщение об отказе не должно утверждать
+  // неправду. Гонка — кого-то из двоих уже слили с другого устройства между
+  // тем, как ведущий открыл диалог подтверждения (там ещё стояли два разных
+  // имени), и тем, как подтвердил его. mergePeople(fromId, intoId) в этом
+  // случае тоже вернёт false, но «выбран один и тот же игрок» была бы
+  // неправдой — ведущий видел два разных имени, а не одно.
+  it('если fromId уже слили с кем-то третьим до подтверждения, причина — что его больше нет, а не «один и тот же»', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const petyaId = history.createPerson('Петя', '2026-08-03')!;
+    // С другого устройства уже слили Ваню в Петю — Вани больше нет.
+    expect(history.mergePeople(vanyaId, petyaId)).toBe(true);
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people-error',
+      reason: 'такого игрока уже нет — обнови список',
+    });
+    admin.ws.close();
+  });
+
+  it('то же самое, если исчез intoId, а не fromId', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const petyaId = history.createPerson('Петя', '2026-08-03')!;
+    // С другого устройства уже слили Катю в Петю — Кати больше нет.
+    expect(history.mergePeople(katyaId, petyaId)).toBe(true);
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const message = await admin.nextMessage();
+    expect(message).toEqual({
+      type: 'admin-people-error',
+      reason: 'такого игрока уже нет — обнови список',
+    });
+    admin.ws.close();
+  });
+
+  // Ревью задачи 4, Important 2: список приходит и в прямом ответе
+  // инициатору, и в обычном состоянии комнаты (stateMessageFor кладёт
+  // room.getPeople() → history.listPeople()) — значит после успешного
+  // слияния свежий список обязан уйти ВСЕМ открытым сокетам, не только
+  // тому, кто его запросил. Второй сокет здесь стоит и за «вторую открытую
+  // админку», и за «лобби на телефоне игрока» — до join() это один и тот же
+  // путь: обычный сокет получает 'state' наравне с админкой.
+  it('после успешного слияния свежий список уходит и остальным открытым сокетам, не только инициатору', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    const admin = await connectAdmin(baseUrl);
+    const bystander = await connectAdmin(baseUrl);
+
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: vanyaId,
+        intoId: katyaId,
+      }),
+    );
+    const direct = await admin.nextMessage();
+    expect(direct).toEqual({
+      type: 'admin-people',
+      people: [{ id: katyaId, name: 'Катя', games: 0 }],
+    });
+
+    const broadcast = await bystander.nextMessage();
+    expect(broadcast).toMatchObject({
+      type: 'state',
+      people: [{ id: katyaId, name: 'Катя', games: 0 }],
+    });
+
+    // Слияние отвечает раньше, чем ложится файл: refreshPlayerStats()
+    // вызывается из обработчика через void и пишет players.md уже после
+    // ответа. Без этого ожидания afterEach сносит каталог одновременно с
+    // записью «players.md.tmp» — на Linux rmdir падает с ENOTEMPTY, и тест
+    // краснеет в CI, оставаясь зелёным на Windows (ba49aeb, прогон CI).
+    await waitForFileContent(playersPath, '## Показывает в игре');
+    admin.ws.close();
+    bystander.ws.close();
+  });
+
+  // Финальное ревью ветки, п. 3 (Important): refreshPlayerStats() раньше
+  // вызывалась только из точки game-end — ведущий сливает расщепившиеся
+  // профили именно затем, чтобы числа в «Показывает в игре» сошлись, а файл
+  // до конца следующей партии продолжал бы показывать два раздела со старыми
+  // числами, один из которых принадлежит уже удалённому из базы человеку.
+  it('после успешного слияния пересчитывает «Показывает в игре» в файле анкет', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const katyaId = history.createPerson('Катя', '2026-08-02')!;
+    // Партия и сыгранный вопрос заводятся прямо через history (минуя
+    // реальную партию через Room) — это тот же приём, что и в
+    // history.test.ts (playerStats seed()): playerStats() читает game_people
+    // и played_questions, ей всё равно, как они появились.
+    const gameId = history.startGame({
+      startedAt: '2026-08-01T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    })!;
+    history.recordQuestion(gameId, {
+      questionId: 'q1',
+      roundIndex: 0,
+      themeName: 'История',
+      price: 100,
+      type: 'обычный',
+      text: 'Вопрос',
+      answer: 'Ответ',
+      answeredBy: 'Ваня',
+      answeredByCounterId: 'c1',
+      correct: true,
+      contested: false,
+    });
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-merge-people',
+        fromId: katyaId,
+        intoId: vanyaId,
+      }),
+    );
+    await admin.nextMessage(); // admin-people
+
+    const content = await waitForFileContent(
+      playersPath,
+      '## Показывает в игре',
+    );
+    expect(content).toContain('### Ваня');
+    // Катя не сыграла ни одной партии и была слита без следа — второго
+    // раздела в файле быть не должно.
+    expect(content).not.toContain('### Катя');
+    expect(content).toContain(
+      'Всего: нажимал 1 из 1 сыгранных при нём вопросов, верно 1.',
+    );
+
+    admin.ws.close();
+  });
+});
+
+describe('createServer admin delete player', () => {
+  let server: GameServer;
+  let dir: string;
+  let baseUrl: string;
+  let history: GameHistory;
+  let playersPath: string;
+
+  const CODE = JSON.stringify({
+    version: 1,
+    name: 'Ваня',
+    interests: [{ area: 'Спорт', examples: ['Формула-1'] }],
+    boring: [],
+  });
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-delete-player-'));
+    history = new GameHistory(':memory:');
+    playersPath = join(dir, 'players.md');
+    await writeFile(
+      playersPath,
+      `# Анкеты игроков\n\nВводный текст.\n`,
+      'utf8',
+    );
+    const room = new Room(
+      undefined,
+      TEST_PACK,
+      undefined,
+      'test.json',
+      history,
+    );
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+      playersPath,
+      history,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `ws://127.0.0.1:${port}/ws`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    history.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function saveVanya(admin: {
+    ws: WebSocket;
+    nextMessage: () => Promise<unknown>;
+  }): Promise<void> {
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-save-player', code: CODE, replace: false }),
+    );
+    await admin.nextMessage();
+  }
+
+  it('удаление анкеты не трогает человека в истории', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'test.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    });
+    const admin = await connectAdmin(baseUrl);
+    await saveVanya(admin);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-player-card', name: 'Ваня' }),
+    );
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-players',
+      players: [],
+    });
+    // Человек и его партия на месте: их убирает admin-forget-person, а не эта
+    // кнопка (спека анкет, «Удаление анкеты — это удаление анкеты»).
+    expect(history.listPeople()).toEqual([
+      { id: vanyaId, name: 'Ваня', games: 1 },
+    ]);
+    expect(await readFile(playersPath, 'utf8')).not.toMatch(/^## Ваня$/m);
+    admin.ws.close();
+  });
+
+  it('во время идущей партии удаление анкеты разрешено — оно трогает файл, а не игру', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const admin = await connectAdmin(baseUrl);
+    await saveVanya(admin);
+
+    const a = await joinPlayer(baseUrl, 'Игрок 1');
+    await admin.nextMessage();
+    const b = await joinPlayer(baseUrl, 'Игрок 2');
+    await admin.nextMessage();
+    await a.nextMessage();
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-player-card', name: 'Ваня' }),
+    );
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-players',
+      players: [],
+    });
+    expect(history.listPeople().map((person) => person.id)).toContain(vanyaId);
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
+  });
+
+  it('admin-forget-person убирает человека и его блок, но не анкету', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'test.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    });
+    const admin = await connectAdmin(baseUrl);
+    await saveVanya(admin);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-forget-person', id: vanyaId }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people',
+      people: [],
+    });
+    expect(history.listPeople()).toEqual([]);
+    // Анкета осталась: это отдельное действие с отдельной кнопкой.
+    expect(await readFile(playersPath, 'utf8')).toMatch(/^## Ваня$/m);
+    admin.ws.close();
+  });
+
+  // Спека идентичности, «Список людей истории»: раздел «Показывает в игре»
+  // пересчитывается сразу после удаления, не дожидаясь конца следующей
+  // партии, — иначе имя удалённого осталось бы в файле до следующей игры.
+  it('admin-forget-person пересчитывает «Показывает в игре» сразу, не дожидаясь конца следующей партии', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const gameId = history.startGame({
+      startedAt: '2026-08-01T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    })!;
+    history.recordQuestion(gameId, {
+      questionId: 'q1',
+      roundIndex: 0,
+      themeName: 'История',
+      price: 100,
+      type: 'обычный',
+      text: 'Вопрос',
+      answer: 'Ответ',
+      answeredBy: 'Ваня',
+      answeredByCounterId: 'c1',
+      correct: true,
+      contested: false,
+    });
+    // Заводим блок «Показывает в игре» так же, как это уже сделал бы конец
+    // партии или слияние — до удаления блок для Вани обязан быть на месте.
+    await savePlayerStats(playersPath, history.playerStats());
+    const before = await readFile(playersPath, 'utf8');
+    expect(before).toMatch(/^### Ваня$/m);
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(JSON.stringify({ type: 'admin-forget-person', id: vanyaId }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people',
+      people: [],
+    });
+
+    const after = await readFile(playersPath, 'utf8');
+    expect(after).not.toMatch(/^### Ваня$/m);
+    admin.ws.close();
+  });
+
+  it('admin-forget-person на несуществующем id отвечает «обнови список»', async () => {
+    const admin = await connectAdmin(baseUrl);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-forget-person', id: 404 }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people-error',
+      reason: 'такого игрока уже нет — обнови список',
+    });
+    admin.ws.close();
+  });
+
+  it('admin-forget-person во время партии отказывает и никого не забывает', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const admin = await connectAdmin(baseUrl);
+
+    const a = await joinPlayer(baseUrl, 'Игрок 1');
+    await admin.nextMessage();
+    const b = await joinPlayer(baseUrl, 'Игрок 2');
+    await admin.nextMessage();
+    await a.nextMessage();
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-forget-person', id: vanyaId }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people-error',
+      reason: 'нельзя удалять человека, пока идёт партия',
+    });
+    expect(history.listPeople().map((person) => person.id)).toContain(vanyaId);
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
   });
 });
 

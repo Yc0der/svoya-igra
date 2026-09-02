@@ -71,6 +71,12 @@ type ServerMessage =
       textRevealFadeMs: number;
       historyEnabled: boolean;
       historyRecording: boolean;
+      // Список постоянных людей — та же форма, что и state.people у
+      // useRoomConnection (задача 2). Задаче 4 нужен здесь только он: два
+      // <select> слияния строятся по этому списку, отдельного запроса не
+      // заводим (server/src/server.ts, stateMessageFor уже кладёт его в
+      // каждую рассылку).
+      people: { id: number; name: string; games: number }[];
     }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   | { type: 'select-pack-error'; reason: 'unknown-file' }
@@ -83,9 +89,18 @@ type ServerMessage =
       questionId: string;
       reason: string;
     }
-  | { type: 'admin-players'; players: { name: string; date: string }[] }
+  | {
+      type: 'admin-players';
+      players: { name: string; date: string }[];
+    }
+  | { type: 'admin-player'; card: PlayerCardView; extraLines: string[] }
   | { type: 'admin-player-exists'; name: string }
-  | { type: 'admin-player-error'; reason: string };
+  | { type: 'admin-player-error'; reason: string }
+  | {
+      type: 'admin-people';
+      people: { id: number; name: string; games: number }[];
+    }
+  | { type: 'admin-people-error'; reason: string };
 
 type ClientMessage =
   | { type: 'admin-start-game' }
@@ -124,7 +139,26 @@ type ClientMessage =
       complaint: string;
     }
   | { type: 'admin-get-players' }
-  | { type: 'admin-save-player'; code: string; replace: boolean };
+  | { type: 'admin-get-player'; name: string }
+  | { type: 'admin-delete-player-card'; name: string }
+  | {
+      type: 'admin-save-player';
+      code: string;
+      replace: boolean;
+      // Есть только у правки через форму: имя до правки. Отсутствие поля и
+      // означает «это вставка кода, а не правка».
+      originalName?: string;
+    }
+  | { type: 'admin-merge-people'; fromId: number; intoId: number }
+  | { type: 'admin-forget-person'; id: number };
+
+// Анкета в том виде, в каком её отдаёт сервер, — форма правки заполняется
+// ею и из неё же собирает код обратно.
+export interface PlayerCardView {
+  name: string;
+  interests: { area: string; examples: string[] }[];
+  boring: string[];
+}
 
 export interface AdminConnection {
   // Открыт ли прямо сейчас собственный сокет админки — не то же самое, что
@@ -203,12 +237,38 @@ export interface AdminConnection {
   // код. Отдельного «ок» на успешную запись сервер не шлёт — успех виден по
   // приходу нового admin-players (см. players ниже).
   players: { name: string; date: string }[];
+  // Анкета, запрошенная для правки. null — форма закрыта или ответ ещё не
+  // пришёл: заполнять её пустышкой нельзя, иначе «Сохранить» сотрёт то, что
+  // не успело приехать.
+  playerCard: { card: PlayerCardView; extraLines: string[] } | null;
   playerError: string | null;
   // Имя игрока, чья анкета уже есть — сервер ничего не записал и ждёт
   // повторной отправки того же кода с replace: true.
   playerConflictName: string | null;
   clearPlayerFeedback(): void;
-  savePlayer(code: string, replace: boolean): void;
+  savePlayer(code: string, replace: boolean, originalName?: string): void;
+  getPlayer(name: string): void;
+  clearPlayerCard(): void;
+  // Убирает только анкету. Человека из истории партий убирает forgetPerson
+  // (задача 3 слайса) — это разные действия и разные кнопки.
+  deletePlayerCard(name: string): void;
+  // Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity)
+  // — тот же список людей, что и в лобби (задача 2/3), для двух <select> в
+  // подразделе «Один и тот же человек». Обновляется и обычным 'state', и
+  // прицельным admin-people после успешного слияния.
+  people: { id: number; name: string; games: number }[];
+  peopleError: string | null;
+  // Гасит отказ слияния (финальное ревью ветки, п. 7, Minor) — иначе
+  // «нельзя сливать игроков, пока идёт партия» висит красным всю партию и
+  // переживает смену выбора в обоих выпадающих списках. Вызывается из
+  // Admin.tsx при смене выбора в любом из двух — тот же класс дефекта, что
+  // уже чинили в лобби (задача 3), только там гасило прибытие 'state', а тут
+  // ошибка не про сервер, а про текущий выбор в форме.
+  clearPeopleError(): void;
+  mergePeople(fromId: number, intoId: number): void;
+  // Забывает человека и его участие в партиях. Анкету не трогает — её убирает
+  // deletePlayerCard.
+  forgetPerson(id: number): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -255,10 +315,18 @@ export function useAdminConnection(
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportAckVersion, setReportAckVersion] = useState(0);
   const [players, setPlayers] = useState<{ name: string; date: string }[]>([]);
+  const [playerCard, setPlayerCard] = useState<{
+    card: PlayerCardView;
+    extraLines: string[];
+  } | null>(null);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [playerConflictName, setPlayerConflictName] = useState<string | null>(
     null,
   );
+  const [people, setPeople] = useState<
+    { id: number; name: string; games: number }[]
+  >([]);
+  const [peopleError, setPeopleError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -295,6 +363,7 @@ export function useAdminConnection(
           setTextRevealFadeMsState(message.textRevealFadeMs);
           setHistoryEnabledState(message.historyEnabled);
           setHistoryRecordingState(message.historyRecording);
+          setPeople(message.people);
           setSelectPackError(null);
           setStartGameError(null);
         }
@@ -328,6 +397,10 @@ export function useAdminConnection(
           setPlayerError(null);
           setPlayerConflictName(null);
         }
+        if (message.type === 'admin-player') {
+          setPlayerCard({ card: message.card, extraLines: message.extraLines });
+          setPlayerError(null);
+        }
         if (message.type === 'admin-player-exists') {
           setPlayerConflictName(message.name);
           setPlayerError(null);
@@ -335,6 +408,13 @@ export function useAdminConnection(
         if (message.type === 'admin-player-error') {
           setPlayerError(message.reason);
           setPlayerConflictName(null);
+        }
+        if (message.type === 'admin-people') {
+          setPeople(message.people);
+          setPeopleError(null);
+        }
+        if (message.type === 'admin-people-error') {
+          setPeopleError(message.reason);
         }
       });
 
@@ -427,7 +507,22 @@ export function useAdminConnection(
       setPlayerError(null);
       setPlayerConflictName(null);
     },
-    savePlayer: (code, replace) =>
-      send({ type: 'admin-save-player', code, replace }),
+    playerCard,
+    savePlayer: (code, replace, originalName) =>
+      send(
+        originalName === undefined
+          ? { type: 'admin-save-player', code, replace }
+          : { type: 'admin-save-player', code, replace, originalName },
+      ),
+    getPlayer: (name) => send({ type: 'admin-get-player', name }),
+    clearPlayerCard: () => setPlayerCard(null),
+    deletePlayerCard: (name) =>
+      send({ type: 'admin-delete-player-card', name }),
+    people,
+    peopleError,
+    clearPeopleError: () => setPeopleError(null),
+    mergePeople: (fromId, intoId) =>
+      send({ type: 'admin-merge-people', fromId, intoId }),
+    forgetPerson: (id) => send({ type: 'admin-forget-person', id }),
   };
 }

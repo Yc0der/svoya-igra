@@ -90,8 +90,17 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     players: [],
     playerError: null,
     playerConflictName: null,
+    playerCard: null,
     clearPlayerFeedback: vi.fn(),
     savePlayer: vi.fn(),
+    getPlayer: vi.fn(),
+    clearPlayerCard: vi.fn(),
+    deletePlayerCard: vi.fn(),
+    people: [],
+    peopleError: null,
+    clearPeopleError: vi.fn(),
+    mergePeople: vi.fn(),
+    forgetPerson: vi.fn(),
     ...overrides,
   };
 }
@@ -1391,5 +1400,308 @@ describe('Admin — анкеты игроков', () => {
     const textarea = screen.getByPlaceholderText(/вставь код анкеты/i);
     await userEvent.type(textarea, 'a');
     expect(clearPlayerFeedback).toHaveBeenCalled();
+  });
+});
+
+// Слияние расщепившихся профилей (задача 4, sdd/2026-08-26-player-identity)
+// — подраздел «Один и тот же человек» внутри «Анкеты игроков».
+describe('Admin — слияние профилей', () => {
+  const PEOPLE = [
+    { id: 1, name: 'Ваня', games: 5 },
+    { id: 2, name: 'Ваня (2)', games: 1 },
+  ];
+
+  it('кнопка «Слить» выключена, пока не выбраны двое разных', async () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ people: PEOPLE }));
+    render(<Admin />);
+    const button = screen.getByRole('button', { name: /слить/i });
+    expect(button).toBeDisabled();
+
+    await userEvent.selectOptions(screen.getByLabelText(/кого слить/i), '1');
+    expect(button).toBeDisabled(); // выбран только один
+
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '1');
+    expect(button).toBeDisabled(); // один и тот же человек с обеих сторон
+
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
+    expect(button).toBeEnabled();
+  });
+
+  it('подтверждение показывает, какое имя останется, а какое исчезнет, и вызывает mergePeople только после подтверждения', async () => {
+    const mergePeople = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ people: PEOPLE, mergePeople }),
+    );
+    render(<Admin />);
+    await userEvent.selectOptions(screen.getByLabelText(/кого слить/i), '1');
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
+    await userEvent.click(screen.getByRole('button', { name: /слить/i }));
+
+    expect(mergePeople).not.toHaveBeenCalled();
+    // Останется «Ваня (2)», исчезнет «Ваня» — оба имени должны быть видны,
+    // иначе ведущий узнает направление только по результату (задача 4).
+    const confirmText = screen.getByText(/останется/i);
+    expect(confirmText.textContent).toContain('Ваня (2)');
+    expect(confirmText.textContent).toMatch(/исчезнет/i);
+
+    await userEvent.click(screen.getByRole('button', { name: /подтвердить/i }));
+    expect(mergePeople).toHaveBeenCalledWith(1, 2);
+  });
+
+  it('«Отмена» на подтверждении не вызывает mergePeople', async () => {
+    const mergePeople = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ people: PEOPLE, mergePeople }),
+    );
+    render(<Admin />);
+    await userEvent.selectOptions(screen.getByLabelText(/кого слить/i), '1');
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
+    await userEvent.click(screen.getByRole('button', { name: /слить/i }));
+    await userEvent.click(screen.getByRole('button', { name: /отмена/i }));
+
+    expect(mergePeople).not.toHaveBeenCalled();
+    expect(screen.queryByText(/останется/i)).not.toBeInTheDocument();
+  });
+
+  it('показывает peopleError, включая отказ во время идущей партии', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        people: PEOPLE,
+        peopleError: 'нельзя сливать игроков, пока идёт партия',
+      }),
+    );
+    render(<Admin />);
+    expect(
+      screen.getByText('нельзя сливать игроков, пока идёт партия'),
+    ).toBeInTheDocument();
+  });
+
+  // Финальное ревью ветки, п. 7 (Minor): отказ слияния («нельзя сливать
+  // игроков, пока идёт партия») не должен пережить смену выбора — иначе он
+  // висит красным всю партию, хотя ведущий уже переключился на другую пару.
+  it('гасит peopleError при смене выбора в любом из двух списков', async () => {
+    const clearPeopleError = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        people: PEOPLE,
+        peopleError: 'нельзя сливать игроков, пока идёт партия',
+        clearPeopleError,
+      }),
+    );
+    render(<Admin />);
+
+    await userEvent.selectOptions(screen.getByLabelText(/кого слить/i), '1');
+    expect(clearPeopleError).toHaveBeenCalledTimes(1);
+
+    await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
+    expect(clearPeopleError).toHaveBeenCalledTimes(2);
+  });
+
+  it('список людей истории показывает имя и число партий', () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ people: PEOPLE }));
+    render(<Admin />);
+    expect(screen.getByText(/люди в истории/i)).toBeInTheDocument();
+    expect(screen.getByText(/5 партий/)).toBeInTheDocument();
+  });
+
+  it('диалог удаления человека называет партии и удаляет только по подтверждению', async () => {
+    const forgetPerson = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ people: PEOPLE, forgetPerson }),
+    );
+    render(<Admin />);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Удалить человека: Ваня' }),
+    );
+    // Спека идентичности, «Список людей истории»: подтверждение обязано
+    // называть число партий («Ваня — 4 партии» честнее, чем «вы уверены?»).
+    const dialogText = screen.getByText(/анкета останется/i).textContent ?? '';
+    expect(dialogText).toMatch(/анкета останется/i);
+    expect(dialogText).toMatch(/5 партий/);
+    expect(forgetPerson).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /удалить навсегда/i }),
+    );
+    expect(forgetPerson).toHaveBeenCalledWith(1);
+  });
+
+  it('«Не удалять» в диалоге человека ничего не удаляет', async () => {
+    const forgetPerson = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ people: PEOPLE, forgetPerson }),
+    );
+    render(<Admin />);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Удалить человека: Ваня' }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /не удалять/i }));
+    expect(forgetPerson).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: /удалить навсегда/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  // Финальное ревью ветки, п. 1 (Important): отказ удаления человека должен
+  // быть виден там, где ведущий его ищет — рядом с разделом «Люди в
+  // истории», а не в конце секции, за подразделом слияния.
+  it('показывает peopleError после отказа удалить человека', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        people: PEOPLE,
+        peopleError: 'нельзя удалять человека, пока идёт партия',
+      }),
+    );
+    render(<Admin />);
+
+    const peopleHeading = screen.getByRole('heading', {
+      name: /люди в истории/i,
+    });
+    const errorText = screen.getByText(
+      'нельзя удалять человека, пока идёт партия',
+    );
+    const mergeHeading = screen.getByRole('heading', {
+      name: /один и тот же человек/i,
+    });
+
+    expect(errorText).toBeInTheDocument();
+    // Ошибка должна стоять между двумя подразделами, а не после обоих —
+    // видна из раздела «Люди в истории», а не только из формы слияния.
+    expect(
+      peopleHeading.compareDocumentPosition(errorText) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      errorText.compareDocumentPosition(mergeHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('без людей в истории раздел говорит об этом', () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ people: [] }));
+    render(<Admin />);
+    expect(screen.getByText(/в истории пока никого/i)).toBeInTheDocument();
+  });
+});
+
+describe('Admin — правка и удаление анкеты', () => {
+  const VANYA = {
+    name: 'Ваня',
+    interests: [{ area: 'Спорт', examples: ['Формула-1', 'хоккей'] }],
+    boring: ['Мода'],
+  };
+
+  it('«Редактировать» запрашивает анкету у сервера', async () => {
+    const getPlayer = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        getPlayer,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать анкету/i }),
+    );
+    expect(getPlayer).toHaveBeenCalledWith('Ваня');
+  });
+
+  it('форма открывается заполненной и сохраняет правку с originalName', async () => {
+    const savePlayer = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        playerCard: { card: VANYA, extraLines: [] },
+        savePlayer,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать анкету/i }),
+    );
+
+    expect(screen.getByLabelText('Имя')).toHaveValue('Ваня');
+    expect(screen.getByLabelText('Спорт')).toHaveValue('Формула-1, хоккей');
+    expect(screen.getByLabelText('Скучно')).toHaveValue('Мода');
+
+    await userEvent.clear(screen.getByLabelText('Спорт'));
+    await userEvent.type(screen.getByLabelText('Спорт'), 'биатлон');
+    await userEvent.click(
+      screen.getByRole('button', { name: /сохранить правку/i }),
+    );
+
+    expect(savePlayer).toHaveBeenCalledTimes(1);
+    const [code, replace, originalName] = savePlayer.mock.calls[0];
+    expect(replace).toBe(true);
+    expect(originalName).toBe('Ваня');
+    expect(JSON.parse(code as string)).toEqual({
+      version: 1,
+      name: 'Ваня',
+      interests: [{ area: 'Спорт', examples: ['биатлон'] }],
+      boring: ['Мода'],
+    });
+  });
+
+  it('предупреждает про строки не из формы', async () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        playerCard: { card: VANYA, extraLines: ['Пометка ведущего.'] },
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /редактировать анкету/i }),
+    );
+    expect(screen.getByText(/строки не из формы/i)).toBeInTheDocument();
+  });
+
+  it('диалог удаления анкеты обещает только анкету и удаляет по подтверждению', async () => {
+    const deletePlayerCard = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        deletePlayerCard,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /удалить анкету/i }),
+    );
+
+    // Спека анкет, «Удаление анкеты — это удаление анкеты»: диалог прямо
+    // говорит, где убирают партии («Люди в истории»), и число партий из
+    // диалога уходит — оно там врало бы, ведь это удаление их не трогает.
+    const dialogText =
+      screen.getByText(/записи о партиях останутся/i).textContent ?? '';
+    expect(dialogText).toMatch(/люди в истории/i);
+    expect(dialogText).not.toMatch(/\d+\s+парти/);
+    expect(deletePlayerCard).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Убрать анкету' }),
+    );
+    expect(deletePlayerCard).toHaveBeenCalledWith('Ваня');
+  });
+
+  it('«Не убирать» в диалоге анкеты ничего не удаляет', async () => {
+    const deletePlayerCard = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        players: [{ name: 'Ваня', date: '2026-08-26' }],
+        deletePlayerCard,
+      }),
+    );
+    render(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: /удалить анкету/i }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /не убирать/i }));
+    expect(deletePlayerCard).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: 'Убрать анкету' }),
+    ).not.toBeInTheDocument();
   });
 });

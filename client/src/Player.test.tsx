@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Player } from './Player';
@@ -60,7 +60,10 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     hostParticipantId: null,
     isHost: false,
     startGameError: null,
+    people: [],
+    rememberedPersonId: null,
     join: vi.fn(),
+    joinAs: vi.fn(),
     startGame: vi.fn(),
     toggleHost: vi.fn(),
     selectQuestion: vi.fn(),
@@ -141,6 +144,227 @@ describe('Player', () => {
     render(<Player />);
 
     expect(screen.getByRole('alert')).toHaveTextContent('уже занято');
+  });
+
+  it('shows the name form immediately when the people list is empty — the fallback for disabled history', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'connecting', people: [] }),
+    );
+
+    render(<Player />);
+
+    expect(screen.getByLabelText('Имя')).toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+  });
+
+  it('renders the list of known people in the order the server sent, with their game counts', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'connecting',
+        people: [
+          { id: 7, name: 'Ваня', games: 5 },
+          { id: 3, name: 'Оля', games: 2 },
+        ],
+      }),
+    );
+
+    render(<Player />);
+
+    const list = screen.getByRole('list');
+    const items = within(list).getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent('Ваня');
+    expect(items[0]).toHaveTextContent('5');
+    expect(items[1]).toHaveTextContent('Оля');
+    expect(items[1]).toHaveTextContent('2');
+    expect(screen.queryByLabelText('Имя')).not.toBeInTheDocument();
+  });
+
+  it('calls joinAs when a known person is tapped', async () => {
+    const joinAs = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'connecting',
+        people: [{ id: 7, name: 'Ваня', games: 5 }],
+        joinAs,
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<Player />);
+    await user.click(screen.getByRole('button', { name: /Ваня/ }));
+
+    expect(joinAs).toHaveBeenCalledWith(7);
+  });
+
+  it('highlights the remembered person in the list without auto-joining', () => {
+    const joinAs = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'connecting',
+        people: [
+          { id: 7, name: 'Ваня', games: 5 },
+          { id: 3, name: 'Оля', games: 2 },
+        ],
+        rememberedPersonId: 3,
+        joinAs,
+      }),
+    );
+
+    render(<Player />);
+
+    expect(screen.getByRole('button', { name: /Оля/ })).toHaveClass(
+      'is-selected',
+    );
+    expect(screen.getByRole('button', { name: /Ваня/ })).not.toHaveClass(
+      'is-selected',
+    );
+    expect(joinAs).not.toHaveBeenCalled();
+  });
+
+  it('switches to the name form via "Меня тут нет" and still calls join from it', async () => {
+    const join = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'connecting',
+        people: [{ id: 7, name: 'Ваня', games: 5 }],
+        join,
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<Player />);
+    expect(screen.queryByLabelText('Имя')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+
+    expect(screen.getByLabelText('Имя')).toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Имя'), 'Петя');
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+
+    expect(join).toHaveBeenCalledWith('Петя');
+  });
+
+  it('returns to the list of known people via "Назад к списку"', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'connecting',
+        people: [{ id: 7, name: 'Ваня', games: 5 }],
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<Player />);
+
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+    expect(screen.getByLabelText('Имя')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Назад к списку' }));
+
+    expect(screen.getByRole('list')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Имя')).not.toBeInTheDocument();
+  });
+
+  it('does not show "Назад к списку" when the people list is empty', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'connecting', people: [] }),
+    );
+
+    render(<Player />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Назад к списку' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows a person-taken message distinct from name-taken', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'person-taken',
+        people: [{ id: 7, name: 'Ваня', games: 5 }],
+      }),
+    );
+
+    render(<Player />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Этим игроком уже вошли с другого телефона',
+    );
+  });
+
+  it('shows a person-unknown message distinct from name-taken', () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'person-unknown',
+        people: [{ id: 7, name: 'Ваня', games: 5 }],
+      }),
+    );
+
+    render(<Player />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Такого игрока больше нет, выбери другого или введи имя',
+    );
+  });
+
+  it('does not re-show a stale person-taken alert after navigating away and back without a new attempt', async () => {
+    // Дефект ревью: тап по человеку → отказ → «Меня тут нет» (тревога
+    // спрятана переключением ветки рендера) → «Назад к списку» — старая
+    // тревога не должна всплывать заново, ведь новой попытки входа не было.
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        status: 'person-taken',
+        people: [{ id: 7, name: 'Ваня', games: 5 }],
+      }),
+    );
+
+    const user = userEvent.setup();
+    render(<Player />);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Этим игроком уже вошли с другого телефона',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+    await user.click(screen.getByRole('button', { name: 'Назад к списку' }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('does not re-show a stale name-taken alert after navigating back to the list and to the form again', async () => {
+    // Симметричный дефект: неудачная попытка из формы → «Назад к списку» →
+    // «Меня тут нет» — старая тревога о занятом имени не должна всплывать
+    // заново без новой отправки. Статус хука проходит через 'joining', как
+    // это делает настоящий join() в useRoomConnection.ts — ровно так, как
+    // выглядела бы реальная попытка входа из формы.
+    const people = [{ id: 7, name: 'Ваня', games: 5 }];
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'connecting', people }),
+    );
+
+    const user = userEvent.setup();
+    const { rerender } = render(<Player />);
+
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Имя'), 'Ваня');
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'joining', people }),
+    );
+    rerender(<Player />);
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'name-taken', people }),
+    );
+    rerender(<Player />);
+    expect(screen.getByRole('alert')).toHaveTextContent('уже занято');
+
+    await user.click(screen.getByRole('button', { name: 'Назад к списку' }));
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('shows a start-game button in the lobby once joined, before any game exists', () => {

@@ -29,13 +29,22 @@ import type { Pack } from './pack.js';
 import type { GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
-import type { HistoryRecorder, PlayedQuestionInput, Thumb } from './history.js';
+import type {
+  HistoryRecorder,
+  PersonSummary,
+  PlayedQuestionInput,
+  Thumb,
+} from './history.js';
 
 export interface Participant {
   id: string;
   name: string;
   token: string;
   connected: boolean;
+  // Постоянный человек за этим участником (history.ts, people). null —
+  // гость или история выключена. Третья сущность рядом с участником и
+  // счётчиком, и путать их нельзя (design.md, 2026-08-26-player-identity).
+  personId: number | null;
 }
 
 export interface RoomState {
@@ -72,7 +81,9 @@ export interface PackInfo {
   activeFilename: string | null;
 }
 
-export type JoinResult = { participant: Participant } | { error: 'name-taken' };
+export type JoinResult =
+  | { participant: Participant }
+  | { error: 'name-taken' | 'person-taken' | 'person-unknown' };
 export type ReconnectResult =
   { participant: Participant } | { error: 'invalid-token' };
 export type StartGameResult =
@@ -132,6 +143,8 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
     clearTag: () => {},
     recordTagReason: () => false,
     downTagsForReview: () => [],
+    createPerson: () => null,
+    listPeople: () => [],
   };
   // Аннотация типа на самом литерале (не только на возврате функции) —
   // без неё пропущенный метод интерфейса не ловится `tsc`, потому что
@@ -215,6 +228,28 @@ function wrapHistoryRecorder(recorder?: HistoryRecorder): HistoryRecorder {
       } catch (err) {
         console.error(
           'История: рекордер бросил исключение (downTagsForReview) —',
+          err,
+        );
+        return [];
+      }
+    },
+    createPerson(name, createdAt) {
+      try {
+        return target.createPerson(name, createdAt);
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (createPerson) —',
+          err,
+        );
+        return null;
+      }
+    },
+    listPeople() {
+      try {
+        return target.listPeople();
+      } catch (err) {
+        console.error(
+          'История: рекордер бросил исключение (listPeople) —',
           err,
         );
         return [];
@@ -369,7 +404,13 @@ export class Room {
     }
   }
 
-  join(name: string): JoinResult {
+  // personId — только для joinAsPerson() ниже: тот уже опознал человека и
+  // передаёт его id напрямую, минуя заведение нового. При обычном вызове
+  // (ввод имени руками) параметр не передаётся, и человек заводится здесь
+  // же, если история включена — ошибка заведения (рекордер вернул null) не
+  // мешает войти, участник просто останется без человека: партия важнее
+  // записи.
+  join(name: string, personId: number | null = null): JoinResult {
     const trimmed = name.trim();
     const normalized = normalizeName(trimmed);
     const taken = this.participants.some(
@@ -378,15 +419,87 @@ export class Room {
     if (taken) {
       return { error: 'name-taken' };
     }
+    const resolvedPersonId =
+      personId !== null
+        ? personId
+        : this.historyEnabled
+          ? this.history.createPerson(trimmed, new Date().toISOString())
+          : null;
     const participant: Participant = {
       id: randomUUID(),
       name: trimmed,
       token: randomUUID(),
       connected: true,
+      personId: resolvedPersonId,
     };
     this.participants.push(participant);
     this.notify();
     return { participant: { ...participant } };
+  }
+
+  // Вход «я — вот этот из списка» (design.md, 2026-08-26-player-identity,
+  // «Лобби») — вместо ручного ввода имени участник выбирает себя среди уже
+  // известных людей. Имя берётся у человека, но правило уникальности имени в
+  // комнате не отменяется: два РАЗНЫХ человека-тёзки разведутся здесь, как и
+  // при ручном вводе.
+  joinAsPerson(personId: number): JoinResult {
+    // «История выключена — вход работает ровно как раньше» (design.md,
+    // «Лобби»): getPeople() в этом случае уже отдаёт пустой список, так что
+    // с точки зрения клиента такого человека не существует — даже если
+    // рекордер продолжает знать его с прошлого включения истории.
+    // person-unknown — честный ответ этому случаю, не отговорка.
+    if (!this.historyEnabled) return { error: 'person-unknown' };
+    const person = this.history.listPeople().find((p) => p.id === personId);
+    if (!person) return { error: 'person-unknown' };
+    if (this.participants.some((p) => p.personId === personId)) {
+      return { error: 'person-taken' };
+    }
+    return this.join(person.name, personId);
+  }
+
+  // Пустой список — заявленный откат всей вехи при выключенной истории:
+  // клиент видит пустой список людей и показывает обычное поле ввода имени
+  // (design.md, 2026-08-26-player-identity, «Лобби»).
+  getPeople(): PersonSummary[] {
+    return this.historyEnabled ? this.history.listPeople() : [];
+  }
+
+  // Перепривязывает живых участников комнаты со слитого человека (fromId) на
+  // того, в кого его слили (intoId) — вызывается из обработчика
+  // admin-merge-people (server.ts) сразу после успешного history.mergePeople
+  // (финальное ревью ветки, п. 2, Important, часть б).
+  //
+  // Зачем это вообще нужно отдельно от базы: участники живут в лобби МЕЖДУ
+  // партиями (resetGame/resetRoom чистят их только по команде ведущего), а
+  // слияние заблокировано лишь на время идущей партии (hasActiveGame()).
+  // Штатный путь — партия дошла до game-end, ведущий слил два расщепившихся
+  // профиля, а участники в комнате остались со ссылкой на уже удалённого
+  // fromId. Без этой перепривязки протухший personId бил дважды:
+  // - следующий startGame() записывал бы состав со сбойным personId (чинит
+  //   задача 2а — по-участнику try/catch), но со временем прежний человек
+  //   продолжал бы значиться отсутствующим;
+  // - joinAsPerson() сверяет занятость через
+  //   `participants.some(p => p.personId === personId)` — у протухшего
+  //   участника personId старый (fromId), поэтому выживший человек (intoId)
+  //   считался бы свободным, и второй телефон вошёл бы им же: за столом
+  //   оказались бы два участника на одного человека.
+  //
+  // Это лечит корень (состояние комнаты), а не только следствие (задача 2а).
+  //
+  // Намеренно без notify(): personId в состоянии, которое уходит клиентам
+  // (getState → participants), не отдаётся вообще — он нужен только внутри
+  // комнаты и в составе партии для рекордера. Значит рассылка после этой
+  // правки отправила бы всем ровно то же состояние, что и до неё. То, что
+  // после слияния действительно поменялось и должно доехать до лобби на
+  // телефонах, — список людей, а его обработчик admin-merge-people
+  // рассылает сам и безусловно (server.ts), в том числе когда в комнате не
+  // оказалось ни одного участника с fromId.
+  reassignPerson(fromId: number, intoId: number): void {
+    for (const participant of this.participants) {
+      if (participant.personId === fromId) {
+        participant.personId = intoId;
+      }
+    }
   }
 
   reconnect(token: string): ReconnectResult {
@@ -496,6 +609,7 @@ export class Room {
           participants: counters.map((p) => ({
             counterId: p.id,
             name: p.name,
+            personId: p.personId,
           })),
         })
       : null;
@@ -984,6 +1098,17 @@ export class Room {
   // партию записываемой, когда она уже окончательно выброшена.
   isHistoryRecording(): boolean {
     return this.historyGameId !== null;
+  }
+
+  // Идёт ли партия прямо сейчас — тот же признак, что startGame() и
+  // toGameStateView() уже используют внутри (`this.game.phase !==
+  // 'game-end'`), вынесенный сюда геттером ради admin-merge-people
+  // (server.ts): слияние профилей людей должно быть возможно только вне
+  // партии — пока она идёт, человек связан с участником и счётчиком за
+  // столом, и перепривязка под ногами у идущей партии — класс ошибок,
+  // которого проще не заводить (design.md, «Слияние профилей»).
+  hasActiveGame(): boolean {
+    return this.game !== null && this.game.phase !== 'game-end';
   }
 
   // Выключение не просто останавливает запись, а выбрасывает уже записанное

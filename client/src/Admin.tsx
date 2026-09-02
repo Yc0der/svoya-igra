@@ -4,6 +4,40 @@ import type { Question } from './useAdminConnection';
 import type { GameStateView } from './useRoomConnection';
 import { START_GAME_ERROR_TEXT } from './errorText';
 
+// Те же области, что в бланке docs/anketa.html: форма правки обязана
+// предлагать их все, даже если в анкете человека часть пустая — иначе
+// заполнить пропущенное можно было бы только новым кодом с телефона.
+const CARD_AREAS = [
+  'Кино и сериалы',
+  'Музыка',
+  'Спорт',
+  'Книги',
+  'Игры',
+  'Еда и путешествия',
+  'Увлечения и работа',
+];
+
+// Значения одной области человек вводит через запятую — ровно так же, как
+// они лежат в файле после рендера раздела.
+function splitValues(value: string): string[] {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item !== '');
+}
+
+// «1 партия», «4 партии», «5 партий» — число идёт в текст подтверждения
+// удаления, и «4 партий» там читалось бы как небрежность ровно в том месте,
+// где человек решает, стирать ли данные живого человека.
+function gamesWord(count: number): string {
+  const tens = count % 100;
+  if (tens >= 11 && tens <= 14) return 'партий';
+  const ones = count % 10;
+  if (ones === 1) return 'партия';
+  if (ones >= 2 && ones <= 4) return 'партии';
+  return 'партий';
+}
+
 // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в
 // server/src/engine.ts. Те же фазы, при которых сам движок игнорирует
 // skip-to-final как no-op — дублируется здесь только чтобы не включать
@@ -63,8 +97,17 @@ export function Admin() {
     players,
     playerError,
     playerConflictName,
+    playerCard,
     clearPlayerFeedback,
     savePlayer,
+    getPlayer,
+    clearPlayerCard,
+    deletePlayerCard,
+    people,
+    peopleError,
+    clearPeopleError,
+    mergePeople,
+    forgetPerson,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -77,6 +120,77 @@ export function Admin() {
   // ведущий вставляет анкеты подряд и сам видит, что список пополнился
   // (задача 3, sdd/2026-08-26-player-questionnaire).
   const [playerCode, setPlayerCode] = useState('');
+  // Правка анкеты: имя, под которым она лежит в файле сейчас (оно же
+  // originalName при сохранении), и заполненная форма. Форма отдельным
+  // состоянием, а не выводится из playerCard на каждый рендер: иначе
+  // очередной ответ сервера затирал бы то, что ведущий уже набрал.
+  const [editingName, setEditingName] = useState<string | null>(null);
+  const [cardForm, setCardForm] = useState<{
+    name: string;
+    areas: Record<string, string>;
+    boring: string;
+  } | null>(null);
+  // Удаление анкеты необратимо, но истории партий не касается — отдельный
+  // диалог, а не перелейбл кнопки: в тексте обязано быть видно, что именно
+  // исчезнет (sdd/2026-09-02-split-card-and-person-delete).
+  const [deletingName, setDeletingName] = useState<string | null>(null);
+  // Удаление человека из истории партий — отдельный диалог от удаления
+  // анкеты (deletingName выше): разные операции, разные подтверждения
+  // (sdd/2026-09-02-split-card-and-person-delete).
+  const [forgettingId, setForgettingId] = useState<number | null>(null);
+
+  // Анкета пришла — заполняем форму. Зависимости ровно две: пока ведущий
+  // правит, ни имя, ни ответ сервера не меняются, и эффект не перезапустится
+  // поверх набранного.
+  useEffect(() => {
+    if (editingName === null || playerCard === null) return;
+    const areas: Record<string, string> = {};
+    for (const area of CARD_AREAS) areas[area] = '';
+    for (const interest of playerCard.card.interests) {
+      areas[interest.area] = interest.examples.join(', ');
+    }
+    setCardForm({
+      name: playerCard.card.name,
+      areas,
+      boring: playerCard.card.boring.join(', '),
+    });
+  }, [editingName, playerCard]);
+
+  function closeCardForm(): void {
+    setEditingName(null);
+    setCardForm(null);
+    clearPlayerCard();
+  }
+
+  function saveCardForm(): void {
+    if (cardForm === null || editingName === null) return;
+    const interests = Object.entries(cardForm.areas)
+      .map(([area, value]) => ({ area, examples: splitValues(value) }))
+      .filter((interest) => interest.examples.length > 0);
+    savePlayer(
+      JSON.stringify({
+        version: 1,
+        name: cardForm.name.trim(),
+        interests,
+        boring: splitValues(cardForm.boring),
+      }),
+      // Правка своей же анкеты — замена по определению: подтверждать её
+      // ведущему нечего, он уже нажал «Редактировать» именно на ней.
+      true,
+      editingName,
+    );
+    closeCardForm();
+  }
+
+  // Слияние профилей (задача 4, sdd/2026-08-26-player-identity) — id как
+  // строка, потому что это значение <select>; '' — ничего не выбрано.
+  const [mergeFromId, setMergeFromId] = useState('');
+  const [mergeIntoId, setMergeIntoId] = useState('');
+  // Операция необратима — тот же принцип, что confirmingWipe/confirmingDelete
+  // выше, но с отдельным диалогом (а не перелейблом кнопки): в тексте
+  // подтверждения обязано быть видно, какое имя останется, а какое исчезнет
+  // (design.md, «Слияние профилей»), а не только «точно?».
+  const [confirmingMerge, setConfirmingMerge] = useState(false);
   // ВРЕМЕННО — подбор скорости показа текста вопроса вживую, см.
   // server/src/protocol.ts, StateMessage.textRevealWordsPerSecond. Убрать
   // вместе с полем, как только число зафиксируется в спеке.
@@ -296,6 +410,19 @@ export function Admin() {
     setConfirmingWipe(false);
   }
 
+  const mergeFromPerson = people.find((p) => String(p.id) === mergeFromId);
+  const mergeIntoPerson = people.find((p) => String(p.id) === mergeIntoId);
+  const forgettingPerson =
+    people.find((person) => person.id === forgettingId) ?? null;
+
+  function handleConfirmMerge(): void {
+    if (!mergeFromPerson || !mergeIntoPerson) return;
+    mergePeople(mergeFromPerson.id, mergeIntoPerson.id);
+    setConfirmingMerge(false);
+    setMergeFromId('');
+    setMergeIntoId('');
+  }
+
   return (
     <div className="admin">
       <h1>Админ-панель</h1>
@@ -448,7 +575,9 @@ export function Admin() {
         <p className="admin-hint">
           Отправь друзьям <code>docs/anketa.html</code>, а присланный код вставь
           сюда. Заполнять необязательно — пришедший без анкеты играет наравне со
-          всеми.
+          всеми. Кому неудобно открывать файл на телефоне (обычно это айфон) —
+          пришли картинки из <code>docs/anketa-screens/</code>: он ответит
+          сообщением, а анкету за него заполнишь здесь ты сам.
         </p>
         <textarea
           className="admin-player-code"
@@ -506,9 +635,281 @@ export function Admin() {
                 {player.date && (
                   <span className="admin-player-date">от {player.date}</span>
                 )}
+                <span className="admin-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    aria-label={`Редактировать анкету: ${player.name}`}
+                    onClick={() => {
+                      setDeletingName(null);
+                      setEditingName(player.name);
+                      getPlayer(player.name);
+                    }}
+                  >
+                    Редактировать
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    aria-label={`Удалить анкету: ${player.name}`}
+                    onClick={() => {
+                      closeCardForm();
+                      setDeletingName(player.name);
+                    }}
+                  >
+                    Удалить
+                  </button>
+                </span>
               </li>
             ))}
           </ul>
+        )}
+
+        {editingName !== null && cardForm !== null && (
+          <div className="admin-player-form">
+            <h3>Правка анкеты</h3>
+            {playerCard !== null && playerCard.extraLines.length > 0 && (
+              <p className="admin-hint">
+                В анкете есть строки не из формы — они сохранятся как есть,
+                править их можно только в файле.
+              </p>
+            )}
+            <label htmlFor="card-name">Имя</label>
+            <input
+              id="card-name"
+              type="text"
+              value={cardForm.name}
+              onChange={(e) =>
+                setCardForm({ ...cardForm, name: e.target.value })
+              }
+            />
+            {Object.keys(cardForm.areas).map((area) => (
+              <div key={area}>
+                <label htmlFor={`card-area-${area}`}>{area}</label>
+                <input
+                  id={`card-area-${area}`}
+                  type="text"
+                  value={cardForm.areas[area]}
+                  onChange={(e) =>
+                    setCardForm({
+                      ...cardForm,
+                      areas: { ...cardForm.areas, [area]: e.target.value },
+                    })
+                  }
+                />
+              </div>
+            ))}
+            <label htmlFor="card-boring">Скучно</label>
+            <input
+              id="card-boring"
+              type="text"
+              value={cardForm.boring}
+              onChange={(e) =>
+                setCardForm({ ...cardForm, boring: e.target.value })
+              }
+            />
+            <div className="admin-actions">
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={saveCardForm}
+                disabled={cardForm.name.trim() === ''}
+              >
+                Сохранить правку
+              </button>
+              <button type="button" className="button" onClick={closeCardForm}>
+                Отменить правку
+              </button>
+            </div>
+          </div>
+        )}
+
+        {deletingName !== null && (
+          <div className="admin-player-conflict">
+            <p>
+              Убрать анкету «{deletingName}»? Записи о партиях останутся — сам
+              человек и его игры убираются ниже, в разделе «Люди в истории».
+              Сыгранные вопросы и статистика паков тоже останутся: они
+              обезличены.
+            </p>
+            <div className="admin-actions">
+              <button
+                type="button"
+                className="button"
+                onClick={() => setDeletingName(null)}
+              >
+                Не убирать
+              </button>
+              <button
+                type="button"
+                className="button button--danger"
+                onClick={() => {
+                  deletePlayerCard(deletingName);
+                  setDeletingName(null);
+                }}
+              >
+                Убрать анкету
+              </button>
+            </div>
+          </div>
+        )}
+
+        <h3>Люди в истории</h3>
+        <p className="admin-hint">
+          Это записи истории партий, а не анкеты и не стол. Удаление убирает
+          человека и его участие в партиях; анкета, если она есть, остаётся — её
+          убирают выше. Пока идёт партия, удаление недоступно.
+        </p>
+        {people.length === 0 ? (
+          <p className="admin-hint">В истории пока никого.</p>
+        ) : (
+          <ul className="admin-players">
+            {people.map((person) => (
+              <li key={person.id}>
+                <span className="admin-player-name">{person.name}</span>
+                <span className="admin-player-date">
+                  {person.games} {gamesWord(person.games)}
+                </span>
+                <span className="admin-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    aria-label={`Удалить человека: ${person.name}`}
+                    onClick={() => {
+                      clearPeopleError();
+                      setForgettingId(person.id);
+                    }}
+                  >
+                    Удалить
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {forgettingId !== null && (
+          <div className="admin-player-conflict">
+            <p>
+              Удалить «{forgettingPerson?.name ?? ''}» из истории? Исчезнет он
+              сам и его участие в партиях ({forgettingPerson?.games ?? 0}{' '}
+              {gamesWord(forgettingPerson?.games ?? 0)}
+              ). Анкета останется — её убирают кнопкой «Удалить» у самой анкеты
+              выше. Сыгранные вопросы и статистика паков останутся: они
+              обезличены.
+            </p>
+            <div className="admin-actions">
+              <button
+                type="button"
+                className="button"
+                onClick={() => setForgettingId(null)}
+              >
+                Не удалять
+              </button>
+              <button
+                type="button"
+                className="button button--danger"
+                onClick={() => {
+                  forgetPerson(forgettingId);
+                  setForgettingId(null);
+                }}
+              >
+                Удалить навсегда
+              </button>
+            </div>
+          </div>
+        )}
+
+        {peopleError && (
+          <p className="admin-error" role="alert">
+            {peopleError}
+          </p>
+        )}
+
+        <h3>Один и тот же человек</h3>
+        <p className="admin-hint">
+          Это про историю, а не про стол: если один и тот же человек в разных
+          партиях назвался по-разному, его записи сводятся в одну. Участников
+          слияние не трогает — лишнего за столом убирают кнопкой «Кикнуть» в
+          разделе «Участники» ниже. Необратимо: направление указываешь ты,
+          лишняя запись исчезает совсем. Пока идёт партия, слияние недоступно.
+        </p>
+        <div className="admin-merge-people">
+          <label htmlFor="merge-from-id">Кого слить</label>
+          <select
+            id="merge-from-id"
+            value={mergeFromId}
+            onChange={(e) => {
+              setMergeFromId(e.target.value);
+              setConfirmingMerge(false);
+              // Финальное ревью ветки, п. 7: отказ слияния («нельзя сливать
+              // игроков, пока идёт партия») не должен пережить смену выбора
+              // — иначе он висит красным всю партию, хотя ведущий уже
+              // переключился на другую пару.
+              clearPeopleError();
+            }}
+          >
+            <option value="">— выбери —</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.games})
+              </option>
+            ))}
+          </select>
+          <label htmlFor="merge-into-id">В кого</label>
+          <select
+            id="merge-into-id"
+            value={mergeIntoId}
+            onChange={(e) => {
+              setMergeIntoId(e.target.value);
+              setConfirmingMerge(false);
+              clearPeopleError();
+            }}
+          >
+            <option value="">— выбери —</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.games})
+              </option>
+            ))}
+          </select>
+          <div className="admin-actions">
+            <button
+              type="button"
+              className="button button--primary"
+              disabled={
+                mergeFromId === '' ||
+                mergeIntoId === '' ||
+                mergeFromId === mergeIntoId
+              }
+              onClick={() => setConfirmingMerge(true)}
+            >
+              Слить
+            </button>
+          </div>
+        </div>
+        {confirmingMerge && mergeFromPerson && mergeIntoPerson && (
+          <div className="admin-player-conflict">
+            <p>
+              Останется «{mergeIntoPerson.name}» — «{mergeFromPerson.name}»
+              исчезнет безвозвратно.
+            </p>
+            <div className="admin-actions">
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={handleConfirmMerge}
+              >
+                Подтвердить
+              </button>
+              <button
+                type="button"
+                className="button"
+                onClick={() => setConfirmingMerge(false)}
+              >
+                Отмена
+              </button>
+            </div>
+          </div>
         )}
       </section>
 

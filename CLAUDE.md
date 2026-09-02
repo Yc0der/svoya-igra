@@ -25,7 +25,8 @@ pnpm-монорепозиторий, две рабочие области: `serv
   загрузка пакетов вопросов. `history.ts` — история партий. Рядом с каждым файлом `*.test.ts`.
 - `client/src/` — `Board.tsx` (экран на телевизоре), `Player.tsx` (телефон игрока),
   `Admin.tsx` (панель ведущего), `use*Connection.ts` (ws-подключения), `VideoPlayer.tsx`.
-- `packs/` — пакеты вопросов в JSON, `packs/media/` — картинки и видео к ним.
+- `packs/` — пакеты вопросов в JSON, `packs/media/` — картинки и видео к ним. В git только
+  `*.example.json` и медиа примеров; собранные под компанию паки игнорируются.
 - `e2e/` — playwright-сценарии.
 - `docs/` — спеки, планы и решения (см. ниже).
 - `.claude/scripts/` — служебные скрипты (`tokens.mjs`, `checkpoint.mjs`), чистый Node без
@@ -75,6 +76,9 @@ pnpm-монорепозиторий, две рабочие области: `serv
 - `docs/superpowers/specs/2026-08-03-svoya-igra-design.md` — что строим и почему
 - `docs/ideas.md` — что сознательно не строим, с причинами
 - `docs/lifecycle.md` — цикл разработки под этот проект
-- `docs/players.md`, `docs/pack-generator-profile.md` — анкеты игроков и профиль генератора
+- `docs/players.md`, `docs/pack-generator-profile.md` — анкеты игроков и профиль генератора.
+  Обоих в git нет: это данные конкретной компании. В репозитории лежат только
+  `*.example.md`, сервер копирует пример при первом запуске
+  (`ensureFileFromExample`). То же правило у пакетов: в git только `packs/*.example.json`
 - `docs/superpowers/plans/` — планы вех, там же секции «Состояние» от `/handoff`
 - `CONTRIBUTING.md` — ветки и коммиты

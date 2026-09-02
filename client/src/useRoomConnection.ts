@@ -129,6 +129,15 @@ export interface PackSummary {
   description: string | null;
 }
 
+// Запись лобби-списка знакомых людей (server/src/protocol.ts, ServerMessage
+// 'state'.people) — уже отсортирована сервером по числу партий убыванием,
+// клиенту пересортировывать не надо (Task 3).
+export interface PersonSummary {
+  id: number;
+  name: string;
+  games: number;
+}
+
 // Готовые варианты причины для разбора в конце партии (server/src/protocol.ts,
 // TAG_REASONS). Клиент не импортирует из server/ — типы и константы в этом
 // проекте дублируются вручную, поэтому копия должна дословно совпадать.
@@ -143,12 +152,17 @@ export const TAG_REASONS = [
 type ServerMessage =
   | { type: 'joined'; participantId: string; token: string; name: string }
   | { type: 'name-taken' }
+  // Отдельные от name-taken отказы join-as (server/src/protocol.ts,
+  // Room.joinAsPerson) — разным причинам разные тексты, см. Player.tsx.
+  | { type: 'person-taken' }
+  | { type: 'person-unknown' }
   | { type: 'invalid-token' }
   | {
       type: 'state';
       participants: ParticipantView[];
       hostParticipantId: string | null;
       game: GameStateView | null;
+      people: PersonSummary[];
       lanUrl: string;
       availablePacks: PackSummary[];
       activePackFilename: string | null;
@@ -160,6 +174,7 @@ type ServerMessage =
 
 type ClientMessage =
   | { type: 'join'; name: string }
+  | { type: 'join-as'; personId: number }
   | { type: 'reconnect'; token: string }
   | { type: 'start-game' }
   | { type: 'toggle-host' }
@@ -189,7 +204,15 @@ type ClientMessage =
   | { type: 'select-pack'; filename: string };
 
 export type ConnectionStatus =
-  'connecting' | 'joining' | 'joined' | 'name-taken' | 'disconnected';
+  | 'connecting'
+  | 'joining'
+  | 'joined'
+  | 'name-taken'
+  // Отдельные от name-taken статусы отказа join-as (Task 3) — «занято» и
+  // «такого больше нет» требуют разных текстов в лобби, см. Player.tsx.
+  | 'person-taken'
+  | 'person-unknown'
+  | 'disconnected';
 
 export interface RoomConnection {
   status: ConnectionStatus;
@@ -206,7 +229,16 @@ export interface RoomConnection {
   hostParticipantId: string | null;
   isHost: boolean;
   startGameError: StartGameErrorReason | null;
+  // Список знакомых людей для лобби (Task 3) — уже отсортирован сервером,
+  // пустой означает «история выключена», единственный сигнал для отката на
+  // старое поле ввода имени (см. Player.tsx).
+  people: PersonSummary[];
+  // Человек, вошедший с этого телефона в прошлый раз — только подсказка
+  // (память телефона, а не истина: телефоны передают из рук в руки), читается
+  // один раз при монтировании и не меняется в процессе жизни хука.
+  rememberedPersonId: number | null;
   join(name: string): void;
+  joinAs(personId: number): void;
   startGame(): void;
   toggleHost(): void;
   selectQuestion(themeIndex: number, questionId: string): void;
@@ -238,6 +270,11 @@ export interface RoomConnection {
 }
 
 const TOKEN_KEY = 'svoya-igra-token';
+// Отдельный ключ от TOKEN_KEY — запомненный человек и токен переподключения
+// не связаны (Task 3): токен привязан к конкретному участнику текущей
+// партии, а запомненный человек переживает и смену партии, и то, что
+// человек вошёл заново под другим токеном.
+const PERSON_KEY = 'svoya-igra-person';
 const RECONNECT_DELAY_MS = 2000;
 const FALSESTART_LOCK_MS = 2000;
 // Дольше, чем FALSESTART_LOCK_MS — здесь целое предложение, а не мгновенная
@@ -270,8 +307,25 @@ export function useRoomConnection(
   );
   const [startGameError, setStartGameError] =
     useState<StartGameErrorReason | null>(null);
+  const [people, setPeople] = useState<PersonSummary[]>([]);
+  // Читается один раз при монтировании — подсказка о том, кто в прошлый раз
+  // входил с этого телефона (Task 3, «память телефона — подсказка, а не
+  // истина»). Нечисловое или отсутствующее значение игнорируется, а не
+  // роняет лобби.
+  const [rememberedPersonId] = useState<number | null>(() => {
+    const raw = localStorage.getItem(PERSON_KEY);
+    if (raw === null) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : null;
+  });
   const wsRef = useRef<WebSocket | null>(null);
   const pendingNameRef = useRef<string | null>(null);
+  // Тот же приём, что у pendingNameRef выше, но для join-as: держит id
+  // человека, которого просили заджойнить, чтобы по успешному 'joined'
+  // знать, что запомнить в localStorage. join()/joinAs() взаимно исключают
+  // друг друга — какая из двух функций вызвана последней, тот ref и
+  // непустой на момент 'joined'.
+  const pendingPersonIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -297,6 +351,21 @@ export function useRoomConnection(
             name: pendingNameRef.current,
           };
           ws.send(JSON.stringify(message));
+        } else if (pendingPersonIdRef.current !== null) {
+          // Тот же ретрай, что и у pendingNameRef выше, но для join-as
+          // (финальное ревью ветки, п. 5, Minor): без этой ветки сокет,
+          // отвалившийся между отправкой join-as и ответом joined (токена
+          // ещё нет — TOKEN_KEY не записан), оставлял статус навсегда
+          // 'joining' — все кнопки имён заблокированы, тревоги нет, и
+          // единственный выход для игрока был «Меня тут нет» с ручным вводом
+          // имени, то есть новый расщеплённый профиль — ровно то, против
+          // чего лобби и затевалось.
+          setStatus('joining');
+          const message: ClientMessage = {
+            type: 'join-as',
+            personId: pendingPersonIdRef.current,
+          };
+          ws.send(JSON.stringify(message));
         }
       });
 
@@ -309,6 +378,26 @@ export function useRoomConnection(
           localStorage.setItem(TOKEN_KEY, message.token);
           setSelfId(message.participantId);
           setStatus('joined');
+          // pendingPersonIdRef непустой ровно тогда, когда это joined —
+          // ответ на joinAs(): запомнить, кем вошли. Иначе, если это был
+          // обычный join(name) (pendingNameRef непустой), старая подсказка
+          // стала ложной — телефон только что вошёл кем-то новым — и её
+          // нужно стереть, а не оставить висеть. Reconnect по токену тоже
+          // присылает joined и заходит в этот блок (финальное ревью ветки,
+          // п. 6, Minor — предыдущая версия комментария утверждала обратное):
+          // оба refs остаются такими, какими были до реконнекта (обычно оба
+          // null, если сокет отвалился не посреди join()/joinAs()), так что
+          // ветка либо ничего не делает, либо переписывает уже лежащий в
+          // localStorage ключ тем же значением — безвредно, но не «не
+          // заходит вовсе».
+          if (pendingPersonIdRef.current !== null) {
+            localStorage.setItem(
+              PERSON_KEY,
+              String(pendingPersonIdRef.current),
+            );
+          } else if (pendingNameRef.current !== null) {
+            localStorage.removeItem(PERSON_KEY);
+          }
         }
         if (message.type === 'name-taken') {
           // Гонка двух подряд join() (например, двойной тап): второй запрос
@@ -321,6 +410,18 @@ export function useRoomConnection(
             current === 'joined' ? current : 'name-taken',
           );
         }
+        if (message.type === 'person-taken') {
+          // Та же гонка, что и у name-taken выше.
+          setStatus((current) =>
+            current === 'joined' ? current : 'person-taken',
+          );
+        }
+        if (message.type === 'person-unknown') {
+          // Та же гонка, что и у name-taken выше.
+          setStatus((current) =>
+            current === 'joined' ? current : 'person-unknown',
+          );
+        }
         if (message.type === 'invalid-token') {
           localStorage.removeItem(TOKEN_KEY);
           setStatus('connecting');
@@ -329,6 +430,7 @@ export function useRoomConnection(
           setParticipants(message.participants);
           setHostParticipantId(message.hostParticipantId);
           setGame(message.game);
+          setPeople(message.people);
           setLanUrl(message.lanUrl);
           setAvailablePacks(message.availablePacks);
           setActivePackFilename(message.activePackFilename);
@@ -390,10 +492,21 @@ export function useRoomConnection(
 
   function join(name: string): void {
     pendingNameRef.current = name;
+    pendingPersonIdRef.current = null;
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       setStatus('joining');
       send({ type: 'join', name });
+    }
+  }
+
+  function joinAs(personId: number): void {
+    pendingPersonIdRef.current = personId;
+    pendingNameRef.current = null;
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      setStatus('joining');
+      send({ type: 'join-as', personId });
     }
   }
 
@@ -409,7 +522,10 @@ export function useRoomConnection(
     isHost:
       selfId !== null && selfId === (game ? game.hostId : hostParticipantId),
     startGameError,
+    people,
+    rememberedPersonId,
     join,
+    joinAs,
     startGame: () => send({ type: 'start-game' }),
     toggleHost: () => send({ type: 'toggle-host' }),
     selectQuestion: (themeIndex, questionId) =>

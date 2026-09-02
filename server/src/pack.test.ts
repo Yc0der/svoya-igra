@@ -538,10 +538,10 @@ describe('findUnreachableVideos', () => {
   });
 });
 
-describe('the real packs/current.json', () => {
+describe('the real packs/current.example.json', () => {
   it('is a valid pack', async () => {
     const path = fileURLToPath(
-      new URL('../../packs/current.json', import.meta.url),
+      new URL('../../packs/current.example.json', import.meta.url),
     );
     const pack = await loadPack(path);
     expect(pack.rounds.length).toBeGreaterThan(0);
