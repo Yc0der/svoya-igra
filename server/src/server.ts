@@ -871,6 +871,43 @@ export function createServer(options: CreateServerOptions): GameServer {
         send(ws, { type: 'admin-people', people: history.listPeople() });
       }
 
+      if (
+        message.type === 'admin-forget-person' &&
+        typeof message.id === 'number'
+      ) {
+        if (!history) return;
+        // Дословно та же причина, что у слияния: человек за столом связан с
+        // участником и счётчиком, и трогать эту связь под ногами у идущей партии —
+        // класс ошибок, которого проще не заводить.
+        if (room.hasActiveGame()) {
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'нельзя удалять человека, пока идёт партия',
+          });
+          return;
+        }
+        if (!history.forgetPerson(message.id)) {
+          // forgetPerson возвращает false и когда человека уже нет (его убрали с
+          // другого устройства, пока ведущий смотрел на список), и при сбое базы.
+          // Для ведущего ответ один и тот же: список у него устарел.
+          send(ws, {
+            type: 'admin-people-error',
+            reason: 'такого игрока уже нет — обнови список',
+          });
+          return;
+        }
+        // Пересчёт «Показывает в игре» сразу, а не после следующей партии, — иначе
+        // имя удалённого осталось бы в файле. В отличие от слияния его здесь ждём:
+        // ведущий открывает файл сразу после удаления, и порядок «ответ ушёл, файл
+        // ещё старый» видно глазами.
+        await refreshPlayerStats();
+        // Список людей едет и в обычном состоянии комнаты: лобби на телефонах
+        // показывает его для входа «я — вот этот из списка» (та же причина, по
+        // которой broadcastState стоит в слиянии).
+        broadcastState();
+        send(ws, { type: 'admin-people', people: history.listPeople() });
+      }
+
       // Сырые сообщения Node (ENOENT: ... open 'C:\...\packs\ghost.json') не
       // годятся для отправки в админку — они на английском и раскрывают
       // абсолютный путь на диске сервера. Ошибки validatePack/updateQuestion/

@@ -280,7 +280,13 @@ export type ClientMessage =
   // 2026-08-26-player-identity, «Слияние профилей») — направление указывает
   // ведущий: fromId исчезает, intoId остаётся. Сервер сам проверяет, что
   // партия сейчас не идёт (Room.hasActiveGame) — клиент этого не решает.
-  | { type: 'admin-merge-people'; fromId: number; intoId: number };
+  | { type: 'admin-merge-people'; fromId: number; intoId: number }
+  // Удаление человека из истории партий по id из списка «Люди в истории»
+  // (спека идентичности, «Список людей истории»). По id, а не по имени:
+  // человек, назвавшийся в партиях иначе, чем в анкете, по имени не находился
+  // вовсе. Анкету не трогает; сервер сам проверяет, что партия не идёт, — тем
+  // же правилом, что и слияние.
+  | { type: 'admin-forget-person'; id: number };
 
 export type StartGameErrorReason =
   | 'not-enough-players'

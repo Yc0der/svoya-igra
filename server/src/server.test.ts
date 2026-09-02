@@ -4153,6 +4153,63 @@ describe('createServer admin delete player', () => {
     a.ws.close();
     b.ws.close();
   });
+
+  it('admin-forget-person убирает человека и его блок, но не анкету', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    history.startGame({
+      startedAt: '2026-08-26',
+      packFilename: 'test.json',
+      packTitle: 'Пак',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    });
+    const admin = await connectAdmin(baseUrl);
+    await saveVanya(admin);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-forget-person', id: vanyaId }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people',
+      people: [],
+    });
+    expect(history.listPeople()).toEqual([]);
+    // Анкета осталась: это отдельное действие с отдельной кнопкой.
+    expect(await readFile(playersPath, 'utf8')).toMatch(/^## Ваня$/m);
+    admin.ws.close();
+  });
+
+  it('admin-forget-person на несуществующем id отвечает «обнови список»', async () => {
+    const admin = await connectAdmin(baseUrl);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-forget-person', id: 404 }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people-error',
+      reason: 'такого игрока уже нет — обнови список',
+    });
+    admin.ws.close();
+  });
+
+  it('admin-forget-person во время партии отказывает и никого не забывает', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const admin = await connectAdmin(baseUrl);
+
+    const a = await joinPlayer(baseUrl, 'Игрок 1');
+    await admin.nextMessage();
+    const b = await joinPlayer(baseUrl, 'Игрок 2');
+    await admin.nextMessage();
+    await a.nextMessage();
+    admin.ws.send(JSON.stringify({ type: 'admin-start-game' }));
+    await Promise.all([admin.nextMessage(), a.nextMessage(), b.nextMessage()]);
+
+    admin.ws.send(JSON.stringify({ type: 'admin-forget-person', id: vanyaId }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people-error',
+      reason: 'нельзя удалять человека, пока идёт партия',
+    });
+    expect(history.listPeople().map((person) => person.id)).toContain(vanyaId);
+
+    admin.ws.close();
+    a.ws.close();
+    b.ws.close();
+  });
 });
 
 describe('createServer media static route', () => {
