@@ -1,4 +1,5 @@
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { writeFileAtomic } from './atomicWrite.js';
 import type { RoomState } from './room.js';
 
 export function serializeSnapshot(state: RoomState): string {
@@ -62,9 +63,7 @@ export async function writeSnapshot(
   path: string,
   state: RoomState,
 ): Promise<void> {
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, serializeSnapshot(state), 'utf8');
-  await rename(tmpPath, path);
+  await writeFileAtomic(path, serializeSnapshot(state));
 }
 
 export async function readSnapshot(path: string): Promise<RoomState | null> {

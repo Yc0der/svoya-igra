@@ -1,4 +1,5 @@
-import { readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
+import { writeFileAtomic } from './atomicWrite.js';
 import { join } from 'node:path';
 import { loadPack, validatePack, type Pack, type Question } from './pack.js';
 
@@ -53,11 +54,12 @@ export async function listAvailablePacks(dir: string): Promise<PackSummary[]> {
   return summaries;
 }
 
-// Тот же паттерн, что уже есть в snapshot.ts (writeFileAtomic) — temp-файл
-// + rename, а не прямая перезапись: половина записанного файла на диске
-// после сбоя посреди write() хуже отсутствия записи вовсе. Отдельного
-// общего хелпера с snapshot.ts не заводим — два похожих места, лишняя
-// абстракция ради них не оправдана (YAGNI).
+// Запись через общий writeFileAtomic (atomicWrite.ts) — temp-файл + rename,
+// а не прямая перезапись: половина записанного файла на диске после сбоя
+// посреди write() хуже отсутствия записи вовсе. Раньше эти три строки стояли
+// здесь копией с пометкой «общего хелпера не заводим, два места, YAGNI»;
+// хелпер появился, когда у приёма завелась платформенная тонкость —
+// повтор rename на EPERM в Windows, см. atomicWrite.ts.
 //
 // null, 2 — а не компактный JSON.stringify, как в serializeSnapshot: пакет,
 // в отличие от снапшота комнаты, человекочитаемый формат, который
@@ -66,9 +68,7 @@ export async function listAvailablePacks(dir: string): Promise<PackSummary[]> {
 // бы сломать эту читаемость для всего остального файла, не только для
 // изменённого вопроса.
 async function writePackAtomic(path: string, pack: Pack): Promise<void> {
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(pack, null, 2), 'utf8');
-  await rename(tmpPath, path);
+  await writeFileAtomic(path, JSON.stringify(pack, null, 2));
 }
 
 function findQuestion(pack: Pack, questionId: string): Question | undefined {
