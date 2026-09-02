@@ -1514,7 +1514,11 @@ describe('Admin — слияние профилей', () => {
     await userEvent.click(
       screen.getByRole('button', { name: 'Удалить человека: Ваня' }),
     );
-    expect(screen.getByText(/анкета останется/i)).toBeInTheDocument();
+    // Спека идентичности, «Список людей истории»: подтверждение обязано
+    // называть число партий («Ваня — 4 партии» честнее, чем «вы уверены?»).
+    const dialogText = screen.getByText(/анкета останется/i).textContent ?? '';
+    expect(dialogText).toMatch(/анкета останется/i);
+    expect(dialogText).toMatch(/5 партий/);
     expect(forgetPerson).not.toHaveBeenCalled();
 
     await userEvent.click(
@@ -1632,7 +1636,13 @@ describe('Admin — правка и удаление анкеты', () => {
       screen.getByRole('button', { name: /удалить анкету/i }),
     );
 
-    expect(screen.getByText(/записи о партиях останутся/i)).toBeInTheDocument();
+    // Спека анкет, «Удаление анкеты — это удаление анкеты»: диалог прямо
+    // говорит, где убирают партии («Люди в истории»), и число партий из
+    // диалога уходит — оно там врало бы, ведь это удаление их не трогает.
+    const dialogText =
+      screen.getByText(/записи о партиях останутся/i).textContent ?? '';
+    expect(dialogText).toMatch(/люди в истории/i);
+    expect(dialogText).not.toMatch(/\d/);
     expect(deletePlayerCard).not.toHaveBeenCalled();
 
     await userEvent.click(

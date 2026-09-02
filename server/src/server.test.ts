@@ -13,6 +13,7 @@ import {
 import type { ServerMessage } from './protocol.js';
 import type { Pack } from './pack.js';
 import { GameHistory, type HistoryRecorder } from './history.js';
+import { savePlayerStats } from './playersFile.js';
 import {
   REVEAL_TIMER_MS,
   VOTE_TIMER_MS,
@@ -4154,6 +4155,48 @@ describe('createServer admin delete player', () => {
     expect(history.listPeople()).toEqual([]);
     // Анкета осталась: это отдельное действие с отдельной кнопкой.
     expect(await readFile(playersPath, 'utf8')).toMatch(/^## Ваня$/m);
+    admin.ws.close();
+  });
+
+  // Спека идентичности, «Список людей истории»: раздел «Показывает в игре»
+  // пересчитывается сразу после удаления, не дожидаясь конца следующей
+  // партии, — иначе имя удалённого осталось бы в файле до следующей игры.
+  it('admin-forget-person пересчитывает «Показывает в игре» сразу, не дожидаясь конца следующей партии', async () => {
+    const vanyaId = history.createPerson('Ваня', '2026-08-01')!;
+    const gameId = history.startGame({
+      startedAt: '2026-08-01T18:00:00.000Z',
+      packFilename: 'p.json',
+      packTitle: 'П',
+      participants: [{ counterId: 'c1', name: 'Ваня', personId: vanyaId }],
+    })!;
+    history.recordQuestion(gameId, {
+      questionId: 'q1',
+      roundIndex: 0,
+      themeName: 'История',
+      price: 100,
+      type: 'обычный',
+      text: 'Вопрос',
+      answer: 'Ответ',
+      answeredBy: 'Ваня',
+      answeredByCounterId: 'c1',
+      correct: true,
+      contested: false,
+    });
+    // Заводим блок «Показывает в игре» так же, как это уже сделал бы конец
+    // партии или слияние — до удаления блок для Вани обязан быть на месте.
+    await savePlayerStats(playersPath, history.playerStats());
+    const before = await readFile(playersPath, 'utf8');
+    expect(before).toMatch(/^### Ваня$/m);
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(JSON.stringify({ type: 'admin-forget-person', id: vanyaId }));
+    expect(await admin.nextMessage()).toEqual({
+      type: 'admin-people',
+      people: [],
+    });
+
+    const after = await readFile(playersPath, 'utf8');
+    expect(after).not.toMatch(/^### Ваня$/m);
     admin.ws.close();
   });
 
