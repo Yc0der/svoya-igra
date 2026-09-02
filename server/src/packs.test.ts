@@ -129,6 +129,36 @@ describe('listAvailablePacks', () => {
     expect(await listAvailablePacks(dir)).toEqual([]);
   });
 
+  it('skips *.example.json — примеры из репозитория не пакеты для выбора', async () => {
+    // current.example.json — источник, из которого сервер заводит рабочий
+    // current.json (index.ts, ensureFileFromExample). Пока список показывал
+    // оба файла, один и тот же пак стоял в выборе дважды под одним названием.
+    await writeFile(
+      join(dir, 'current.example.json'),
+      JSON.stringify({ ...VALID_PACK, title: 'Общая эрудиция' }),
+      'utf8',
+    );
+    await writeFile(
+      join(dir, 'current.json'),
+      JSON.stringify({ ...VALID_PACK, title: 'Общая эрудиция' }),
+      'utf8',
+    );
+    expect(await listAvailablePacks(dir)).toEqual([
+      { filename: 'current.json', title: 'Общая эрудиция', description: null },
+    ]);
+  });
+
+  it('не путает example.json с настоящим паком, имя которого им заканчивается', async () => {
+    // Отсекается именно суффикс `.example.json`, не подстрока «example»:
+    // «example.json» и «my-example.json» — обычные имена файлов.
+    await writeFile(join(dir, 'example.json'), JSON.stringify(VALID_PACK));
+    await writeFile(join(dir, 'my-example.json'), JSON.stringify(VALID_PACK));
+    expect(await listAvailablePacks(dir)).toEqual([
+      { filename: 'example.json', title: 'Тест', description: null },
+      { filename: 'my-example.json', title: 'Тест', description: null },
+    ]);
+  });
+
   it('skips a file with malformed JSON, logs, and still returns the valid ones', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     await writeFile(join(dir, 'broken.json'), '{"title": "об', 'utf8');

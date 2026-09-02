@@ -17,6 +17,12 @@ export interface PackSummary {
  * должен мешать увидеть остальные. console.error — для диагностики на сервере, не для
  * клиента: то, почему конкретного файла нет в списке, не то, что должно решаться в
  * интерфейсе разбором сообщений об ошибках.
+ *
+ * `*.example.json` в список не попадают. Это файлы репозитория, а не пакеты этой компании:
+ * из `current.example.json` сервер заводит рабочий `current.json`
+ * (`ensureFileFromExample` в index.ts), и пока список показывал оба, один и тот же пак
+ * стоял в выборе дважды под одним названием. Сыграть пример по-прежнему можно — скопировав
+ * его под обычным именем, ровно как это делает сам сервер с `current.json`.
  */
 export async function listAvailablePacks(dir: string): Promise<PackSummary[]> {
   let entries: string[];
@@ -29,6 +35,7 @@ export async function listAvailablePacks(dir: string): Promise<PackSummary[]> {
   const summaries: PackSummary[] = [];
   for (const filename of entries) {
     if (!filename.endsWith('.json')) continue;
+    if (filename.endsWith('.example.json')) continue;
     const path = join(dir, filename);
     try {
       const raw = await readFile(path, 'utf8');
