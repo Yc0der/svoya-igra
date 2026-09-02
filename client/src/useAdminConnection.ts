@@ -149,7 +149,8 @@ type ClientMessage =
       // означает «это вставка кода, а не правка».
       originalName?: string;
     }
-  | { type: 'admin-merge-people'; fromId: number; intoId: number };
+  | { type: 'admin-merge-people'; fromId: number; intoId: number }
+  | { type: 'admin-forget-person'; id: number };
 
 // Анкета в том виде, в каком её отдаёт сервер, — форма правки заполняется
 // ею и из неё же собирает код обратно.
@@ -267,6 +268,9 @@ export interface AdminConnection {
   // ошибка не про сервер, а про текущий выбор в форме.
   clearPeopleError(): void;
   mergePeople(fromId: number, intoId: number): void;
+  // Забывает человека и его участие в партиях. Анкету не трогает — её убирает
+  // deletePlayerCard.
+  forgetPerson(id: number): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -523,5 +527,6 @@ export function useAdminConnection(
     clearPeopleError: () => setPeopleError(null),
     mergePeople: (fromId, intoId) =>
       send({ type: 'admin-merge-people', fromId, intoId }),
+    forgetPerson: (id) => send({ type: 'admin-forget-person', id }),
   };
 }

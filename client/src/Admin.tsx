@@ -107,6 +107,7 @@ export function Admin() {
     peopleError,
     clearPeopleError,
     mergePeople,
+    forgetPerson,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -133,6 +134,10 @@ export function Admin() {
   // — отдельный диалог, а не перелейбл кнопки: в тексте обязано быть видно,
   // что именно исчезнет (спека анкет, «Удаление — человек целиком»).
   const [deletingName, setDeletingName] = useState<string | null>(null);
+  // Удаление человека из истории партий — отдельный диалог от удаления
+  // анкеты (deletingName выше): разные операции, разные подтверждения
+  // (sdd/2026-09-02-split-card-and-person-delete).
+  const [forgettingId, setForgettingId] = useState<number | null>(null);
 
   // Анкета пришла — заполняем форму. Зависимости ровно две: пока ведущий
   // правит, ни имя, ни ответ сервера не меняются, и эффект не перезапустится
@@ -747,6 +752,75 @@ export function Admin() {
                 onClick={() => {
                   deletePlayerCard(deletingName);
                   setDeletingName(null);
+                }}
+              >
+                Удалить навсегда
+              </button>
+            </div>
+          </div>
+        )}
+
+        <h3>Люди в истории</h3>
+        <p className="admin-hint">
+          Это записи истории партий, а не анкеты и не стол. Удаление убирает
+          человека и его участие в партиях; анкета, если она есть, остаётся — её
+          убирают выше. Пока идёт партия, удаление недоступно.
+        </p>
+        {people.length === 0 ? (
+          <p className="admin-hint">В истории пока никого.</p>
+        ) : (
+          <ul className="admin-players">
+            {people.map((person) => (
+              <li key={person.id}>
+                <span className="admin-player-name">{person.name}</span>
+                <span className="admin-player-date">
+                  {person.games} {gamesWord(person.games)}
+                </span>
+                <span className="admin-actions">
+                  <button
+                    type="button"
+                    className="button"
+                    aria-label={`Удалить человека: ${person.name}`}
+                    onClick={() => {
+                      clearPeopleError();
+                      setForgettingId(person.id);
+                    }}
+                  >
+                    Удалить
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {forgettingId !== null && (
+          <div className="admin-player-conflict">
+            <p>
+              Удалить «
+              {people.find((person) => person.id === forgettingId)?.name ?? ''}»
+              из истории? Исчезнет он сам и его участие в партиях (
+              {people.find((person) => person.id === forgettingId)?.games ?? 0}{' '}
+              {gamesWord(
+                people.find((person) => person.id === forgettingId)?.games ?? 0,
+              )}
+              ). Анкета останется — её убирают кнопкой «Удалить» у самой анкеты
+              выше. Сыгранные вопросы и статистика паков останутся: они
+              обезличены.
+            </p>
+            <div className="admin-actions">
+              <button
+                type="button"
+                className="button"
+                onClick={() => setForgettingId(null)}
+              >
+                Не удалять
+              </button>
+              <button
+                type="button"
+                className="button button--danger"
+                onClick={() => {
+                  forgetPerson(forgettingId);
+                  setForgettingId(null);
                 }}
               >
                 Удалить навсегда

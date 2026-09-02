@@ -100,6 +100,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     peopleError: null,
     clearPeopleError: vi.fn(),
     mergePeople: vi.fn(),
+    forgetPerson: vi.fn(),
     ...overrides,
   };
 }
@@ -1494,6 +1495,55 @@ describe('Admin — слияние профилей', () => {
 
     await userEvent.selectOptions(screen.getByLabelText(/в кого/i), '2');
     expect(clearPeopleError).toHaveBeenCalledTimes(2);
+  });
+
+  it('список людей истории показывает имя и число партий', () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ people: PEOPLE }));
+    render(<Admin />);
+    expect(screen.getByText(/люди в истории/i)).toBeInTheDocument();
+    expect(screen.getByText(/5 партий/)).toBeInTheDocument();
+  });
+
+  it('диалог удаления человека называет партии и удаляет только по подтверждению', async () => {
+    const forgetPerson = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ people: PEOPLE, forgetPerson }),
+    );
+    render(<Admin />);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Удалить человека: Ваня' }),
+    );
+    expect(screen.getByText(/анкета останется/i)).toBeInTheDocument();
+    expect(forgetPerson).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /удалить навсегда/i }),
+    );
+    expect(forgetPerson).toHaveBeenCalledWith(1);
+  });
+
+  it('«Не удалять» в диалоге человека ничего не удаляет', async () => {
+    const forgetPerson = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ people: PEOPLE, forgetPerson }),
+    );
+    render(<Admin />);
+
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Удалить человека: Ваня' }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /не удалять/i }));
+    expect(forgetPerson).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: /удалить навсегда/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('без людей в истории раздел говорит об этом', () => {
+    mockedUseAdminConnection.mockReturnValue(connection({ people: [] }));
+    render(<Admin />);
+    expect(screen.getByText(/в истории пока никого/i)).toBeInTheDocument();
   });
 });
 
