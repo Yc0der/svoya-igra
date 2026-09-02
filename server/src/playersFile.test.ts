@@ -87,6 +87,17 @@ describe('playersFile', () => {
     );
   });
 
+  // Порядок «сначала партия, потом анкета» — обычный вечер: человек сыграл,
+  // и только после этого прислал анкету. До правки она уходила под машинный
+  // раздел и в /admin не появлялась вовсе.
+  it('анкета, присланная после первой партии, попадает в список', async () => {
+    await savePlayerStats(playersPath, STATS);
+    await savePlayerCard(playersPath, CARD, '2026-08-26');
+    expect(await readPlayerList(playersPath)).toEqual([
+      { name: 'Ваня', date: '2026-08-26' },
+    ]);
+  });
+
   it('повторный пересчёт с теми же числами не трогает диск', async () => {
     await savePlayerStats(playersPath, STATS);
     const first = await stat(playersPath);

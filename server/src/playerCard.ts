@@ -177,8 +177,28 @@ export function upsertPlayerSection(
     result.push(...lines.slice(cursor));
     return result.join('\n');
   }
-  const base = fileText.endsWith('\n') ? fileText : `${fileText}\n`;
-  return `${base}\n${section.join('\n')}\n`;
+  // Конец АНКЕТНОЙ части, а не файла. Ниже может лежать машинный раздел
+  // «Показывает в игре»: playerStats.ts кладёт его в самый конец, и анкета,
+  // дописанная под него, выпадала из listPlayers, а в файле оказывалась в
+  // куске, про который там же написано «правки руками не сохранятся».
+  const statsAt = lines.findIndex((line) => line.trim() === STATS_HEADING);
+  if (statsAt === -1) {
+    const base = fileText.endsWith('\n') ? fileText : `${fileText}\n`;
+    return `${base}\n${section.join('\n')}\n`;
+  }
+  // Пустые строки и разделитель перед машинным разделом — его собственная
+  // шапка (appendAtEnd в playerStats.ts), поэтому анкета встаёт перед ними, а
+  // не между разделителем и заголовком.
+  let insertAt = statsAt;
+  while (insertAt > 0 && lines[insertAt - 1] === '') insertAt -= 1;
+  if (insertAt > 0 && lines[insertAt - 1] === '---') insertAt -= 1;
+  while (insertAt > 0 && lines[insertAt - 1] === '') insertAt -= 1;
+  return [
+    ...lines.slice(0, insertAt),
+    '',
+    ...section,
+    ...lines.slice(insertAt),
+  ].join('\n');
 }
 
 /**
@@ -191,13 +211,15 @@ export function listPlayers(
 ): { name: string; date: string }[] {
   const lines = fileText.split('\n');
   const players: { name: string; date: string }[] = [];
-  // Всё ниже машинного раздела — не анкеты: там числа по партиям, и раздел
-  // всегда последний в файле (spliceStatsSection). Поэтому не «пропустить
-  // один заголовок», а остановиться: анкет за ним не бывает по построению.
-  const statsAt = lines.findIndex((line) => line.trim() === STATS_HEADING);
-  const end = statsAt === -1 ? lines.length : statsAt;
-  lines.slice(0, end).forEach((line, index) => {
+  // Машинный раздел «Показывает в игре» — не анкета, но и не конец чтения:
+  // пропускается только его заголовок. Останавливаться на нём нельзя, хотя
+  // сервер и кладёт его последним: файл заявлен правимым руками, а лежащие на
+  // дисках файлы помнят версию, дописывавшую анкету в абсолютный конец, — всё
+  // оказавшееся ниже молча пропадало из /admin. Тело раздела заголовков
+  // уровня «## » не содержит: людей в нём playerStats.ts пишет через «### ».
+  lines.forEach((line, index) => {
     if (!line.startsWith('## ')) return;
+    if (line.trim() === STATS_HEADING) return;
     const name = oneLine(line.slice(3));
     if (name === '') return;
     const end = sectionEnd(lines, index);
