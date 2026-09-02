@@ -1163,7 +1163,7 @@ describe('GameHistory.forgetPerson', () => {
     expect(history.listPeople()).toEqual([]);
     expect(history.playerStats().people).toEqual([]);
     // Вопрос остаётся: он обезличен и нужен генератору (спека анкет,
-    // «Удаление — человек целиком, и это сказано прямо»).
+    // «Удаление анкеты — это удаление анкеты»).
     expect(history.allPlayedQuestions()).toHaveLength(1);
   });
 

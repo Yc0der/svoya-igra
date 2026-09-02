@@ -819,6 +819,12 @@ export function Admin() {
           </div>
         )}
 
+        {peopleError && (
+          <p className="admin-error" role="alert">
+            {peopleError}
+          </p>
+        )}
+
         <h3>Один и тот же человек</h3>
         <p className="admin-hint">
           Это про историю, а не про стол: если один и тот же человек в разных
@@ -904,11 +910,6 @@ export function Admin() {
               </button>
             </div>
           </div>
-        )}
-        {peopleError && (
-          <p className="admin-error" role="alert">
-            {peopleError}
-          </p>
         )}
       </section>
 

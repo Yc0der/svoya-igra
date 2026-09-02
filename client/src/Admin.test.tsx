@@ -1544,6 +1544,41 @@ describe('Admin — слияние профилей', () => {
     ).not.toBeInTheDocument();
   });
 
+  // Финальное ревью ветки, п. 1 (Important): отказ удаления человека должен
+  // быть виден там, где ведущий его ищет — рядом с разделом «Люди в
+  // истории», а не в конце секции, за подразделом слияния.
+  it('показывает peopleError после отказа удалить человека', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        people: PEOPLE,
+        peopleError: 'нельзя удалять человека, пока идёт партия',
+      }),
+    );
+    render(<Admin />);
+
+    const peopleHeading = screen.getByRole('heading', {
+      name: /люди в истории/i,
+    });
+    const errorText = screen.getByText(
+      'нельзя удалять человека, пока идёт партия',
+    );
+    const mergeHeading = screen.getByRole('heading', {
+      name: /один и тот же человек/i,
+    });
+
+    expect(errorText).toBeInTheDocument();
+    // Ошибка должна стоять между двумя подразделами, а не после обоих —
+    // видна из раздела «Люди в истории», а не только из формы слияния.
+    expect(
+      peopleHeading.compareDocumentPosition(errorText) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      errorText.compareDocumentPosition(mergeHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it('без людей в истории раздел говорит об этом', () => {
     mockedUseAdminConnection.mockReturnValue(connection({ people: [] }));
     render(<Admin />);
@@ -1642,7 +1677,7 @@ describe('Admin — правка и удаление анкеты', () => {
     const dialogText =
       screen.getByText(/записи о партиях останутся/i).textContent ?? '';
     expect(dialogText).toMatch(/люди в истории/i);
-    expect(dialogText).not.toMatch(/\d/);
+    expect(dialogText).not.toMatch(/\d+\s+парти/);
     expect(deletePlayerCard).not.toHaveBeenCalled();
 
     await userEvent.click(
