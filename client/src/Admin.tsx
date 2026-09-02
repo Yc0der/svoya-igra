@@ -412,6 +412,8 @@ export function Admin() {
 
   const mergeFromPerson = people.find((p) => String(p.id) === mergeFromId);
   const mergeIntoPerson = people.find((p) => String(p.id) === mergeIntoId);
+  const forgettingPerson =
+    people.find((person) => person.id === forgettingId) ?? null;
 
   function handleConfirmMerge(): void {
     if (!mergeFromPerson || !mergeIntoPerson) return;
@@ -796,13 +798,9 @@ export function Admin() {
         {forgettingId !== null && (
           <div className="admin-player-conflict">
             <p>
-              Удалить «
-              {people.find((person) => person.id === forgettingId)?.name ?? ''}»
-              из истории? Исчезнет он сам и его участие в партиях (
-              {people.find((person) => person.id === forgettingId)?.games ?? 0}{' '}
-              {gamesWord(
-                people.find((person) => person.id === forgettingId)?.games ?? 0,
-              )}
+              Удалить «{forgettingPerson?.name ?? ''}» из истории? Исчезнет он
+              сам и его участие в партиях ({forgettingPerson?.games ?? 0}{' '}
+              {gamesWord(forgettingPerson?.games ?? 0)}
               ). Анкета останется — её убирают кнопкой «Удалить» у самой анкеты
               выше. Сыгранные вопросы и статистика паков останутся: они
               обезличены.
