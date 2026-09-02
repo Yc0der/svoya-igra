@@ -3811,6 +3811,12 @@ describe('createServer admin merge people', () => {
     expect(history.listPeople()).toEqual([
       { id: katyaId, name: 'Катя', games: 0 },
     ]);
+    // Слияние отвечает раньше, чем ложится файл: refreshPlayerStats()
+    // вызывается из обработчика через void и пишет players.md уже после
+    // ответа. Без этого ожидания afterEach сносит каталог одновременно с
+    // записью «players.md.tmp» — на Linux rmdir падает с ENOTEMPTY, и тест
+    // краснеет в CI, оставаясь зелёным на Windows (ba49aeb, прогон CI).
+    await waitForFileContent(playersPath, '## Показывает в игре');
     admin.ws.close();
   });
 
@@ -3961,6 +3967,12 @@ describe('createServer admin merge people', () => {
       people: [{ id: katyaId, name: 'Катя', games: 0 }],
     });
 
+    // Слияние отвечает раньше, чем ложится файл: refreshPlayerStats()
+    // вызывается из обработчика через void и пишет players.md уже после
+    // ответа. Без этого ожидания afterEach сносит каталог одновременно с
+    // записью «players.md.tmp» — на Linux rmdir падает с ENOTEMPTY, и тест
+    // краснеет в CI, оставаясь зелёным на Windows (ba49aeb, прогон CI).
+    await waitForFileContent(playersPath, '## Показывает в игре');
     admin.ws.close();
     bystander.ws.close();
   });
