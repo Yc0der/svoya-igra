@@ -882,7 +882,10 @@ export class Room {
     });
   }
 
-  cancelQuestion(requesterId: string): void {
+  // requesterId === null — с админ-панели (тот же паттерн, что у
+  // refreshAvailablePacks/selectPack). Настоящий отправитель, а не то, что
+  // клиент о себе заявляет: строку сюда кладёт server.ts из connections.
+  cancelQuestion(requesterId: string | null): void {
     this.dispatch({ type: 'cancel-question', requesterId });
   }
 

@@ -1091,6 +1091,84 @@ describe('createServer game flow', () => {
     }
   });
 
+  it('admin-cancel-question closes the open question with no host assigned', async () => {
+    // Фейковые таймеры — только чтобы дожать question-reveal до
+    // question-open, тем же приёмом (shouldAdvanceTime), что и соседний
+    // тест партии выше: сеть при этом остаётся настоящей.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-admin-cancel-'));
+      const room = new Room(undefined, TEST_PACK);
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        port: 8080,
+        packsDir: dir,
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } = server.httpServer.address() as AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const a = await joinPlayer(url, 'Ваня');
+      const b = await joinPlayer(url, 'Катя');
+      await a.nextMessage();
+      const admin = await connectAdmin(url);
+
+      a.ws.send(JSON.stringify({ type: 'start-game' }));
+      const started = (await settle(a, b, a)) as {
+        game: {
+          phase: string;
+          turnParticipantId: string;
+          hostId: string | null;
+        };
+      };
+      await admin.nextMessage();
+      // Ведущего никто не назначал — ровно тот случай, ради которого
+      // правило и менялось.
+      expect(started.game.hostId).toBeNull();
+
+      const picker = started.game.turnParticipantId === a.participantId ? a : b;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(a, b, picker);
+      await admin.nextMessage();
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      const open = (await settle(a, b, picker)) as { game: { phase: string } };
+      await admin.nextMessage();
+      expect(open.game.phase).toBe('question-open');
+
+      admin.ws.send(JSON.stringify({ type: 'admin-cancel-question' }));
+      const skipped = (await settle(a, b, picker)) as {
+        game: {
+          phase: string;
+          scores: { participantId: string; score: number }[];
+        };
+      };
+      expect(skipped.game.phase).toBe('reveal');
+      expect(skipped.game.scores).toEqual(
+        expect.arrayContaining([
+          { participantId: a.participantId, score: 0 },
+          { participantId: b.participantId, score: 0 },
+        ]),
+      );
+
+      a.ws.close();
+      b.ws.close();
+      admin.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('tag-question доносит оценку игрока до комнаты', async () => {
     // Тем же способом, каким соседний тест выше доводит партию до 'reveal',
     // но проще: вопрос доигрывается до таймаута (никто не нажал), а не через

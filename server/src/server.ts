@@ -626,6 +626,10 @@ export function createServer(options: CreateServerOptions): GameServer {
         room.skipToFinal();
       }
 
+      if (message.type === 'admin-cancel-question') {
+        room.cancelQuestion(null);
+      }
+
       if (
         message.type === 'admin-set-lan-address' &&
         typeof message.address === 'string'

@@ -194,6 +194,9 @@ export type ClientMessage =
   | { type: 'admin-set-host'; participantId: string | null }
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
   | { type: 'admin-skip-to-final' }
+  // Пропуск активного вопроса с пульта хозяина комнаты. Без параметров: что
+  // именно отменять, знает комната, а не клиент.
+  | { type: 'admin-cancel-question' }
   // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — человек
   // выбирает из реально найденных кандидатов вместо угадывания сервером.
   | { type: 'admin-set-lan-address'; address: string }
