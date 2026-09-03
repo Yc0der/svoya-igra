@@ -59,6 +59,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     kick: vi.fn(),
     setHost: vi.fn(),
     skipToFinal: vi.fn(),
+    cancelQuestion: vi.fn(),
     setLanAddress: vi.fn(),
     textRevealWordsPerSecond: 2.5,
     setTextRevealWordsPerSecond: vi.fn(),
@@ -410,6 +411,32 @@ describe('Admin', () => {
     expect(button).toBeEnabled();
     await userEvent.click(button);
     expect(skipToFinal).toHaveBeenCalledOnce();
+  });
+
+  it('кнопка пропуска выключена без активного вопроса и шлёт cancelQuestion с ним', async () => {
+    const cancelQuestion = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ game: baseGame(), cancelQuestion }),
+    );
+    const { rerender } = render(<Admin />);
+    expect(
+      screen.getByRole('button', { name: 'Пропустить вопрос' }),
+    ).toBeDisabled();
+
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: { text: 'В?', price: 100, themeName: 'История' },
+        }),
+        cancelQuestion,
+      }),
+    );
+    rerender(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Пропустить вопрос' }),
+    );
+    expect(cancelQuestion).toHaveBeenCalledTimes(1);
   });
 
   it('shows a message instead of a table when nobody has joined yet', () => {

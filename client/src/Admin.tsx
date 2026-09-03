@@ -66,6 +66,7 @@ export function Admin() {
     kick,
     setHost,
     skipToFinal,
+    cancelQuestion,
     setLanAddress,
     textRevealWordsPerSecond,
     setTextRevealWordsPerSecond,
@@ -1197,6 +1198,13 @@ export function Admin() {
           </button>
           <button className="button" onClick={resetGame} disabled={!game}>
             Завершить партию (в лобби)
+          </button>
+          <button
+            className="button"
+            onClick={cancelQuestion}
+            disabled={!game || game.currentQuestion === null}
+          >
+            Пропустить вопрос
           </button>
           {/* ВРЕМЕННО, для ручного тестирования финала — см. комментарий у
               EngineEvent.skip-to-final в server/src/engine.ts. Убрать вместе

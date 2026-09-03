@@ -110,6 +110,7 @@ type ClientMessage =
   | { type: 'admin-set-host'; participantId: string | null }
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   | { type: 'admin-skip-to-final' }
+  | { type: 'admin-cancel-question' }
   | { type: 'admin-set-lan-address'; address: string }
   // ВРЕМЕННО — см. server/src/protocol.ts.
   | { type: 'admin-set-text-reveal-rate'; wordsPerSecond: number }
@@ -178,6 +179,9 @@ export interface AdminConnection {
   setHost(participantId: string | null): void;
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   skipToFinal(): void;
+  // Закрывает активный вопрос без начисления очков — то же, что кнопка на
+  // телефоне ведущего, но с пульта и не требуя назначенного ведущего.
+  cancelQuestion(): void;
   setLanAddress(address: string): void;
   // ВРЕМЕННО — см. server/src/protocol.ts.
   textRevealWordsPerSecond: number;
@@ -455,6 +459,7 @@ export function useAdminConnection(
     kick: (participantId) => send({ type: 'admin-kick', participantId }),
     setHost: (participantId) => send({ type: 'admin-set-host', participantId }),
     skipToFinal: () => send({ type: 'admin-skip-to-final' }),
+    cancelQuestion: () => send({ type: 'admin-cancel-question' }),
     setLanAddress: (address) =>
       send({ type: 'admin-set-lan-address', address }),
     textRevealWordsPerSecond,

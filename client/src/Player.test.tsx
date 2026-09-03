@@ -860,7 +860,7 @@ describe('Player', () => {
     render(<Player />);
     await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
-      screen.getByRole('button', { name: 'Отменить вопрос' }),
+      screen.getByRole('button', { name: 'Пропустить вопрос' }),
     ).toBeInTheDocument();
   });
 
@@ -1344,7 +1344,7 @@ describe('Player', () => {
     const { rerender } = render(<Player />);
     await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
-      screen.queryByRole('button', { name: /отменить вопрос/i }),
+      screen.queryByRole('button', { name: /пропустить вопрос/i }),
     ).not.toBeInTheDocument();
 
     mockedUseRoomConnection.mockReturnValue(
@@ -1358,7 +1358,7 @@ describe('Player', () => {
     );
     rerender(<Player />);
     await userEvent.click(
-      screen.getByRole('button', { name: /отменить вопрос/i }),
+      screen.getByRole('button', { name: /пропустить вопрос/i }),
     );
     expect(cancelQuestion).toHaveBeenCalledOnce();
   });
@@ -2016,7 +2016,7 @@ describe('Player', () => {
     render(<Player />);
     await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
-      screen.getByRole('button', { name: 'Отменить вопрос' }),
+      screen.getByRole('button', { name: 'Пропустить вопрос' }),
     ).toBeInTheDocument();
   });
 });
