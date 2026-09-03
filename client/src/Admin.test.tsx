@@ -84,6 +84,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     getPack: vi.fn(),
     updateQuestion: vi.fn(),
     deleteQuestion: vi.fn(),
+    deletePack: vi.fn(),
     reportError: null,
     reportAckVersion: 0,
     clearReportError: vi.fn(),
@@ -632,6 +633,55 @@ describe('Admin — редактор пакета', () => {
     expect(
       screen.getByRole('button', { name: /редактировать/i }),
     ).toBeDisabled();
+  });
+
+  it('удаление пакета требует двух нажатий', async () => {
+    const deletePack = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+          { filename: 'b.json', title: 'Пак Б', description: null },
+        ],
+        activePackFilename: 'a.json',
+        deletePack,
+      }),
+    );
+    render(<Admin />);
+    const row = screen.getByRole('button', { name: /Пак Б/ }).closest('li');
+    const remove = within(row as HTMLElement).getByRole('button', {
+      name: 'Удалить',
+    });
+
+    await userEvent.click(remove);
+    expect(deletePack).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      within(row as HTMLElement).getByRole('button', {
+        name: 'Точно? Вместе с картинками',
+      }),
+    );
+    expect(deletePack).toHaveBeenCalledWith('b.json');
+  });
+
+  it('у активного пакета кнопка удаления выключена и объясняет, почему', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        activePackFilename: 'a.json',
+        deletePack: vi.fn(),
+      }),
+    );
+    render(<Admin />);
+    const row = screen.getByRole('button', { name: /Пак А/ }).closest('li');
+    expect(
+      within(row as HTMLElement).getByRole('button', { name: 'Удалить' }),
+    ).toBeDisabled();
+    expect(
+      within(row as HTMLElement).getByTitle('Сначала выберите другой пакет'),
+    ).toBeInTheDocument();
   });
 
   it('renders the grid once the pack arrives, with a button per question price', async () => {

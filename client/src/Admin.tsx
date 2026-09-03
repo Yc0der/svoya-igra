@@ -91,6 +91,7 @@ export function Admin() {
     getPack,
     updateQuestion,
     deleteQuestion,
+    deletePack,
     reportError,
     reportAckVersion,
     clearReportError,
@@ -215,6 +216,12 @@ export function Admin() {
   const [formComment, setFormComment] = useState('');
   const [formType, setFormType] = useState<Question['type']>('обычный');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Какой именно пакет ждёт подтверждения удаления. Не boolean, как
+  // confirmingDelete у вопроса: строк в списке много, и «Точно?» должно
+  // гореть ровно на нажатой.
+  const [confirmingDeletePack, setConfirmingDeletePack] = useState<
+    string | null
+  >(null);
   // Вид редактора: 'list' по умолчанию — беглый просмотр запрошен как
   // основной сценарий входа (design.md, 2026-08-15).
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
@@ -334,6 +341,15 @@ export function Admin() {
       deleteQuestion(editingFilename, editingQuestionId);
     }
     setConfirmingDelete(false);
+  }
+
+  function handleDeletePack(filename: string): void {
+    if (confirmingDeletePack !== filename) {
+      setConfirmingDeletePack(filename);
+      return;
+    }
+    deletePack(filename);
+    setConfirmingDeletePack(null);
   }
 
   // Закрывает форму без сохранения — поля формы (formPrice/formText/...)
@@ -958,6 +974,31 @@ export function Admin() {
                           </span>
                         )}
                       </button>
+                      {/* title на обёртке, а не на самой кнопке: выключенный
+                          элемент не получает mouse-событий, и подсказка на нём
+                          не всплывает — блокировка осталась бы беззвучной,
+                          ровно того случая мы и избегаем. */}
+                      <span
+                        className="admin-pack-delete"
+                        title={
+                          selected ? 'Сначала выберите другой пакет' : undefined
+                        }
+                      >
+                        <button
+                          className={`button button--no${
+                            confirmingDeletePack === p.filename
+                              ? ' is-selected'
+                              : ''
+                          }`}
+                          onClick={() => handleDeletePack(p.filename)}
+                          onBlur={() => setConfirmingDeletePack(null)}
+                          disabled={selected}
+                        >
+                          {confirmingDeletePack === p.filename
+                            ? 'Точно? Вместе с картинками'
+                            : 'Удалить'}
+                        </button>
+                      </span>
                     </li>
                   );
                 })}

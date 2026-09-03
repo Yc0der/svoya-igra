@@ -744,6 +744,16 @@ code {
   gap: 4px;
 }
 
+.admin-packs li {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.admin-packs li > .button {
+  flex: 1;
+}
+
 .admin-pack-title {
   font-weight: 600;
 }

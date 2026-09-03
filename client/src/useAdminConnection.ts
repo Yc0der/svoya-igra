@@ -133,6 +133,7 @@ type ClientMessage =
       questionType: Question['type'];
     }
   | { type: 'admin-delete-question'; filename: string; questionId: string }
+  | { type: 'admin-delete-pack'; filename: string }
   | {
       type: 'admin-report-question';
       filename: string;
@@ -232,6 +233,9 @@ export interface AdminConnection {
     },
   ): void;
   deleteQuestion(filename: string, questionId: string): void;
+  // Сносит пакет вместе с его папкой картинок. Ответа при успехе нет —
+  // пакет просто исчезает из availablePacks.
+  deletePack(filename: string): void;
   reportError: string | null;
   reportAckVersion: number;
   clearReportError(): void;
@@ -500,6 +504,7 @@ export function useAdminConnection(
       }),
     deleteQuestion: (filename, questionId) =>
       send({ type: 'admin-delete-question', filename, questionId }),
+    deletePack: (filename) => send({ type: 'admin-delete-pack', filename }),
     reportError,
     reportAckVersion,
     clearReportError: () => setReportError(null),
