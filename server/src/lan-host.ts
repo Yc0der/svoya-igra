@@ -1,4 +1,5 @@
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { writeFileAtomic } from './atomicWrite.js';
 
 export interface LanHostConfig {
   address: string | null;
@@ -27,10 +28,8 @@ async function readFileBestEffort(path: string): Promise<LanHostFile> {
   }
 }
 
-async function writeFileAtomic(path: string, data: LanHostFile): Promise<void> {
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(data), 'utf8');
-  await rename(tmpPath, path);
+async function writeConfigFile(path: string, data: LanHostFile): Promise<void> {
+  await writeFileAtomic(path, JSON.stringify(data));
 }
 
 export async function readLanHostConfig(path: string): Promise<LanHostConfig> {
@@ -60,7 +59,7 @@ export async function writeLanHostAddress(
   address: string,
 ): Promise<void> {
   const existing = await readFileBestEffort(path);
-  await writeFileAtomic(path, { ...existing, address });
+  await writeConfigFile(path, { ...existing, address });
 }
 
 export async function writeLanHostHiddenInterfaces(
@@ -68,5 +67,5 @@ export async function writeLanHostHiddenInterfaces(
   hiddenInterfaces: string[],
 ): Promise<void> {
   const existing = await readFileBestEffort(path);
-  await writeFileAtomic(path, { ...existing, hiddenInterfaces });
+  await writeConfigFile(path, { ...existing, hiddenInterfaces });
 }

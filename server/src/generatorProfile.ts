@@ -1,4 +1,5 @@
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
+import { writeFileAtomic } from './atomicWrite.js';
 import type { ProfileAggregate } from './history.js';
 import {
   indentContinuation,
@@ -58,8 +59,8 @@ function formatEntry(entry: ComplaintEntry): string {
  * ветки, п. 4): его оценки попадают в файл через rewriteAutoSection ниже,
  * пересчётом, в схлопнутом виде.
  *
- * Тот же паттерн атомарной записи, что уже есть в snapshot.ts/packs.ts —
- * temp-файл + rename, не прямая перезапись.
+ * Запись — через общий writeFileAtomic (atomicWrite.ts), не прямая
+ * перезапись; тот же приём, что в snapshot.ts и packs.ts.
  */
 export async function appendComplaint(
   profilePath: string,
@@ -76,9 +77,7 @@ export async function appendComplaint(
   const updated = base.includes(HEADING)
     ? `${base}${bullet}\n`
     : `${base}\n---\n\n${HEADING}\n\n${bullet}\n`;
-  const tmpPath = `${profilePath}.tmp`;
-  await writeFile(tmpPath, updated, 'utf8');
-  await rename(tmpPath, profilePath);
+  await writeFileAtomic(profilePath, updated);
 }
 
 /**
@@ -91,7 +90,7 @@ export async function appendComplaint(
  * того как раздел заменён, — иначе маркер, стоящий рядом с разделом, уже
  * потерян.
  *
- * Тот же атомарный приём записи, что и в appendComplaint: temp + rename.
+ * Тот же атомарный приём записи, что и в appendComplaint: writeFileAtomic.
  */
 export async function rewriteAutoSection(
   profilePath: string,
@@ -104,7 +103,5 @@ export async function rewriteAutoSection(
   // пока игроки заполняют экран разбора. Без этой проверки файл переписывался
   // бы и когда в нём нечего менять.
   if (updated === current) return;
-  const tmpPath = `${profilePath}.tmp`;
-  await writeFile(tmpPath, updated, 'utf8');
-  await rename(tmpPath, profilePath);
+  await writeFileAtomic(profilePath, updated);
 }
