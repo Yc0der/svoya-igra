@@ -3195,6 +3195,92 @@ describe('createServer pack editor', () => {
     admin.ws.close();
   });
 
+  it('admin-delete-pack удаляет файл и рассылает обновлённый список всем', async () => {
+    await writeFile(join(packsDir, 'b.json'), JSON.stringify(PACK_A), 'utf8');
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(JSON.stringify({ type: 'admin-refresh-packs' }));
+    const listed = (await admin.nextMessage()) as {
+      availablePacks: { filename: string }[];
+    };
+    expect(listed.availablePacks.map((p) => p.filename)).toEqual(
+      expect.arrayContaining(['a.json', 'b.json']),
+    );
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: 'b.json' }),
+    );
+    const after = (await admin.nextMessage()) as {
+      type: string;
+      availablePacks: { filename: string }[];
+    };
+    expect(after.type).toBe('state');
+    expect(after.availablePacks.map((p) => p.filename)).toEqual(['a.json']);
+    await expect(readFile(join(packsDir, 'b.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    admin.ws.close();
+  });
+
+  // Идущая партия не должна остаться без картинок посреди хода — поэтому
+  // отказ, а не разбор состояния «игра идёт / игра не начата».
+  it('admin-delete-pack отказывает для активного пакета с причиной', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: 'a.json' }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toEqual({
+      type: 'admin-pack-error',
+      filename: 'a.json',
+      reason: 'сначала выберите другой пакет',
+    });
+    await expect(readFile(join(packsDir, 'a.json'))).resolves.toBeTruthy();
+    admin.ws.close();
+  });
+
+  // Файлы репозитория, а не пакеты компании: из них сервер заводит рабочие
+  // копии. В списке паков их нет, так что через интерфейс сюда не попасть —
+  // проверка на случай прямого сообщения.
+  it('admin-delete-pack отказывает для *.example.json', async () => {
+    await writeFile(
+      join(packsDir, 'current.example.json'),
+      JSON.stringify(PACK_A),
+      'utf8',
+    );
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-delete-pack',
+        filename: 'current.example.json',
+      }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toEqual({
+      type: 'admin-pack-error',
+      filename: 'current.example.json',
+      reason: 'пример из репозитория нельзя удалить',
+    });
+    await expect(
+      readFile(join(packsDir, 'current.example.json')),
+    ).resolves.toBeTruthy();
+    admin.ws.close();
+  });
+
+  it('admin-delete-pack с путём наружу — молчаливый no-op', async () => {
+    const admin = await connectAdmin(baseUrl);
+    // Тот же приём, что у соседей: легитимное действие после подозрительного
+    // доказывает, что сокет жив и молчание не было случайностью.
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: '../a.json' }),
+    );
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string };
+    expect(reply.type).toBe('admin-pack');
+    admin.ws.close();
+  });
+
   it('admin-report-question appends a complaint to the profile file and acks', async () => {
     const admin = await connectAdmin(baseUrl);
     admin.ws.send(

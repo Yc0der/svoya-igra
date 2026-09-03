@@ -244,6 +244,9 @@ export type ClientMessage =
       questionType: Question['type'];
     }
   | { type: 'admin-delete-question'; filename: string; questionId: string }
+  // Сносит пакет целиком — json и его папку картинок. Ответа при успехе нет:
+  // виден он как обновлённый список паков в широковещательном состоянии.
+  | { type: 'admin-delete-pack'; filename: string }
   // Жалоба на вопрос — список для беглого просмотра (design.md, 2026-08-15).
   // Контекст вопроса (текст/ответ/тема/цена) сервер достаёт сам по
   // filename+questionId, от клиента нужен только текст жалобы.

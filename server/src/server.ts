@@ -15,6 +15,7 @@ import {
   listAvailablePacks,
   updateQuestion,
   deleteQuestion,
+  deletePack,
   findQuestionLocation,
 } from './packs.js';
 import { loadPack } from './pack.js';
@@ -734,6 +735,13 @@ export function createServer(options: CreateServerOptions): GameServer {
       }
 
       if (
+        message.type === 'admin-delete-pack' &&
+        typeof message.filename === 'string'
+      ) {
+        await handleDeletePack(message.filename);
+      }
+
+      if (
         message.type === 'admin-report-question' &&
         typeof message.filename === 'string' &&
         typeof message.questionId === 'string' &&
@@ -958,6 +966,44 @@ export function createServer(options: CreateServerOptions): GameServer {
             deleteQuestion(packsDir, filename, questionId),
           );
           send(ws, { type: 'admin-pack', filename, pack });
+        } catch (err) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: adminPackErrorReason(err),
+          });
+        }
+      }
+
+      async function handleDeletePack(filename: string): Promise<void> {
+        // Тот же охранник, что у handleDeleteQuestion. Молча, потому что это
+        // не пользовательская ошибка, а попытка обхода пути.
+        if (basename(filename) !== filename) return;
+        // Файлы репозитория, а не пакеты этой компании: из них сервер заводит
+        // рабочие копии (ensureFileFromExample). В listAvailablePacks их и так
+        // нет — проверка на случай прямого сообщения.
+        if (filename.endsWith('.example.json')) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: 'пример из репозитория нельзя удалить',
+          });
+          return;
+        }
+        // Пока пакет выбран, удалять его нельзя: иначе идущая партия может
+        // остаться без картинок посреди хода. Отказ вместо разбора состояния
+        // «игра идёт / игра не начата».
+        if (filename === room.getPackInfo().activeFilename) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: 'сначала выберите другой пакет',
+          });
+          return;
+        }
+        try {
+          await withPackWriteLock(() => deletePack(packsDir, filename));
+          room.refreshAvailablePacks(null, await listAvailablePacks(packsDir));
         } catch (err) {
           send(ws, {
             type: 'admin-pack-error',
