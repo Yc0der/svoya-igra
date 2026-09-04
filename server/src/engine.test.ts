@@ -842,6 +842,91 @@ describe('cancel-question', () => {
     });
     expect(next.phase).toBe('question-open');
   });
+
+  it('closes the question when the requester is the admin panel (requesterId: null)', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const opened = selectFirst(initial).state;
+    const { state: next } = reduce(opened, {
+      type: 'cancel-question',
+      requesterId: null,
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.answeredQuestionIds).toEqual(['a1']);
+    expect(next.scores).toEqual(initial.scores);
+  });
+
+  // Ровно тот случай, ради которого правило и менялось: играли вдвоём,
+  // ведущего никто не назначал, и пропустить вопрос было нечем.
+  it('works from the admin panel even with no host assigned', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2']);
+    const opened = selectFirst(initial).state;
+    expect(opened.hostId).toBeNull();
+    const { state: next } = reduce(opened, {
+      type: 'cancel-question',
+      requesterId: null,
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.answeredQuestionIds).toEqual(['a1']);
+  });
+
+  it('is still a no-op for a player who is not the host', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const opened = selectFirst(initial).state;
+    const { state: next } = reduce(opened, {
+      type: 'cancel-question',
+      requesterId: 'p1',
+    });
+    expect(next).toEqual(opened);
+  });
+
+  it('is a no-op from the admin panel when there is no open question', () => {
+    const state = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const { state: next, effects } = reduce(state, {
+      type: 'cancel-question',
+      requesterId: null,
+    });
+    expect(next).toEqual(state);
+    expect(effects).toEqual([]);
+  });
+
+  // revealQuestion держит currentQuestion заполненным все 4 секунды фазы
+  // reveal (обнуляется только при переходе в selecting), так что охрана
+  // "!state.currentQuestion" её не ловит — вторая отмена того же вопроса
+  // задваивала бы его в answeredQuestionIds и стирала бы уже поставленные
+  // оценки.
+  it('is a no-op in the reveal phase so a second cancel cannot double-record the answered question', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const opened = selectFirst(initial).state;
+    const revealed = reduce(opened, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    }).state;
+    expect(revealed.phase).toBe('reveal');
+    const { state: next, effects } = reduce(revealed, {
+      type: 'cancel-question',
+      requesterId: 'judge',
+    });
+    expect(next).toBe(revealed);
+    expect(next.answeredQuestionIds).toEqual(['a1']);
+    expect(effects).toEqual([]);
+  });
+
+  it('is a no-op in the reveal phase from the admin panel too', () => {
+    const initial = createInitialState(PACK, ['p1', 'p2', 'p3'], 'judge');
+    const opened = selectFirst(initial).state;
+    const revealed = reduce(opened, {
+      type: 'cancel-question',
+      requesterId: null,
+    }).state;
+    expect(revealed.phase).toBe('reveal');
+    const { state: next, effects } = reduce(revealed, {
+      type: 'cancel-question',
+      requesterId: null,
+    });
+    expect(next).toBe(revealed);
+    expect(next.answeredQuestionIds).toEqual(['a1']);
+    expect(effects).toEqual([]);
+  });
 });
 
 describe('a full two-question game, played end to end', () => {

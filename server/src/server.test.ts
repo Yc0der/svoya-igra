@@ -21,6 +21,16 @@ import {
   QUESTION_TIMER_MS,
 } from './engine.js';
 
+// Оборачивает rm в vi.fn поверх настоящей реализации — по умолчанию ведёт
+// себя как обычный fs/promises.rm (все остальные тесты файла его не видят),
+// и только один тест ниже (deletePack: снос медиа-папки падает) подменяет
+// поведение через mockImplementationOnce, чтобы смоделировать EBUSY/EPERM
+// без реальной блокировки файла на диске.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, rm: vi.fn(actual.rm) };
+});
+
 // Attaches a persistent 'message' listener synchronously at socket creation
 // (before any await), so no frame can ever arrive unheard even if the server
 // sends multiple messages immediately on connection and they land in the same
@@ -1084,6 +1094,84 @@ describe('createServer game flow', () => {
 
       a.ws.close();
       b.ws.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('admin-cancel-question closes the open question with no host assigned', async () => {
+    // Фейковые таймеры — только чтобы дожать question-reveal до
+    // question-open, тем же приёмом (shouldAdvanceTime), что и соседний
+    // тест партии выше: сеть при этом остаётся настоящей.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-admin-cancel-'));
+      const room = new Room(undefined, TEST_PACK);
+      const server = createServer({
+        room,
+        clientDistPath: dir,
+        port: 8080,
+        packsDir: dir,
+      });
+      await new Promise<void>((resolve) =>
+        server.httpServer.listen(0, resolve),
+      );
+      const { port } = server.httpServer.address() as AddressInfo;
+      const url = `ws://127.0.0.1:${port}/ws`;
+
+      const a = await joinPlayer(url, 'Ваня');
+      const b = await joinPlayer(url, 'Катя');
+      await a.nextMessage();
+      const admin = await connectAdmin(url);
+
+      a.ws.send(JSON.stringify({ type: 'start-game' }));
+      const started = (await settle(a, b, a)) as {
+        game: {
+          phase: string;
+          turnParticipantId: string;
+          hostId: string | null;
+        };
+      };
+      await admin.nextMessage();
+      // Ведущего никто не назначал — ровно тот случай, ради которого
+      // правило и менялось.
+      expect(started.game.hostId).toBeNull();
+
+      const picker = started.game.turnParticipantId === a.participantId ? a : b;
+      picker.ws.send(
+        JSON.stringify({
+          type: 'select-question',
+          themeIndex: 0,
+          questionId: 'q1',
+        }),
+      );
+      await settle(a, b, picker);
+      await admin.nextMessage();
+      await vi.advanceTimersByTimeAsync(TEXT_REVEAL_MIN_MS);
+      const open = (await settle(a, b, picker)) as { game: { phase: string } };
+      await admin.nextMessage();
+      expect(open.game.phase).toBe('question-open');
+
+      admin.ws.send(JSON.stringify({ type: 'admin-cancel-question' }));
+      const skipped = (await settle(a, b, picker)) as {
+        game: {
+          phase: string;
+          scores: { participantId: string; score: number }[];
+        };
+      };
+      expect(skipped.game.phase).toBe('reveal');
+      expect(skipped.game.scores).toEqual(
+        expect.arrayContaining([
+          { participantId: a.participantId, score: 0 },
+          { participantId: b.participantId, score: 0 },
+        ]),
+      );
+
+      a.ws.close();
+      b.ws.close();
+      admin.ws.close();
       await server.close();
       await rm(dir, { recursive: true, force: true });
     } finally {
@@ -3114,6 +3202,158 @@ describe('createServer pack editor', () => {
     );
     expect(onDisk.rounds[0].themes[0].questions).toHaveLength(1);
     expect(onDisk.rounds[0].themes[0].questions[0].id).toBe('a2');
+    admin.ws.close();
+  });
+
+  it('admin-delete-pack удаляет файл и рассылает обновлённый список всем', async () => {
+    await writeFile(join(packsDir, 'b.json'), JSON.stringify(PACK_A), 'utf8');
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(JSON.stringify({ type: 'admin-refresh-packs' }));
+    const listed = (await admin.nextMessage()) as {
+      availablePacks: { filename: string }[];
+    };
+    expect(listed.availablePacks.map((p) => p.filename)).toEqual(
+      expect.arrayContaining(['a.json', 'b.json']),
+    );
+
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: 'b.json' }),
+    );
+    const after = (await admin.nextMessage()) as {
+      type: string;
+      availablePacks: { filename: string }[];
+    };
+    expect(after.type).toBe('state');
+    expect(after.availablePacks.map((p) => p.filename)).toEqual(['a.json']);
+    await expect(readFile(join(packsDir, 'b.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    admin.ws.close();
+  });
+
+  // Fix 2 (финальное ревью) — deletePack сносит json и медиа-папку двумя
+  // отдельными операциями; на Windows второй rm рядовым образом падает с
+  // EBUSY/EPERM (картинка открыта в просмотрщике, антивирус держит файл).
+  // json к этому моменту уже удалён с диска, и без обновления списка при
+  // ошибке пакет молча зависал бы у всех подключённых.
+  it('admin-delete-pack updates the packs list even when removing the media folder fails', async () => {
+    await writeFile(join(packsDir, 'b.json'), JSON.stringify(PACK_A), 'utf8');
+    await mkdir(join(packsDir, 'media', 'b'), { recursive: true });
+    await writeFile(join(packsDir, 'media', 'b', 'pic.png'), 'png', 'utf8');
+
+    const actualFsPromises =
+      await vi.importActual<typeof import('node:fs/promises')>(
+        'node:fs/promises',
+      );
+    vi.mocked(rm)
+      .mockImplementationOnce((...args: Parameters<typeof rm>) =>
+        actualFsPromises.rm(...args),
+      )
+      .mockImplementationOnce(async () => {
+        throw Object.assign(new Error('EBUSY: resource busy or locked, rm'), {
+          code: 'EBUSY',
+        });
+      });
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: 'b.json' }),
+    );
+    const errorReply = await admin.nextMessage();
+    expect(errorReply).toEqual({
+      type: 'admin-pack-error',
+      filename: 'b.json',
+      reason: 'EBUSY: resource busy or locked, rm',
+    });
+    const afterReply = (await admin.nextMessage()) as {
+      type: string;
+      availablePacks: { filename: string }[];
+    };
+    expect(afterReply.type).toBe('state');
+    expect(afterReply.availablePacks.map((p) => p.filename)).toEqual([
+      'a.json',
+    ]);
+    await expect(readFile(join(packsDir, 'b.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    admin.ws.close();
+  });
+
+  // Идущая партия не должна остаться без картинок посреди хода — поэтому
+  // отказ, а не разбор состояния «игра идёт / игра не начата».
+  it('admin-delete-pack отказывает для активного пакета с причиной', async () => {
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: 'a.json' }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toEqual({
+      type: 'admin-pack-error',
+      filename: 'a.json',
+      reason: 'сначала выберите другой пакет',
+    });
+    await expect(readFile(join(packsDir, 'a.json'))).resolves.toBeTruthy();
+    admin.ws.close();
+  });
+
+  // Файлы репозитория, а не пакеты компании: из них сервер заводит рабочие
+  // копии. В списке паков их нет, так что через интерфейс сюда не попасть —
+  // проверка на случай прямого сообщения.
+  it('admin-delete-pack отказывает для *.example.json', async () => {
+    await writeFile(
+      join(packsDir, 'current.example.json'),
+      JSON.stringify(PACK_A),
+      'utf8',
+    );
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({
+        type: 'admin-delete-pack',
+        filename: 'current.example.json',
+      }),
+    );
+    const reply = await admin.nextMessage();
+    expect(reply).toEqual({
+      type: 'admin-pack-error',
+      filename: 'current.example.json',
+      reason: 'пример из репозитория нельзя удалить',
+    });
+    await expect(
+      readFile(join(packsDir, 'current.example.json')),
+    ).resolves.toBeTruthy();
+    admin.ws.close();
+  });
+
+  it('admin-delete-pack с путём наружу — молчаливый no-op', async () => {
+    const admin = await connectAdmin(baseUrl);
+    // Тот же приём, что у соседей: легитимное действие после подозрительного
+    // доказывает, что сокет жив и молчание не было случайностью.
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: '../a.json' }),
+    );
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string };
+    expect(reply.type).toBe('admin-pack');
+    admin.ws.close();
+  });
+
+  // Fix 5 (финальное ревью) — basename-охрана не пускает выйти из packsDir,
+  // но не проверяет расширение: без отдельной проверки любой файл в корне
+  // packs/ (не только *.json) удалялся бы по прямому сообщению.
+  it('admin-delete-pack с не-json именем — молчаливый no-op', async () => {
+    await writeFile(join(packsDir, 'notes.txt'), 'не пакет', 'utf8');
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: 'notes.txt' }),
+    );
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string };
+    expect(reply.type).toBe('admin-pack');
+    await expect(readFile(join(packsDir, 'notes.txt'))).resolves.toBeTruthy();
     admin.ws.close();
   });
 

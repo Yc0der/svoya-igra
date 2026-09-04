@@ -1,4 +1,4 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, rm } from 'node:fs/promises';
 import { writeFileAtomic } from './atomicWrite.js';
 import { join } from 'node:path';
 import { loadPack, validatePack, type Pack, type Question } from './pack.js';
@@ -172,4 +172,30 @@ export async function deleteQuestion(
   const validated = validatePack(pack);
   await writePackAtomic(path, validated);
   return loadPack(path);
+}
+
+/**
+ * Сносит пакет целиком: json и папку с его картинками.
+ *
+ * Раскладка медиа не угадывается, а выводится из имени файла: URL картинки
+ * комната собирает как `/media/<имя пакета без .json>/<файл>` (room.ts), и
+ * генератор пакетов кладёт файлы туда же. То есть у каждого пакета своя
+ * папка, названная его же именем, и общих картинок между пакетами по
+ * построению не бывает.
+ *
+ * Порядок важен: сначала json, потом медиа. Пакет без картинок хотя бы виден
+ * в списке и чинится руками; картинки без пакета — мусор, который никто не
+ * найдёт.
+ *
+ * Несуществующий json бросает ENOENT, а не заканчивается тихим успехом:
+ * запрос на удаление того, чего нет, — рассинхрон интерфейса, о котором
+ * стоит знать. Отсутствие папки медиа, наоборот, норма — у текстового пакета
+ * её просто нет, отсюда `force: true`.
+ */
+export async function deletePack(dir: string, filename: string): Promise<void> {
+  await rm(join(dir, filename));
+  await rm(join(dir, 'media', filename.replace(/\.json$/, '')), {
+    recursive: true,
+    force: true,
+  });
 }

@@ -15,6 +15,7 @@ import {
   listAvailablePacks,
   updateQuestion,
   deleteQuestion,
+  deletePack,
   findQuestionLocation,
 } from './packs.js';
 import { loadPack } from './pack.js';
@@ -626,6 +627,10 @@ export function createServer(options: CreateServerOptions): GameServer {
         room.skipToFinal();
       }
 
+      if (message.type === 'admin-cancel-question') {
+        room.cancelQuestion(null);
+      }
+
       if (
         message.type === 'admin-set-lan-address' &&
         typeof message.address === 'string'
@@ -727,6 +732,13 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.questionId === 'string'
       ) {
         await handleDeleteQuestion(message.filename, message.questionId);
+      }
+
+      if (
+        message.type === 'admin-delete-pack' &&
+        typeof message.filename === 'string'
+      ) {
+        await handleDeletePack(message.filename);
       }
 
       if (
@@ -960,6 +972,53 @@ export function createServer(options: CreateServerOptions): GameServer {
             filename,
             reason: adminPackErrorReason(err),
           });
+        }
+      }
+
+      async function handleDeletePack(filename: string): Promise<void> {
+        // Тот же охранник, что у handleDeleteQuestion. Молча, потому что это
+        // не пользовательская ошибка, а попытка обхода пути.
+        if (basename(filename) !== filename) return;
+        // basename не защищает от файла другого типа в корне packs/ — только
+        // от выхода за его пределы. Симметрично room.selectPack, который
+        // проверяет членство в *.json. Молча — по той же причине, что и выше.
+        if (!filename.endsWith('.json')) return;
+        // Файлы репозитория, а не пакеты этой компании: из них сервер заводит
+        // рабочие копии (ensureFileFromExample). В listAvailablePacks их и так
+        // нет — проверка на случай прямого сообщения.
+        if (filename.endsWith('.example.json')) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: 'пример из репозитория нельзя удалить',
+          });
+          return;
+        }
+        // Пока пакет выбран, удалять его нельзя: иначе идущая партия может
+        // остаться без картинок посреди хода. Отказ вместо разбора состояния
+        // «игра идёт / игра не начата».
+        if (filename === room.getPackInfo().activeFilename) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: 'сначала выберите другой пакет',
+          });
+          return;
+        }
+        try {
+          await withPackWriteLock(() => deletePack(packsDir, filename));
+        } catch (err) {
+          send(ws, {
+            type: 'admin-pack-error',
+            filename,
+            reason: adminPackErrorReason(err),
+          });
+        } finally {
+          // deletePack сносит json и медиа-папку отдельными операциями:
+          // json уже мог уйти с диска, даже если снос медиа упал следом
+          // (например EBUSY/EPERM на Windows). Список обновляем в любом
+          // случае, иначе пакет молча зависает в списке у всех подключённых.
+          room.refreshAvailablePacks(null, await listAvailablePacks(packsDir));
         }
       }
 

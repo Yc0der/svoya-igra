@@ -149,7 +149,10 @@ export type EngineEvent =
       targetCounterId: string;
       delta: number;
     }
-  | { type: 'cancel-question'; requesterId: string }
+  // requesterId: null — с админ-панели, у которой нет личности отправителя
+  // (room.ts, Admin.tsx). Строка — телефон ведущего; чужой id движок
+  // отсеивает сам, как и у adjust-score.
+  | { type: 'cancel-question'; requesterId: string | null }
   // ВРЕМЕННО — для ручного тестирования финала без прохождения всех
   // раундов пакета. Не часть спеки, убрать вместе с кнопкой в Admin.tsx,
   // когда финал будет проверен вживую. Без requesterId: вызывается только с
@@ -633,15 +636,30 @@ function handleAdjustScore(
 // Закрывает текущий вопрос без начисления очков — тем же путём, что и
 // «никто не нажал за 25 секунд» (revealQuestion(state, null)): вопрос
 // помечается отвеченным, ход остаётся у того же счётчика. Для кривого
-// вопроса из пакета или зависшей по факту партии.
+// вопроса из пакета или зависшей по факту партии. Доступно назначенному
+// ведущему или админ-панели (requesterId === null).
 function handleCancelQuestion(
   state: EngineState,
   event: Extract<EngineEvent, { type: 'cancel-question' }>,
 ): Result {
-  if (state.hostId === null || event.requesterId !== state.hostId) {
-    return unchanged(state);
+  // Либо это админ-панель (requesterId === null — подставляет сервер, клиент
+  // соврать про себя не может), либо назначенный ведущий. Второго события
+  // ради админ-панели не заводим: в движке это была бы дословная копия того
+  // же правила.
+  if (event.requesterId !== null) {
+    if (state.hostId === null || event.requesterId !== state.hostId) {
+      return unchanged(state);
+    }
   }
   if (!state.currentQuestion) {
+    return unchanged(state);
+  }
+  // revealQuestion не обнуляет currentQuestion — оно живёт всю фазу reveal
+  // (обнуляется только при переходе в selecting, см. room.ts). Без этой
+  // проверки вторая отмена того же вопроса во время reveal проходила бы
+  // охрану выше и вызывала revealQuestion повторно: вопрос задваивался бы
+  // в answeredQuestionIds, а уже поставленные оценки стирались бы в room.ts.
+  if (state.phase === 'reveal') {
     return unchanged(state);
   }
   return revealQuestion(state, null);

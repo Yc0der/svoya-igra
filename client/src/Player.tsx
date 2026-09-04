@@ -432,7 +432,7 @@ export function Player() {
         </ul>
         {questionActive && (
           <button className="button" onClick={cancelQuestion}>
-            Отменить вопрос
+            Пропустить вопрос
           </button>
         )}
       </div>

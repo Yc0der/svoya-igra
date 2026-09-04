@@ -110,6 +110,7 @@ type ClientMessage =
   | { type: 'admin-set-host'; participantId: string | null }
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   | { type: 'admin-skip-to-final' }
+  | { type: 'admin-cancel-question' }
   | { type: 'admin-set-lan-address'; address: string }
   // ВРЕМЕННО — см. server/src/protocol.ts.
   | { type: 'admin-set-text-reveal-rate'; wordsPerSecond: number }
@@ -132,6 +133,7 @@ type ClientMessage =
       questionType: Question['type'];
     }
   | { type: 'admin-delete-question'; filename: string; questionId: string }
+  | { type: 'admin-delete-pack'; filename: string }
   | {
       type: 'admin-report-question';
       filename: string;
@@ -178,6 +180,9 @@ export interface AdminConnection {
   setHost(participantId: string | null): void;
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в server/src/engine.ts.
   skipToFinal(): void;
+  // Закрывает активный вопрос без начисления очков — то же, что кнопка на
+  // телефоне ведущего, но с пульта и не требуя назначенного ведущего.
+  cancelQuestion(): void;
   setLanAddress(address: string): void;
   // ВРЕМЕННО — см. server/src/protocol.ts.
   textRevealWordsPerSecond: number;
@@ -228,6 +233,9 @@ export interface AdminConnection {
     },
   ): void;
   deleteQuestion(filename: string, questionId: string): void;
+  // Сносит пакет вместе с его папкой картинок. Ответа при успехе нет —
+  // пакет просто исчезает из availablePacks.
+  deletePack(filename: string): void;
   reportError: string | null;
   reportAckVersion: number;
   clearReportError(): void;
@@ -455,6 +463,7 @@ export function useAdminConnection(
     kick: (participantId) => send({ type: 'admin-kick', participantId }),
     setHost: (participantId) => send({ type: 'admin-set-host', participantId }),
     skipToFinal: () => send({ type: 'admin-skip-to-final' }),
+    cancelQuestion: () => send({ type: 'admin-cancel-question' }),
     setLanAddress: (address) =>
       send({ type: 'admin-set-lan-address', address }),
     textRevealWordsPerSecond,
@@ -495,6 +504,7 @@ export function useAdminConnection(
       }),
     deleteQuestion: (filename, questionId) =>
       send({ type: 'admin-delete-question', filename, questionId }),
+    deletePack: (filename) => send({ type: 'admin-delete-pack', filename }),
     reportError,
     reportAckVersion,
     clearReportError: () => setReportError(null),
