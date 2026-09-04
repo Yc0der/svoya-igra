@@ -67,7 +67,7 @@
 - Отдаёт наружу: вариант `EngineEvent` `{ type: 'cancel-question'; requesterId: string | null }`.
   Задача 2 полагается на то, что `null` проходит проверку, а чужой id — нет.
 
-- [ ] **Шаг 1: написать падающие тесты**
+- [x] **Шаг 1: написать падающие тесты**
 
 Дописать в конец `describe('cancel-question', ...)` в `server/src/engine.test.ts`
 (перед закрывающим `});` блока):
@@ -124,7 +124,7 @@ it('is a no-op from the admin panel when there is no open question', () => {
 посмотреть, как соседний тест `'is a no-op with no host'` (около строки 774) строит
 состояние без ведущего, и повторить его вызов.
 
-- [ ] **Шаг 2: убедиться, что тесты падают**
+- [x] **Шаг 2: убедиться, что тесты падают**
 
 ```bash
 pnpm --filter server test -- -t "cancel-question"
@@ -134,7 +134,7 @@ pnpm --filter server test -- -t "cancel-question"
 `event.requesterId !== state.hostId` даёт `true` для `null`, и событие уходит в
 `unchanged(state)`, то есть фаза остаётся `question-open`, а не `reveal`.
 
-- [ ] **Шаг 3: расширить тип события**
+- [x] **Шаг 3: расширить тип события**
 
 `server/src/engine.ts`, строка 152 — заменить
 
@@ -151,7 +151,7 @@ pnpm --filter server test -- -t "cancel-question"
   | { type: 'cancel-question'; requesterId: string | null }
 ```
 
-- [ ] **Шаг 4: поправить проверку в обработчике**
+- [x] **Шаг 4: поправить проверку в обработчике**
 
 `server/src/engine.ts`, `handleCancelQuestion`:
 
@@ -179,7 +179,7 @@ function handleCancelQuestion(
 Комментарий над функцией («Закрывает текущий вопрос без начисления очков…») оставить,
 дописав к нему строку про то, что доступно это теперь ведущему **или** админ-панели.
 
-- [ ] **Шаг 5: убедиться, что тесты зелёные**
+- [x] **Шаг 5: убедиться, что тесты зелёные**
 
 ```bash
 pnpm --filter server test -- -t "cancel-question"
@@ -187,7 +187,7 @@ pnpm --filter server test -- -t "cancel-question"
 
 Ожидается: PASS, включая четыре старых теста блока.
 
-- [ ] **Шаг 6: коммит**
+- [x] **Шаг 6: коммит**
 
 ```bash
 git add server/src/engine.ts server/src/engine.test.ts
@@ -211,7 +211,7 @@ git commit -m "feat: пропуск вопроса разрешён админ-�
 - Отдаёт наружу: сообщение протокола `{ type: 'admin-cancel-question' }` — задача 3
   посылает именно его; метод `Room.cancelQuestion(requesterId: string | null): void`.
 
-- [ ] **Шаг 1: написать падающий тест**
+- [x] **Шаг 1: написать падающий тест**
 
 Дописать в `server/src/server.test.ts` внутрь `describe('createServer game flow', ...)`,
 рядом с тестом `'plays a question from start-game through a correct answer'`:
@@ -299,7 +299,7 @@ it('admin-cancel-question closes the open question with no host assigned', async
 тесты в этом файле вычитывают очередь админа, и добавить/убрать вычитывание — важна только
 последняя проверка фазы.
 
-- [ ] **Шаг 2: убедиться, что тест падает**
+- [x] **Шаг 2: убедиться, что тест падает**
 
 ```bash
 pnpm --filter server test -- -t "admin-cancel-question"
@@ -308,7 +308,7 @@ pnpm --filter server test -- -t "admin-cancel-question"
 Ожидается: FAIL — сообщение `admin-cancel-question` сервер сейчас не знает, ничего не
 происходит, `settle` виснет на ожидании следующего состояния и тест падает по таймауту.
 
-- [ ] **Шаг 3: расширить `Room.cancelQuestion`**
+- [x] **Шаг 3: расширить `Room.cancelQuestion`**
 
 `server/src/room.ts`, около строки 885:
 
@@ -321,7 +321,7 @@ pnpm --filter server test -- -t "admin-cancel-question"
   }
 ```
 
-- [ ] **Шаг 4: добавить сообщение протокола**
+- [x] **Шаг 4: добавить сообщение протокола**
 
 `server/src/protocol.ts`, сразу под `| { type: 'admin-skip-to-final' }` (строка 196):
 
@@ -331,7 +331,7 @@ pnpm --filter server test -- -t "admin-cancel-question"
   | { type: 'admin-cancel-question' }
 ```
 
-- [ ] **Шаг 5: добавить обработчик**
+- [x] **Шаг 5: добавить обработчик**
 
 `server/src/server.ts`, сразу под обработчиком `admin-skip-to-final` (около строки 627):
 
@@ -341,7 +341,7 @@ if (message.type === 'admin-cancel-question') {
 }
 ```
 
-- [ ] **Шаг 6: убедиться, что тест зелёный**
+- [x] **Шаг 6: убедиться, что тест зелёный**
 
 ```bash
 pnpm --filter server test -- -t "admin-cancel-question"
@@ -349,7 +349,7 @@ pnpm --filter server test -- -t "admin-cancel-question"
 
 Ожидается: PASS.
 
-- [ ] **Шаг 7: прогнать серверную область целиком**
+- [x] **Шаг 7: прогнать серверную область целиком**
 
 ```bash
 pnpm --filter server test
@@ -358,7 +358,7 @@ pnpm --filter server test
 Ожидается: PASS — обработчик игрока `cancel-question` (`server.ts:534`) передаёт
 `participantId` и продолжает работать без изменений.
 
-- [ ] **Шаг 8: коммит**
+- [x] **Шаг 8: коммит**
 
 ```bash
 git add server/src/room.ts server/src/protocol.ts server/src/server.ts server/src/server.test.ts
@@ -382,7 +382,7 @@ git commit -m "feat: сообщение admin-cancel-question для пропу�
 - Потребляет: сообщение `{ type: 'admin-cancel-question' }` из задачи 2.
 - Отдаёт наружу: `AdminConnection.cancelQuestion(): void`.
 
-- [ ] **Шаг 1: написать падающие тесты**
+- [x] **Шаг 1: написать падающие тесты**
 
 В `client/src/Admin.test.tsx` — новый тест рядом с тестами управления партией:
 
@@ -431,7 +431,7 @@ it('кнопка пропуска выключена без активного �
       screen.getByRole('button', { name: 'Пропустить вопрос' }),
 ```
 
-- [ ] **Шаг 2: убедиться, что тесты падают**
+- [x] **Шаг 2: убедиться, что тесты падают**
 
 ```bash
 pnpm --filter client test -- -t "Пропустить вопрос"
@@ -439,7 +439,7 @@ pnpm --filter client test -- -t "Пропустить вопрос"
 
 Ожидается: FAIL — такой кнопки нет ни в `Admin.tsx`, ни (под этим именем) в `Player.tsx`.
 
-- [ ] **Шаг 3: добавить метод в хук**
+- [x] **Шаг 3: добавить метод в хук**
 
 `client/src/useAdminConnection.ts` — в union `ClientMessage`, под `admin-skip-to-final`:
 
@@ -461,7 +461,7 @@ pnpm --filter client test -- -t "Пропустить вопрос"
     cancelQuestion: () => send({ type: 'admin-cancel-question' }),
 ```
 
-- [ ] **Шаг 4: добавить кнопку в `/admin`**
+- [x] **Шаг 4: добавить кнопку в `/admin`**
 
 `client/src/Admin.tsx` — взять `cancelQuestion` из `useAdminConnection()` (там же, где
 берётся `skipToFinal`) и вставить кнопку **перед** временной «Перейти к финалу (тест)», в
@@ -480,13 +480,13 @@ pnpm --filter client test -- -t "Пропустить вопрос"
 Подтверждения нет намеренно: цена ошибки — один вопрос, цена лишнего тапа посреди партии
 выше.
 
-- [ ] **Шаг 5: переименовать кнопку у ведущего**
+- [x] **Шаг 5: переименовать кнопку у ведущего**
 
 `client/src/Player.tsx:435` — заменить `Отменить вопрос` на `Пропустить вопрос`. Место
 кнопки и обработчик не трогать. Смысл правки: «отменить» читается как «вопрос вернётся на
 табло», а механика противоположная — вопрос считается сыгранным и с табло уходит.
 
-- [ ] **Шаг 6: убедиться, что тесты зелёные**
+- [x] **Шаг 6: убедиться, что тесты зелёные**
 
 ```bash
 pnpm --filter client test
@@ -495,7 +495,7 @@ pnpm --filter client test
 Ожидается: PASS. Если где-то ещё остались ожидания подписи «Отменить вопрос» — поправить
 их, это та же переименованная кнопка.
 
-- [ ] **Шаг 7: коммит**
+- [x] **Шаг 7: коммит**
 
 ```bash
 git add client/src/useAdminConnection.ts client/src/Admin.tsx client/src/Player.tsx client/src/Admin.test.tsx client/src/Player.test.tsx
@@ -518,7 +518,7 @@ git commit -m "feat: кнопка «Пропустить вопрос» в /admi
 - Отдаёт наружу: `deletePack(dir: string, filename: string): Promise<void>` — задача 5
   вызывает её под `withPackWriteLock`.
 
-- [ ] **Шаг 1: написать падающие тесты**
+- [x] **Шаг 1: написать падающие тесты**
 
 В `server/src/packs.test.ts` — добавить `deletePack` в список импортов из `./packs.js`,
 `mkdir` и `stat` в импорт из `node:fs/promises`, и новый блок:
@@ -571,7 +571,7 @@ describe('deletePack', () => {
 Имя переменной временной директории (`dir`) взять то же, что у соседних блоков этого файла;
 если оно другое — переиспользовать существующее, новый `beforeEach` не заводить.
 
-- [ ] **Шаг 2: убедиться, что тесты падают**
+- [x] **Шаг 2: убедиться, что тесты падают**
 
 ```bash
 pnpm --filter server test -- -t "deletePack"
@@ -579,7 +579,7 @@ pnpm --filter server test -- -t "deletePack"
 
 Ожидается: FAIL с `deletePack is not a function` (или ошибкой импорта).
 
-- [ ] **Шаг 3: реализовать `deletePack`**
+- [x] **Шаг 3: реализовать `deletePack`**
 
 `server/src/packs.ts` — в импорте заменить
 
@@ -623,7 +623,7 @@ export async function deletePack(dir: string, filename: string): Promise<void> {
 }
 ```
 
-- [ ] **Шаг 4: убедиться, что тесты зелёные**
+- [x] **Шаг 4: убедиться, что тесты зелёные**
 
 ```bash
 pnpm --filter server test -- -t "deletePack"
@@ -631,7 +631,7 @@ pnpm --filter server test -- -t "deletePack"
 
 Ожидается: PASS (4 теста).
 
-- [ ] **Шаг 5: коммит**
+- [x] **Шаг 5: коммит**
 
 ```bash
 git add server/src/packs.ts server/src/packs.test.ts
@@ -659,7 +659,7 @@ git commit -m "feat: deletePack сносит пакет вместе с его �
   `{ type: 'admin-pack-error'; filename; reason }`, успех виден как широковещательный
   `state` с обновлённым `availablePacks`.
 
-- [ ] **Шаг 1: написать падающие тесты**
+- [x] **Шаг 1: написать падающие тесты**
 
 В `server/src/server.test.ts`, в блок про редактор пакетов:
 
@@ -749,7 +749,7 @@ it('admin-delete-pack с путём наружу — молчаливый no-op'
 });
 ```
 
-- [ ] **Шаг 2: убедиться, что тесты падают**
+- [x] **Шаг 2: убедиться, что тесты падают**
 
 ```bash
 pnpm --filter server test -- -t "admin-delete-pack"
@@ -758,7 +758,7 @@ pnpm --filter server test -- -t "admin-delete-pack"
 Ожидается: FAIL — сообщение неизвестно серверу, ответа нет, тесты падают по таймауту
 ожидания следующего сообщения.
 
-- [ ] **Шаг 3: добавить сообщение протокола**
+- [x] **Шаг 3: добавить сообщение протокола**
 
 `server/src/protocol.ts`, под `| { type: 'admin-delete-question'; ... }` (строка 243):
 
@@ -768,7 +768,7 @@ pnpm --filter server test -- -t "admin-delete-pack"
   | { type: 'admin-delete-pack'; filename: string }
 ```
 
-- [ ] **Шаг 4: разобрать сообщение**
+- [x] **Шаг 4: разобрать сообщение**
 
 `server/src/server.ts`, под блоком `admin-delete-question` (около строки 725):
 
@@ -781,7 +781,7 @@ if (
 }
 ```
 
-- [ ] **Шаг 5: написать обработчик**
+- [x] **Шаг 5: написать обработчик**
 
 `server/src/server.ts`, сразу после `handleDeleteQuestion` (около строки 964). Импорт
 `deletePack` добавить к существующему импорту из `./packs.js`:
@@ -826,7 +826,7 @@ async function handleDeletePack(filename: string): Promise<void> {
 }
 ```
 
-- [ ] **Шаг 6: убедиться, что тесты зелёные**
+- [x] **Шаг 6: убедиться, что тесты зелёные**
 
 ```bash
 pnpm --filter server test -- -t "admin-delete-pack"
@@ -834,13 +834,13 @@ pnpm --filter server test -- -t "admin-delete-pack"
 
 Ожидается: PASS (4 теста).
 
-- [ ] **Шаг 7: прогнать серверную область целиком**
+- [x] **Шаг 7: прогнать серверную область целиком**
 
 ```bash
 pnpm --filter server test
 ```
 
-- [ ] **Шаг 8: коммит**
+- [x] **Шаг 8: коммит**
 
 ```bash
 git add server/src/protocol.ts server/src/server.ts server/src/server.test.ts
@@ -864,7 +864,7 @@ git commit -m "feat: admin-delete-pack удаляет пакет, кроме а�
 - Потребляет: сообщение `{ type: 'admin-delete-pack'; filename: string }` из задачи 5.
 - Отдаёт наружу: `AdminConnection.deletePack(filename: string): void`.
 
-- [ ] **Шаг 1: написать падающие тесты**
+- [x] **Шаг 1: написать падающие тесты**
 
 В `client/src/Admin.test.tsx`:
 
@@ -919,7 +919,7 @@ it('у активного пакета кнопка удаления выклю�
 });
 ```
 
-- [ ] **Шаг 2: убедиться, что тесты падают**
+- [x] **Шаг 2: убедиться, что тесты падают**
 
 ```bash
 pnpm --filter client test -- -t "пакет"
@@ -927,7 +927,7 @@ pnpm --filter client test -- -t "пакет"
 
 Ожидается: FAIL — кнопки «Удалить» в строке пакета нет.
 
-- [ ] **Шаг 3: добавить метод в хук**
+- [x] **Шаг 3: добавить метод в хук**
 
 `client/src/useAdminConnection.ts` — в union `ClientMessage`, под `admin-delete-question`:
 
@@ -949,7 +949,7 @@ pnpm --filter client test -- -t "пакет"
     deletePack: (filename) => send({ type: 'admin-delete-pack', filename }),
 ```
 
-- [ ] **Шаг 4: добавить состояние подтверждения в `Admin.tsx`**
+- [x] **Шаг 4: добавить состояние подтверждения в `Admin.tsx`**
 
 Рядом с `const [confirmingDelete, setConfirmingDelete] = useState(false);` (строка 216) —
 отдельное состояние, помнящее **какую** строку подтверждают (у вопроса подтверждение одно
@@ -979,7 +979,7 @@ function handleDeletePack(filename: string): void {
 
 `deletePack` взять из `useAdminConnection()` там же, где берётся `deleteQuestion`.
 
-- [ ] **Шаг 5: добавить кнопку в строку списка**
+- [x] **Шаг 5: добавить кнопку в строку списка**
 
 `client/src/Admin.tsx`, внутри `<ul className="admin-packs">` — дописать вторую кнопку
 после кнопки выбора, не трогая её саму:
@@ -1023,7 +1023,7 @@ function handleDeletePack(filename: string): void {
 Подпись в подтверждающем состоянии говорит про картинки намеренно: удаление медиа
 необратимо, и из слова «удалить» это никак не следует.
 
-- [ ] **Шаг 6: поправить раскладку строки, если она поехала**
+- [x] **Шаг 6: поправить раскладку строки, если она поехала**
 
 Открыть `/admin` (`pnpm dev`) и посмотреть список пакетов. Если две кнопки в `li` встали
 друг под друга или разъехались — добавить в `client/src/index.css` рядом с существующим
@@ -1043,7 +1043,7 @@ function handleDeletePack(filename: string): void {
 
 Если раскладка и так в порядке — шаг пропустить, лишнего CSS не добавлять.
 
-- [ ] **Шаг 7: убедиться, что тесты зелёные**
+- [x] **Шаг 7: убедиться, что тесты зелёные**
 
 ```bash
 pnpm --filter client test
@@ -1051,7 +1051,7 @@ pnpm --filter client test
 
 Ожидается: PASS.
 
-- [ ] **Шаг 8: коммит**
+- [x] **Шаг 8: коммит**
 
 ```bash
 git add client/src/useAdminConnection.ts client/src/Admin.tsx client/src/Admin.test.tsx client/src/index.css
@@ -1064,7 +1064,7 @@ git commit -m "feat: кнопка удаления пакета в списке 
 
 **Файлы:** без правок кода, если проверки зелёные.
 
-- [ ] **Шаг 1: полный прогон**
+- [x] **Шаг 1: полный прогон**
 
 ```bash
 pnpm typecheck && pnpm lint && pnpm test && pnpm build
@@ -1074,7 +1074,7 @@ pnpm typecheck && pnpm lint && pnpm test && pnpm build
 (`superpowers:verification-before-completion`). Упало — чинить причину; три попытки без
 результата — остановиться и рассказать, что происходит.
 
-- [ ] **Шаг 2: ручная проверка обеих механик**
+- [x] **Шаг 2: ручная проверка обеих механик**
 
 Поднять `pnpm dev`, открыть `/admin` и две вкладки игроков. Проверить:
 
@@ -1086,7 +1086,14 @@ pnpm typecheck && pnpm lint && pnpm test && pnpm build
 3. у активного пакета кнопка выключена, и при наведении видна подсказка «Сначала выберите
    другой пакет».
 
-- [ ] **Шаг 3: ревью**
+Проверено 2026-09-04: пункты 2 и 3 — вживую на одноразовом паке (json и `packs/media/<имя>/`
+исчезли с диска, список обновился; `title` висит на обёртке `<span>`, кнопка `disabled`,
+раскладка `li` — flex, кнопка удаления в той же строке). Пункт 1 вживую не проверялся:
+он требует старта новой партии, а это затирает `room-snapshot.json` с сохранённым
+состоянием прошлой игры. Цепочка покрыта ws-тестом в `server.test.ts` для случая без
+назначенного ведущего; остаётся на шаг 5.
+
+- [x] **Шаг 3: ревью**
 
 `superpowers:requesting-code-review`. Отдельно попросить проверить пять инвариантов из
 скилла `svoya-igra-dev` — в этой работе под ударом первый (движок не знает про диск и часы)
