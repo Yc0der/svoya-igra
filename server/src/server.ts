@@ -979,6 +979,10 @@ export function createServer(options: CreateServerOptions): GameServer {
         // Тот же охранник, что у handleDeleteQuestion. Молча, потому что это
         // не пользовательская ошибка, а попытка обхода пути.
         if (basename(filename) !== filename) return;
+        // basename не защищает от файла другого типа в корне packs/ — только
+        // от выхода за его пределы. Симметрично room.selectPack, который
+        // проверяет членство в *.json. Молча — по той же причине, что и выше.
+        if (!filename.endsWith('.json')) return;
         // Файлы репозитория, а не пакеты этой компании: из них сервер заводит
         // рабочие копии (ensureFileFromExample). В listAvailablePacks их и так
         // нет — проверка на случай прямого сообщения.
@@ -1003,13 +1007,18 @@ export function createServer(options: CreateServerOptions): GameServer {
         }
         try {
           await withPackWriteLock(() => deletePack(packsDir, filename));
-          room.refreshAvailablePacks(null, await listAvailablePacks(packsDir));
         } catch (err) {
           send(ws, {
             type: 'admin-pack-error',
             filename,
             reason: adminPackErrorReason(err),
           });
+        } finally {
+          // deletePack сносит json и медиа-папку отдельными операциями:
+          // json уже мог уйти с диска, даже если снос медиа упал следом
+          // (например EBUSY/EPERM на Windows). Список обновляем в любом
+          // случае, иначе пакет молча зависает в списке у всех подключённых.
+          room.refreshAvailablePacks(null, await listAvailablePacks(packsDir));
         }
       }
 

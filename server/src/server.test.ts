@@ -21,6 +21,16 @@ import {
   QUESTION_TIMER_MS,
 } from './engine.js';
 
+// Оборачивает rm в vi.fn поверх настоящей реализации — по умолчанию ведёт
+// себя как обычный fs/promises.rm (все остальные тесты файла его не видят),
+// и только один тест ниже (deletePack: снос медиа-папки падает) подменяет
+// поведение через mockImplementationOnce, чтобы смоделировать EBUSY/EPERM
+// без реальной блокировки файла на диске.
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, rm: vi.fn(actual.rm) };
+});
+
 // Attaches a persistent 'message' listener synchronously at socket creation
 // (before any await), so no frame can ever arrive unheard even if the server
 // sends multiple messages immediately on connection and they land in the same
@@ -3221,6 +3231,54 @@ describe('createServer pack editor', () => {
     admin.ws.close();
   });
 
+  // Fix 2 (финальное ревью) — deletePack сносит json и медиа-папку двумя
+  // отдельными операциями; на Windows второй rm рядовым образом падает с
+  // EBUSY/EPERM (картинка открыта в просмотрщике, антивирус держит файл).
+  // json к этому моменту уже удалён с диска, и без обновления списка при
+  // ошибке пакет молча зависал бы у всех подключённых.
+  it('admin-delete-pack updates the packs list even when removing the media folder fails', async () => {
+    await writeFile(join(packsDir, 'b.json'), JSON.stringify(PACK_A), 'utf8');
+    await mkdir(join(packsDir, 'media', 'b'), { recursive: true });
+    await writeFile(join(packsDir, 'media', 'b', 'pic.png'), 'png', 'utf8');
+
+    const actualFsPromises =
+      await vi.importActual<typeof import('node:fs/promises')>(
+        'node:fs/promises',
+      );
+    vi.mocked(rm)
+      .mockImplementationOnce((...args: Parameters<typeof rm>) =>
+        actualFsPromises.rm(...args),
+      )
+      .mockImplementationOnce(async () => {
+        throw Object.assign(new Error('EBUSY: resource busy or locked, rm'), {
+          code: 'EBUSY',
+        });
+      });
+
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: 'b.json' }),
+    );
+    const errorReply = await admin.nextMessage();
+    expect(errorReply).toEqual({
+      type: 'admin-pack-error',
+      filename: 'b.json',
+      reason: 'EBUSY: resource busy or locked, rm',
+    });
+    const afterReply = (await admin.nextMessage()) as {
+      type: string;
+      availablePacks: { filename: string }[];
+    };
+    expect(afterReply.type).toBe('state');
+    expect(afterReply.availablePacks.map((p) => p.filename)).toEqual([
+      'a.json',
+    ]);
+    await expect(readFile(join(packsDir, 'b.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    admin.ws.close();
+  });
+
   // Идущая партия не должна остаться без картинок посреди хода — поэтому
   // отказ, а не разбор состояния «игра идёт / игра не начата».
   it('admin-delete-pack отказывает для активного пакета с причиной', async () => {
@@ -3278,6 +3336,24 @@ describe('createServer pack editor', () => {
     );
     const reply = (await admin.nextMessage()) as { type: string };
     expect(reply.type).toBe('admin-pack');
+    admin.ws.close();
+  });
+
+  // Fix 5 (финальное ревью) — basename-охрана не пускает выйти из packsDir,
+  // но не проверяет расширение: без отдельной проверки любой файл в корне
+  // packs/ (не только *.json) удалялся бы по прямому сообщению.
+  it('admin-delete-pack с не-json именем — молчаливый no-op', async () => {
+    await writeFile(join(packsDir, 'notes.txt'), 'не пакет', 'utf8');
+    const admin = await connectAdmin(baseUrl);
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-delete-pack', filename: 'notes.txt' }),
+    );
+    admin.ws.send(
+      JSON.stringify({ type: 'admin-get-pack', filename: 'a.json' }),
+    );
+    const reply = (await admin.nextMessage()) as { type: string };
+    expect(reply.type).toBe('admin-pack');
+    await expect(readFile(join(packsDir, 'notes.txt'))).resolves.toBeTruthy();
     admin.ws.close();
   });
 
