@@ -664,6 +664,58 @@ describe('Admin — редактор пакета', () => {
     expect(deletePack).toHaveBeenCalledWith('b.json');
   });
 
+  // Fix 3 (финальное ревью) — editedPackError раньше рендерился только
+  // внутри редактора пакета (editingFilename !== null), а удаляют из ветки
+  // списка: отказ admin-delete-pack приходил и оставался невидимым, пока
+  // админ не откроет тот же пакет в редакторе.
+  it('shows editedPackError above the packs list, not only inside the pack editor', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        activePackFilename: 'a.json',
+        editedPackError: 'пример из репозитория нельзя удалить',
+      }),
+    );
+    render(<Admin />);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /пример из репозитория нельзя удалить/i,
+    );
+  });
+
+  it('удаление пакета сбрасывает старую ошибку до отправки запроса', async () => {
+    const deletePack = vi.fn();
+    const clearPackError = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+          { filename: 'b.json', title: 'Пак Б', description: null },
+        ],
+        activePackFilename: 'a.json',
+        deletePack,
+        clearPackError,
+      }),
+    );
+    render(<Admin />);
+    const row = screen.getByRole('button', { name: /Пак Б/ }).closest('li');
+    const remove = within(row as HTMLElement).getByRole('button', {
+      name: 'Удалить',
+    });
+    await userEvent.click(remove);
+    await userEvent.click(
+      within(row as HTMLElement).getByRole('button', {
+        name: 'Точно? Вместе с картинками',
+      }),
+    );
+    expect(deletePack).toHaveBeenCalledWith('b.json');
+    expect(clearPackError).toHaveBeenCalled();
+    expect(clearPackError.mock.invocationCallOrder[0]).toBeLessThan(
+      deletePack.mock.invocationCallOrder[0],
+    );
+  });
+
   it('у активного пакета кнопка удаления выключена и объясняет, почему', () => {
     mockedUseAdminConnection.mockReturnValue(
       connection({

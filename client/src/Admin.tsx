@@ -348,6 +348,9 @@ export function Admin() {
       setConfirmingDeletePack(filename);
       return;
     }
+    // Иначе отказ от предыдущей попытки удаления так и висел бы над списком
+    // после того, как эта прошла успешно.
+    clearPackError();
     deletePack(filename);
     setConfirmingDeletePack(null);
   }
@@ -951,6 +954,11 @@ export function Admin() {
                 Редактировать
               </button>
             </div>
+            {editedPackError && (
+              <p className="player-alert" role="alert">
+                {editedPackError}
+              </p>
+            )}
             {availablePacks.length === 0 ? (
               <p>
                 Пакеты не найдены — положите файлы в packs/ и нажмите
