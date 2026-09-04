@@ -654,6 +654,14 @@ function handleCancelQuestion(
   if (!state.currentQuestion) {
     return unchanged(state);
   }
+  // revealQuestion не обнуляет currentQuestion — оно живёт всю фазу reveal
+  // (обнуляется только при переходе в selecting, см. room.ts). Без этой
+  // проверки вторая отмена того же вопроса во время reveal проходила бы
+  // охрану выше и вызывала revealQuestion повторно: вопрос задваивался бы
+  // в answeredQuestionIds, а уже поставленные оценки стирались бы в room.ts.
+  if (state.phase === 'reveal') {
+    return unchanged(state);
+  }
   return revealQuestion(state, null);
 }
 
