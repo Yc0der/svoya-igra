@@ -764,6 +764,10 @@ code {
   font-weight: 400;
 }
 
+/* .admin-pack-delete — чистый хук для title (подсказки у выключенной кнопки
+   удаления, см. Admin.tsx) и якорь для тестов. Правил у него сознательно
+   нет: обёртка работает на наследстве от .admin-packs .button. */
+
 .player-people {
   list-style: none;
   margin: 0;
