@@ -487,6 +487,10 @@ export function Player() {
         }
         return (
           <div className="player">
+            {/* Сетка сама по себе не говорит, почему она появилась именно
+                сейчас. Строка отвечает на «что от меня требуется»: на табло
+                это видно («Выбирает …»), на телефоне — не было ничего. */}
+            <p className="player-cue">Твой ход — выбери вопрос</p>
             <div
               className="player-grid"
               style={
@@ -661,7 +665,9 @@ export function Player() {
       // 2026-08-19-gradual-text-reveal-design.md, «Сервер и клиент»).
       case 'question-reveal':
         return (
-          <div className="player player--center">
+          // player--standby: экран «вот-вот» — цвет и пульс видно боковым
+          // зрением, когда глаза на телевизоре, а не на телефоне.
+          <div className="player player--center player--standby">
             <p>Читаем вопрос…</p>
           </div>
         );
@@ -672,7 +678,7 @@ export function Player() {
       // медиа»).
       case 'question-media':
         return (
-          <div className="player player--center">
+          <div className="player player--center player--standby">
             <p>Идёт ролик — смотрите на табло</p>
           </div>
         );
@@ -766,7 +772,7 @@ export function Player() {
       case 'buzzed':
         if (isBuzzedByMe) {
           return (
-            <div className="player player--center">
+            <div className="player player--center player--live">
               <p>Скажи ответ вслух</p>
               <button className="button button--primary" onClick={saidAnswer}>
                 Я ответил
@@ -775,7 +781,7 @@ export function Player() {
           );
         }
         return (
-          <div className="player player--center">
+          <div className="player player--center player--wait">
             <p>{nameOf(game.buzzedParticipantId)} отвечает</p>
           </div>
         );
