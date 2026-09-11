@@ -1,14 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { writeFileAtomic } from './atomicWrite.js';
+import type { AudioSettings } from './protocol.js';
 
-// ВРЕМЕННО в этом файле: в задаче 3 тип переезжает в protocol.ts (он часть
-// формата сообщения state), здесь останется `import type` и реэкспорт.
-export interface AudioSettings {
-  effectsEnabled: boolean;
-  effectsVolume: number;
-  musicEnabled: boolean;
-  musicVolume: number;
-}
+export type { AudioSettings };
 
 export const DEFAULT_AUDIO_SETTINGS: AudioSettings = {
   effectsEnabled: true,

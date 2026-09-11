@@ -1,21 +1,6 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-
-// ВРЕМЕННО в этом файле: в задаче 3 оба типа переезжают в protocol.ts (они
-// часть формата сообщения state), а здесь останется `import type`.
-export type GameCue =
-  | 'question-opened'
-  | 'buzzed'
-  | 'answer-correct'
-  | 'answer-wrong'
-  | 'question-timeout'
-  | 'round-ended'
-  | 'game-ended';
-
-export interface AudioAssets {
-  cues: { cue: GameCue; url: string }[];
-  music: string[];
-}
+import type { AudioAssets, GameCue } from './protocol.js';
 
 const AUDIO_EXTENSIONS = ['.mp3', '.ogg', '.wav', '.m4a'];
 

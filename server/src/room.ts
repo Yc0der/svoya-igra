@@ -26,9 +26,10 @@ import {
   type TimerName,
 } from './engine.js';
 import type { Pack } from './pack.js';
-import type { GameStateView } from './protocol.js';
+import type { AudioSettings, GameCue, GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
+import { DEFAULT_AUDIO_SETTINGS, mergeAudioSettings } from './audioSettings.js';
 import type {
   HistoryRecorder,
   PersonSummary,
@@ -350,6 +351,12 @@ export class Room {
   // UI в админке, как только число зафиксируется в спеке.
   private textRevealFadeMs = 270;
   private textRevealFadeListeners = new Set<(fadeMs: number) => void>();
+  // Не часть RoomState и не пишется в снапшот: это настройка машины, а не
+  // состояние партии — переживает перезапуск через audio-settings.local.json
+  // (index.ts), ровно как выбранный LAN-адрес.
+  private audio: AudioSettings = { ...DEFAULT_AUDIO_SETTINGS };
+  private audioSettingsListeners = new Set<(settings: AudioSettings) => void>();
+  private audioCueListeners = new Set<(cue: GameCue) => void>();
   // Настоящая длительность показа текущего вопроса — то самое число, которое
   // applyEffects только что подставило в таймер (Step 3 ниже). Не null,
   // только пока идёт question-reveal; отдаётся в toGameStateView, чтобы
@@ -1105,6 +1112,42 @@ export class Room {
     }
   }
 
+  getAudioSettings(): AudioSettings {
+    return { ...this.audio };
+  }
+
+  // Без проверки отправителя, тем же паттерном, что setLanAddress: это пульт
+  // комнаты, им пользуются и /admin, и /board (design.md, «Настройки»).
+  setAudioSettings(patch: Partial<AudioSettings>): void {
+    this.audio = mergeAudioSettings(this.audio, patch);
+    for (const listener of this.audioSettingsListeners) {
+      listener(this.getAudioSettings());
+    }
+  }
+
+  onAudioSettingsChange(
+    listener: (settings: AudioSettings) => void,
+  ): () => void {
+    this.audioSettingsListeners.add(listener);
+    return () => this.audioSettingsListeners.delete(listener);
+  }
+
+  // Подписка на разовые сигналы партии. Наполняется в задаче 4 — заводится
+  // здесь вместе с остальной проводкой звука, чтобы сервер мог подписаться
+  // раньше, чем появятся сами сигналы.
+  onAudioCue(listener: (cue: GameCue) => void): () => void {
+    this.audioCueListeners.add(listener);
+    return () => this.audioCueListeners.delete(listener);
+  }
+
+  private emitAudioCues(cues: GameCue[]): void {
+    for (const cue of cues) {
+      for (const listener of this.audioCueListeners) {
+        listener(cue);
+      }
+    }
+  }
+
   getHistoryEnabled(): boolean {
     return this.historyEnabled;
   }
@@ -1609,6 +1652,10 @@ export class Room {
     ) {
       this.history.finishGame(this.historyGameId, state.scores);
     }
+    // Пустой список — сопоставление phaseBefore/state.phase с GameCue ещё не
+    // написано (задача 4). Вызов уже здесь, чтобы задаче 4 нужно было только
+    // собрать cues, а не искать, откуда их слать.
+    this.emitAudioCues([]);
     this.notify();
   }
 

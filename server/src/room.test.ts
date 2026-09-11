@@ -3848,3 +3848,46 @@ describe('Room: оценки вопросов', () => {
     ]);
   });
 });
+
+describe('Room: настройки звука', () => {
+  it('по умолчанию звуки и музыка включены', () => {
+    expect(new Room().getAudioSettings()).toEqual({
+      effectsEnabled: true,
+      effectsVolume: 0.7,
+      musicEnabled: true,
+      musicVolume: 0.35,
+    });
+  });
+
+  it('частичное обновление меняет только своё поле', () => {
+    const room = new Room();
+    room.setAudioSettings({ musicVolume: 0.1 });
+    room.setAudioSettings({ effectsEnabled: false });
+    expect(room.getAudioSettings()).toEqual({
+      effectsEnabled: false,
+      effectsVolume: 0.7,
+      musicEnabled: true,
+      musicVolume: 0.1,
+    });
+  });
+
+  it('зовёт подписчиков на каждое изменение и отписывает', () => {
+    const room = new Room();
+    const listener = vi.fn();
+    const unsubscribe = room.onAudioSettingsChange(listener);
+    room.setAudioSettings({ musicEnabled: false });
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({ musicEnabled: false }),
+    );
+    unsubscribe();
+    room.setAudioSettings({ musicEnabled: true });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it('отдаёт копию, а не своё внутреннее состояние', () => {
+    const room = new Room();
+    const settings = room.getAudioSettings();
+    settings.musicVolume = 0.99;
+    expect(room.getAudioSettings().musicVolume).toBe(0.35);
+  });
+});
