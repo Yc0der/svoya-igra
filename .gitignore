@@ -90,3 +90,9 @@ packs/*.json.tmp
 !packs/*.example.json
 packs/media/*
 !packs/media/photo-test/
+
+# Звуки игры: чужие лицензии и личный подбор под компанию, не содержимое
+# репозитория (docs/superpowers/specs/2026-09-11-game-audio-design.md).
+# В гите остаётся только README со списком имён.
+audio/*
+!audio/README.md
