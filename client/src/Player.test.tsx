@@ -332,6 +332,35 @@ describe('Player', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('показывает про уже известного человека отдельно от занятого имени', async () => {
+    // Имя человека — ник (design.md, 2026-08-26-player-identity). Текст обязан
+    // отличаться от «имя занято»: там надо взять другое имя, здесь первым
+    // делом стоит поискать себя в списке.
+    const people = [{ id: 7, name: 'Ваня', games: 5 }];
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'connecting', people }),
+    );
+
+    const user = userEvent.setup();
+    const { rerender } = render(<Player />);
+
+    await user.click(screen.getByRole('button', { name: 'Меня тут нет' }));
+    await user.type(screen.getByLabelText('Имя'), 'Ваня');
+    await user.click(screen.getByRole('button', { name: 'Войти' }));
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'joining', people }),
+    );
+    rerender(<Player />);
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ status: 'person-exists', people }),
+    );
+    rerender(<Player />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Такое имя уже есть в списке — выбери себя там или возьми другую форму имени',
+    );
+  });
+
   it('does not re-show a stale name-taken alert after navigating back to the list and to the form again', async () => {
     // Симметричный дефект: неудачная попытка из формы → «Назад к списку» →
     // «Меня тут нет» — старая тревога о занятом имени не должна всплывать
@@ -860,7 +889,7 @@ describe('Player', () => {
     render(<Player />);
     await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
-      screen.getByRole('button', { name: 'Отменить вопрос' }),
+      screen.getByRole('button', { name: 'Пропустить вопрос' }),
     ).toBeInTheDocument();
   });
 
@@ -1344,7 +1373,7 @@ describe('Player', () => {
     const { rerender } = render(<Player />);
     await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
-      screen.queryByRole('button', { name: /отменить вопрос/i }),
+      screen.queryByRole('button', { name: /пропустить вопрос/i }),
     ).not.toBeInTheDocument();
 
     mockedUseRoomConnection.mockReturnValue(
@@ -1358,7 +1387,7 @@ describe('Player', () => {
     );
     rerender(<Player />);
     await userEvent.click(
-      screen.getByRole('button', { name: /отменить вопрос/i }),
+      screen.getByRole('button', { name: /пропустить вопрос/i }),
     );
     expect(cancelQuestion).toHaveBeenCalledOnce();
   });
@@ -2016,7 +2045,7 @@ describe('Player', () => {
     render(<Player />);
     await userEvent.click(screen.getByRole('button', { name: 'Продолжить' }));
     expect(
-      screen.getByRole('button', { name: 'Отменить вопрос' }),
+      screen.getByRole('button', { name: 'Пропустить вопрос' }),
     ).toBeInTheDocument();
   });
 });

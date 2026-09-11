@@ -66,6 +66,7 @@ export function Admin() {
     kick,
     setHost,
     skipToFinal,
+    cancelQuestion,
     setLanAddress,
     textRevealWordsPerSecond,
     setTextRevealWordsPerSecond,
@@ -90,6 +91,7 @@ export function Admin() {
     getPack,
     updateQuestion,
     deleteQuestion,
+    deletePack,
     reportError,
     reportAckVersion,
     clearReportError,
@@ -214,6 +216,12 @@ export function Admin() {
   const [formComment, setFormComment] = useState('');
   const [formType, setFormType] = useState<Question['type']>('обычный');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Какой именно пакет ждёт подтверждения удаления. Не boolean, как
+  // confirmingDelete у вопроса: строк в списке много, и «Точно?» должно
+  // гореть ровно на нажатой.
+  const [confirmingDeletePack, setConfirmingDeletePack] = useState<
+    string | null
+  >(null);
   // Вид редактора: 'list' по умолчанию — беглый просмотр запрошен как
   // основной сценарий входа (design.md, 2026-08-15).
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
@@ -333,6 +341,18 @@ export function Admin() {
       deleteQuestion(editingFilename, editingQuestionId);
     }
     setConfirmingDelete(false);
+  }
+
+  function handleDeletePack(filename: string): void {
+    if (confirmingDeletePack !== filename) {
+      setConfirmingDeletePack(filename);
+      return;
+    }
+    // Иначе отказ от предыдущей попытки удаления так и висел бы над списком
+    // после того, как эта прошла успешно.
+    clearPackError();
+    deletePack(filename);
+    setConfirmingDeletePack(null);
   }
 
   // Закрывает форму без сохранения — поля формы (formPrice/formText/...)
@@ -934,6 +954,11 @@ export function Admin() {
                 Редактировать
               </button>
             </div>
+            {editedPackError && (
+              <p className="player-alert" role="alert">
+                {editedPackError}
+              </p>
+            )}
             {availablePacks.length === 0 ? (
               <p>
                 Пакеты не найдены — положите файлы в packs/ и нажмите
@@ -957,6 +982,31 @@ export function Admin() {
                           </span>
                         )}
                       </button>
+                      {/* title на обёртке, а не на самой кнопке: выключенный
+                          элемент не получает mouse-событий, и подсказка на нём
+                          не всплывает — блокировка осталась бы беззвучной,
+                          ровно того случая мы и избегаем. */}
+                      <span
+                        className="admin-pack-delete"
+                        title={
+                          selected ? 'Сначала выберите другой пакет' : undefined
+                        }
+                      >
+                        <button
+                          className={`button button--no${
+                            confirmingDeletePack === p.filename
+                              ? ' is-selected'
+                              : ''
+                          }`}
+                          onClick={() => handleDeletePack(p.filename)}
+                          onBlur={() => setConfirmingDeletePack(null)}
+                          disabled={selected}
+                        >
+                          {confirmingDeletePack === p.filename
+                            ? 'Точно? Вместе с картинками'
+                            : 'Удалить'}
+                        </button>
+                      </span>
                     </li>
                   );
                 })}
@@ -1197,6 +1247,13 @@ export function Admin() {
           </button>
           <button className="button" onClick={resetGame} disabled={!game}>
             Завершить партию (в лобби)
+          </button>
+          <button
+            className="button"
+            onClick={cancelQuestion}
+            disabled={!game || game.currentQuestion === null}
+          >
+            Пропустить вопрос
           </button>
           {/* ВРЕМЕННО, для ручного тестирования финала — см. комментарий у
               EngineEvent.skip-to-final в server/src/engine.ts. Убрать вместе

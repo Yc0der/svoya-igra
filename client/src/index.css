@@ -1,96 +1,167 @@
+/* Оформление «Своей игры» (2026-09-11).
+
+   Три поверхности, три расстояния до глаза, одна палитра:
+
+   - табло (/board) — телевизор в трёх метрах, комната приглушена;
+   - телефон игрока (/) — 40 см, но смотрят на него боковым зрением: глаза
+     на телевизоре. Поэтому состояние игры на телефоне читается цветом всего
+     экрана, а не текстом;
+   - админка (/admin) — ноутбук вплотную, служебный экран. Те же токены, но
+     без свечения и крупностей: закулисье не должно спорить со сценой.
+
+   Подпись оформления — гаснущее табло. Цена вопроса не текст, а ячейка,
+   подсвеченная изнутри; сыгранный вопрос не сереет, а гаснет. За раунд табло
+   физически темнеет, и с трёх метров одним взглядом видно, сколько ещё
+   осталось. Два акцента и ни одного лишнего: янтарь — деньги (цены, счёт),
+   розовый — «сейчас» (нажатая кнопка, истекающий таймер). Всё остальное —
+   монохром по чернильно-фиолетовому.
+
+   Светлой темы нет сознательно. Белый экран в тёмной комнате бьёт по глазам
+   всем, кто сидит напротив телевизора, а один выдержанный облик сильнее двух
+   посредственных. */
+
+/* Шрифты лежат в репозитории, а не грузятся с Google Fonts: игра работает по
+   локальной сети и обязана открываться без интернета (docs — «Пак с
+   видео-вопросами требует интернета»: это единственное исключение, и
+   расширять его на типографику нельзя). Оба файла — вариативные, один файл
+   покрывает весь диапазон насыщенностей. Сабсеты только cyrillic и latin. */
+@font-face {
+  font-family: 'Unbounded';
+  src: url('./assets/fonts/unbounded-cyrillic.woff2') format('woff2');
+  font-weight: 200 900;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Unbounded';
+  src: url('./assets/fonts/unbounded-latin.woff2') format('woff2');
+  font-weight: 200 900;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+@font-face {
+  font-family: 'Golos Text';
+  src: url('./assets/fonts/golos-text-cyrillic.woff2') format('woff2');
+  font-weight: 400 900;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: 'Golos Text';
+  src: url('./assets/fonts/golos-text-latin.woff2') format('woff2');
+  font-weight: 400 900;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF,
+    U+FFFD;
+}
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* Чернила: фон комнаты, панель, приподнятая панель, край. */
+  --ink-0: #08060f;
+  --ink-1: #100c1e;
+  --ink-2: #191231;
+  --ink-3: #241a45;
+  --line: rgba(167, 141, 255, 0.16);
+  --line-strong: rgba(167, 141, 255, 0.32);
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Янтарь — деньги: цены, счёт, ставки. Больше он не значит ничего. */
+  --lamp: #ffc24b;
+  --lamp-deep: #b87f1c;
+  --lamp-glow: rgba(255, 194, 75, 0.45);
+  --lamp-wash: rgba(255, 194, 75, 0.09);
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
+  /* Розовый — «сейчас»: нажатая кнопка, истекающий таймер, чей ход. */
+  --live: #ff3e6c;
+  --live-glow: rgba(255, 62, 108, 0.42);
+  --live-wash: rgba(255, 62, 108, 0.12);
+
+  /* Вердикт — единственная пара, где цвет означает «да» и «нет». */
+  --yes: #2fd18b;
+  --no: #ff5a5a;
+
+  --fg: #f4f0ff;
+  --fg-mut: #a89dcc;
+  --fg-dim: #6d648f;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+
+  --sans: 'Golos Text', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --display: 'Unbounded', 'Golos Text', system-ui, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+
+  font: 400 17px/1.5 var(--sans);
+  color-scheme: dark;
+  color: var(--fg-mut);
+  background: var(--ink-0);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
+body {
+  margin: 0;
+  background: var(--ink-0);
+  /* Свет сверху по центру — «прожектор над столом». Единственное украшение
+     фона; никаких текстур и рамок. */
+  background-image:
+    radial-gradient(
+      120% 80% at 50% -10%,
+      rgba(120, 80, 220, 0.22),
+      transparent 60%
+    ),
+    radial-gradient(
+      90% 60% at 50% 110%,
+      rgba(255, 62, 108, 0.07),
+      transparent 60%
+    );
+  background-attachment: fixed;
+  min-height: 100svh;
 }
 
 #root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
+*:focus-visible {
+  outline: 3px solid var(--lamp);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
+h2,
+h3 {
+  color: var(--fg);
+  margin: 0;
 }
 
 h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(30px, 3.4vw, 60px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
   margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
 }
+
+h2 {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: clamp(19px, 1.6vw, 26px);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
 p {
   margin: 0;
 }
@@ -99,51 +170,238 @@ code,
 .counter {
   font-family: var(--mono);
   display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+  border-radius: 6px;
+  color: var(--fg);
 }
 
 code {
-  font-size: 15px;
-  line-height: 135%;
+  font-size: 14px;
+  line-height: 1.4;
   padding: 4px 8px;
-  background: var(--code-bg);
+  background: var(--ink-2);
+  border: 1px solid var(--line);
 }
 
-/* Табло и игрок — базовая раскладка (2026-08-05, вне обычного порядка вех,
-   см. lifecycle.md п.7: сделано наспех перед живой проверкой, а не по
-   полноценному design-циклу). */
+/* ───────────────────────── Кнопки и поля ───────────────────────── */
 
-.board,
-.player {
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+.button {
+  font-family: var(--sans);
+  font-size: 18px;
+  font-weight: 600;
+  padding: 14px 26px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: linear-gradient(180deg, var(--ink-3), var(--ink-2));
+  color: var(--fg);
+  min-height: 52px;
+  cursor: pointer;
+  transition:
+    transform 0.09s ease,
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+@media (hover: hover) {
+  .button:hover:not(:disabled) {
+    border-color: var(--lamp-deep);
+  }
+
+  .button--primary:hover:not(:disabled) {
+    border-color: #fff;
+  }
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* Главное действие экрана — янтарное и заполненное. На экране их не больше
+   одного: если янтарных кнопок две, ни одна не читается как главная. */
+.button--primary {
+  background: linear-gradient(180deg, #ffd071, var(--lamp));
+  border-color: #ffdd97;
+  color: #2a1a00;
+  box-shadow: 0 10px 30px -12px var(--lamp-glow);
+}
+
+/* Необратимое действие — удаление человека вместе с историей. Единственная
+   кнопка в панели, которая стирает данные живого человека, и выглядеть как
+   соседние «Обновить» и «Редактировать» она не должна. */
+.button--danger {
+  background: linear-gradient(180deg, #c04836, #97301f);
+  border-color: #d2604d;
+  color: #fff;
+}
+
+.button--yes {
+  background: linear-gradient(180deg, #33e09a, #17a76a);
+  border-color: #5cf0b6;
+  color: #062418;
+}
+
+.button--no {
+  background: linear-gradient(180deg, #ff7070, #d63b3b);
+  border-color: #ff9a9a;
+  color: #2d0606;
+}
+
+.button.is-selected {
+  outline: 3px solid var(--fg);
+  outline-offset: 3px;
+}
+
+.button.is-selected:disabled {
+  opacity: 0.75;
+}
+
+input,
+textarea,
+select {
+  font-size: 17px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--ink-1);
+  color: var(--fg);
+  min-height: 46px;
+  box-sizing: border-box;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  min-height: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--lamp);
+  flex: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--fg-dim);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--lamp-deep);
+}
+
+/* ───────────────────────── Табло (телевизор) ───────────────────────── */
+
+.board {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
-  padding: 24px 16px 48px;
-  box-sizing: border-box;
-}
-
-.player--center {
-  flex: 1;
   justify-content: center;
-  gap: 16px;
+  gap: clamp(14px, 2.2vh, 34px);
+  /* Снизу — место под всегда висящую полосу счёта (.board .scoreboard). */
+  padding: clamp(24px, 3.5vh, 56px) clamp(20px, 3vw, 64px)
+    clamp(76px, 8.5vh, 110px);
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
 }
 
+.board--lobby {
+  gap: clamp(20px, 3vh, 44px);
+  padding-bottom: clamp(32px, 5vh, 64px);
+}
+
+.board--lobby h1 {
+  font-size: clamp(42px, 6.5vw, 116px);
+  letter-spacing: -0.035em;
+  background: linear-gradient(170deg, #fff 10%, var(--lamp) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* QR должен сканироваться, а значит остаётся светлым островом на тёмном
+   фоне — это функция, а не отступление от палитры. */
 .board-qr {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 16px;
+}
+
+.board-qr svg {
+  background: #fff;
+  padding: 14px;
+  border-radius: 16px;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.9);
+  width: clamp(200px, 20vw, 300px);
+  height: auto;
+}
+
+.board-qr-hint {
+  font-size: clamp(17px, 1.5vw, 28px);
+  color: var(--fg-mut);
 }
 
 .board-qr-url {
-  font-family: var(--mono);
-  font-size: 20px;
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(20px, 1.8vw, 32px);
+  color: var(--lamp);
+  letter-spacing: 0.01em;
 }
 
-.board-participants,
+.board-participants {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px 14px;
+  font-size: clamp(18px, 1.5vw, 26px);
+}
+
+.board-participants li {
+  padding: 10px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--ink-1);
+  color: var(--fg);
+}
+
+.board-participants .is-disconnected {
+  opacity: 0.4;
+}
+
+/* Полоса счёта прибита к низу телевизора: одно и то же место весь вечер,
+   чтобы счёт находили взглядом, а не искали. */
+.board .scoreboard {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: clamp(10px, 1.4vh, 20px) clamp(16px, 3vw, 48px);
+  background: linear-gradient(0deg, var(--ink-0) 55%, transparent);
+  border-top: 1px solid var(--line);
+  gap: clamp(16px, 3vw, 56px);
+  z-index: 2;
+}
+
 .scoreboard {
   list-style: none;
   padding: 0;
@@ -151,49 +409,87 @@ code {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 16px 32px;
-  font-size: 24px;
-}
-
-.board-participants .is-disconnected {
-  opacity: 0.5;
-}
-
-.scoreboard {
-  font-size: 32px;
-  font-weight: 600;
+  align-items: baseline;
+  gap: 12px 28px;
 }
 
 .scoreboard li {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   align-items: baseline;
 }
 
 .scoreboard-name {
-  color: var(--text-h);
+  color: var(--fg);
+  font-weight: 600;
+  font-size: clamp(17px, 1.5vw, 28px);
 }
 
 .scoreboard-value {
-  color: var(--accent);
-  font-family: var(--mono);
+  color: var(--lamp);
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(20px, 1.9vw, 36px);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 24px var(--lamp-glow);
 }
 
 .board-status {
-  font-size: 32px;
+  font-size: clamp(20px, 1.9vw, 34px);
+  color: var(--fg-mut);
+  margin-bottom: clamp(4px, 1vh, 14px);
 }
 
+.board-status strong {
+  color: var(--fg);
+  font-weight: 700;
+}
+
+/* Кто-то нажал — это единственный момент, когда табло кричит. */
 .board-status--buzzed {
-  color: var(--accent);
-  font-weight: 600;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(28px, 3.4vw, 64px);
+  color: var(--live);
+  text-shadow: 0 0 44px var(--live-glow);
+  padding: 14px 40px;
+  border-radius: 999px;
+  border: 2px solid var(--live);
+  background: var(--live-wash);
+  animation: live-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  50% {
+    box-shadow: 0 0 0 14px rgba(255, 62, 108, 0);
+  }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--live-wash);
+  }
+}
+
+/* Тема и цена над вопросом — тише самого вопроса, но янтарные: это про
+   деньги на кону. */
+.board-eyebrow {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(14px, 1.15vw, 24px);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lamp);
+  opacity: 0.85;
 }
 
 .board-question {
-  font-size: 48px;
+  font-family: var(--sans);
+  font-size: clamp(28px, 3.9vw, 76px);
   font-weight: 600;
-  color: var(--text-h);
-  max-width: 900px;
-  line-height: 130%;
+  color: var(--fg);
+  max-width: 22ch;
+  line-height: 1.18;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
 }
 
 /* Постепенный показ текста вопроса (useTextReveal.tsx): слово — неразрывный
@@ -221,10 +517,12 @@ code {
 }
 
 .board-question-image {
-  max-width: min(95vw, 1100px);
-  max-height: 65vh;
+  max-width: min(92vw, 1200px);
+  max-height: 58vh;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  box-shadow: 0 30px 80px -30px #000;
 }
 
 .board-video,
@@ -240,11 +538,12 @@ code {
 }
 
 .board-video iframe {
-  max-width: min(95vw, 960px);
+  max-width: min(92vw, 1100px);
   width: 100%;
   aspect-ratio: 16 / 9;
-  border-radius: 8px;
+  border-radius: var(--radius);
   border: none;
+  box-shadow: 0 30px 80px -30px #000;
   /* Ни контролов, ни клика, уводящего на YouTube — pointer-events:none. Плата
      — пауза и перемотка руками недоступны, но клип короткий и играет один
      раз (design.md, «Сервер и клиент»). Полоса, закрывавшая верхнюю зону от
@@ -256,10 +555,10 @@ code {
 }
 
 .board-video-audio-placeholder {
-  max-width: min(95vw, 500px);
+  max-width: min(92vw, 560px);
   max-height: 40vh;
   object-fit: contain;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 /* Не display: none — некоторые браузеры приостанавливают медиа в полностью
@@ -275,16 +574,43 @@ code {
 }
 
 .board-video-error {
-  font-size: 28px;
-  color: var(--text);
+  font-size: clamp(20px, 1.8vw, 30px);
+  color: var(--live);
 }
 
+/* Ответ — янтарная карточка: тот же цвет, что у цены, потому что это то же
+   самое, за что платят очками. */
 .board-answer {
-  font-size: 32px;
-  color: var(--text-h);
+  font-size: clamp(24px, 2.6vw, 48px);
+  color: var(--lamp);
+  font-weight: 600;
+  max-width: 26ch;
+  padding: clamp(16px, 2vh, 30px) clamp(24px, 3vw, 56px);
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 194, 75, 0.35);
+  background: var(--lamp-wash);
+  box-shadow: 0 0 90px -30px var(--lamp-glow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-/* Сетка тем: строка на тему, слева название, справа по возрастанию цены.
+/* Комментарий к ответу — не второй ответ, поэтому тише и меньше. */
+.board-answer p + p {
+  font-size: 0.55em;
+  font-weight: 400;
+  color: var(--fg-mut);
+  line-height: 1.4;
+}
+
+.board-tags {
+  font-size: 0.5em;
+  opacity: 0.85;
+}
+
+/* ─────────────── Сетка тем: гаснущее табло ───────────────
+
+   Строка на тему, слева название, справа по возрастанию цены.
    grid-auto-flow: row раскладывает элементы по DOM-порядку — тема и её
    вопросы идут подряд, поэтому каждая группа (Fragment из Board.tsx/
    Player.tsx) сама заполняет одну строку, обёртка не нужна как отдельный
@@ -298,257 +624,530 @@ code {
 .player-grid {
   display: grid;
   grid-auto-flow: row;
-  grid-template-columns: minmax(140px, auto) repeat(
+  grid-template-columns: minmax(130px, 0.7fr) repeat(
       var(--price-columns, 4),
       1fr
     );
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  max-width: 1000px;
+}
+
+.board-grid {
+  max-width: 1700px;
+  max-height: 76vh;
+  gap: clamp(8px, 0.9vh, 16px);
+  /* Табло — это весь экран, а не блок посередине: сетка забирает всю
+     свободную высоту, ряды делят её поровну. */
+  flex: 1 1 auto;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.player-grid {
+  max-width: 700px;
 }
 
 .board-grid .theme-name,
 .player-grid .theme-name {
-  font-size: 24px;
-  text-align: left;
+  font-family: var(--sans);
+  font-weight: 700;
+  /* Выключка вправо, а не влево: название должно стоять вплотную к своему
+     ряду ламп, иначе длинные и короткие темы висят каждая сама по себе. */
+  text-align: right;
+  justify-content: flex-end;
   margin: 0;
   display: flex;
   align-items: center;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #cdc4ec;
+  padding-right: 16px;
+  border-right: 1px solid var(--line);
+  line-height: 1.15;
+}
+
+.board-grid .theme-name {
+  font-size: clamp(14px, 1.45vw, 30px);
+}
+
+.player-grid .theme-name {
+  font-size: 13px;
+}
+
+/* Ячейка-лампа. Табло (.price-cell) и телефон (.price-button) — одна и та же
+   вещь, поэтому свет у них общий, а различается только реакция на палец. */
+.price-cell,
+.price-button {
+  font-family: var(--display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--lamp);
+  background:
+    radial-gradient(
+      120% 140% at 50% -30%,
+      rgba(255, 194, 75, 0.16),
+      transparent 70%
+    ),
+    linear-gradient(180deg, var(--ink-3), var(--ink-1));
+  border: 1px solid rgba(255, 194, 75, 0.22);
+  border-radius: var(--radius-sm);
+  text-shadow: 0 0 26px var(--lamp-glow);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 10px 26px -16px #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Гашение — не мгновенное: за полсекунды видно, какая именно лампа
+     погасла, и это читается с трёх метров. */
+  transition:
+    background 0.45s ease,
+    box-shadow 0.45s ease,
+    border-color 0.45s ease,
+    color 0.45s ease,
+    text-shadow 0.45s ease,
+    transform 0.09s ease;
 }
 
 .price-cell {
-  font-size: 44px;
-  font-weight: 700;
-  color: var(--accent);
-  text-align: center;
+  font-size: clamp(22px, 3.2vw, 72px);
+  min-height: clamp(52px, 8.5vh, 116px);
+  letter-spacing: -0.03em;
 }
 
-.price-cell--answered {
-  color: var(--border);
+/* Погасшая лампа: не серая, а тёмная и вдавленная. */
+.price-cell--answered,
+.price-button:disabled {
+  background: #0b0816;
+  border-color: rgba(255, 255, 255, 0.045);
+  color: transparent;
+  text-shadow: none;
+  box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.75);
+  opacity: 1;
 }
 
 .price-button {
-  font-size: 28px;
-  font-weight: 700;
-  min-height: 64px;
-  border-radius: 8px;
-  border: 2px solid var(--accent-border);
-  background: var(--accent-bg);
-  color: var(--accent);
-  transition: transform 0.1s ease;
+  font-size: 22px;
+  min-height: 62px;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  padding: 0 4px;
 }
 
 .price-button:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: scale(0.94);
+  border-color: var(--lamp);
 }
 
-.price-button:disabled {
-  opacity: 0.35;
-  border-color: var(--border);
-  background: transparent;
-  color: var(--text);
+/* Таймер — крупная цифра тем же шрифтом, что и цены: то же семейство «чисел,
+   от которых зависит исход». */
+.player-timer,
+.board-timer {
+  font-family: var(--display);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-dim);
+  letter-spacing: -0.02em;
 }
 
-.button {
-  font-size: 24px;
-  font-weight: 600;
-  padding: 16px 32px;
-  border-radius: 12px;
-  border: 2px solid var(--accent-border);
-  background: var(--accent-bg);
-  color: var(--accent);
-  min-height: 56px;
-  transition: transform 0.1s ease;
+.board-timer {
+  font-size: clamp(24px, 2.4vw, 46px);
 }
 
-.button:active:not(:disabled) {
-  transform: scale(0.96);
+.player-timer {
+  font-size: 26px;
 }
 
-.button:disabled {
-  opacity: 0.4;
+/* Пока вопрос на экране, сетка тем уходит с телевизора: на трёх метрах два
+   объекта внимания — это ни одного. Класс фазы вешает Board.tsx. */
+.board--cat-handoff .board-grid,
+.board--auction-bidding .board-grid,
+.board--question-media .board-grid,
+.board--question-reveal .board-grid,
+.board--question-open .board-grid,
+.board--buzzed .board-grid,
+.board--judging .board-grid,
+.board--reveal .board-grid {
+  display: none;
 }
 
-.button--primary {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
+.board-timer--urgent {
+  color: var(--live);
+  text-shadow: 0 0 34px var(--live-glow);
+  animation: timer-tick 1s steps(2, jump-none) infinite;
 }
 
-/* Необратимое действие — удаление человека вместе с историей. Единственная
-   кнопка в панели, которая стирает данные живого человека, и выглядеть как
-   соседние «Обновить» и «Редактировать» она не должна. */
-.button--danger {
-  background: #b5432a;
-  color: white;
-  border-color: #b5432a;
+@keyframes timer-tick {
+  50% {
+    opacity: 0.5;
+  }
 }
 
-.button--buzz {
-  font-size: 40px;
-  padding: 40px 64px;
-  border-radius: 24px;
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
+/* ───────────────────────── Телефон игрока ───────────────────────── */
+
+.player {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
   width: 100%;
-  max-width: 400px;
+  max-width: 640px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  text-align: center;
+  padding: calc(20px + env(safe-area-inset-top))
+    calc(16px + env(safe-area-inset-right))
+    calc(32px + env(safe-area-inset-bottom))
+    calc(16px + env(safe-area-inset-left));
 }
 
-.player-vote {
+.player > *:first-child {
+  margin-top: auto;
+}
+
+.player > *:last-child {
+  margin-bottom: auto;
+}
+
+/* Экран одного действия: то, ради чего человек поднял телефон, стоит по
+   центру и занимает середину экрана — большой палец достаёт не глядя. */
+.player--center {
+  justify-content: center;
+  gap: 20px;
+}
+
+/* Ожидание на телефоне — не пустой экран, а состояние. Крупная строка по
+   центру: в неё попадают взглядом за долю секунды, не отрываясь от
+   телевизора надолго. */
+.player--center > p {
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--fg);
+  line-height: 1.35;
+  max-width: 20ch;
+  text-wrap: balance;
+}
+
+/* «Вот-вот» — вопрос читают, кнопки ещё нет. Янтарное дыхание по краю
+   экрана: сигнал приготовиться, который виден боковым зрением. */
+.player--standby {
+  box-shadow: inset 0 0 0 3px rgba(255, 194, 75, 0.22);
+}
+
+.player--standby > p {
+  color: var(--lamp);
+  animation: standby-breathe 1.9s ease-in-out infinite;
+}
+
+@keyframes standby-breathe {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Нажал именно ты — экран целиком становится «сейчас». Ошибиться, чей это
+   телефон, невозможно даже краем глаза. */
+.player--live {
+  background: radial-gradient(
+    120% 70% at 50% 0%,
+    rgba(255, 62, 108, 0.42),
+    transparent 70%
+  );
+  box-shadow: inset 0 0 0 3px var(--live);
+}
+
+.player--live > p {
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.02em;
+}
+
+/* Вердикт ведущего — единственная пара кнопок, где промах стоит очков.
+   Крупные и во всю ширину; в .player-vote (голосование за спорный ответ)
+   они стоят парой в ряд и этого правила не получают. */
+.player--center > .button--yes,
+.player--center > .button--no {
+  width: 100%;
+  max-width: 340px;
+  min-height: 74px;
+  font-size: 22px;
+}
+
+.player--live .button {
+  width: 100%;
+  max-width: 340px;
+  min-height: 68px;
+  font-size: 20px;
+}
+
+/* Отвечает другой — экран сознательно тусклый: жать нечего. */
+.player--wait > p {
+  color: var(--fg-dim);
+  font-weight: 500;
+}
+
+.player--join {
+  justify-content: center;
+  gap: 14px;
+}
+
+.player--join h1 {
+  font-size: clamp(38px, 12vw, 56px);
+  letter-spacing: -0.035em;
+  margin-bottom: 18px;
+  background: linear-gradient(170deg, #fff 10%, var(--lamp) 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.player--join label {
+  font-size: 14px;
+  color: var(--fg-mut);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.player--join input {
+  font-size: 20px;
+  min-height: 54px;
+  width: 100%;
+  max-width: 340px;
+  text-align: center;
+}
+
+.player--join .button {
+  width: 100%;
+  max-width: 340px;
+}
+
+.player-people {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  /* Та же ширина, что у input и .button на этом экране: кнопки внутри списка
+     всё равно ограничены 340px из «.player--join .button», и при более широком
+     ul они прижимались влево, а «Меня тут нет» под списком центрировалась — на
+     телефоне колонка visibly разъезжалась. */
+  max-width: 340px;
+}
+
+.player-people .button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+}
+
+.player-person-games {
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--lamp);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Кнопка ответа — единственное, ради чего телефон вообще в руке. Она
+   занимает половину экрана и светится: попасть в неё надо, не отрывая глаз
+   от телевизора. */
+.button--buzz {
+  font-family: var(--display);
+  font-size: clamp(30px, 9vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  padding: 0;
+  min-height: min(46vh, 340px);
+  border-radius: 28px;
+  background: radial-gradient(120% 120% at 50% 0%, #ff6c8f, var(--live) 70%);
+  color: #2b000c;
+  border: 2px solid #ff89a6;
+  width: 100%;
+  max-width: 460px;
+  box-shadow:
+    0 0 90px -20px var(--live-glow),
+    inset 0 2px 0 rgba(255, 255, 255, 0.35);
+}
+
+.button--buzz:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.player-cue {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--lamp);
+  margin-bottom: 4px;
+}
+
+.player-answer {
+  font-size: 25px;
+  font-weight: 700;
+  color: var(--lamp);
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.player-comment {
+  font-size: 16px;
+  color: var(--fg-mut);
+  line-height: 1.45;
+}
+
+.player-hint {
+  font-size: 14px;
+  color: var(--fg-dim);
+}
+
+.player-alert {
+  color: var(--no);
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 90, 90, 0.1);
+  border: 1px solid rgba(255, 90, 90, 0.35);
+}
+
+.player-vote,
+.player-tags {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 16px;
+  gap: 14px;
 }
 
 .player-tags {
-  display: flex;
-  gap: 0.75rem;
-  justify-content: center;
-  margin-top: 1rem;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  border-top: 1px solid var(--line);
+  background: rgba(8, 6, 15, 0.9);
+}
+
+.player-vote .button,
+.player-tags .button {
+  flex: 1 1 130px;
+  max-width: 220px;
+}
+
+.player-vote-hint {
+  font-size: 15px;
+  color: var(--fg-dim);
+  width: 100%;
 }
 
 .board-tags {
-  margin-top: 0.5rem;
-  opacity: 0.75;
+  margin-top: 4px;
 }
 
+.player-toast {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(400px, calc(100vw - 24px));
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 20px 50px -20px #000;
+  color: var(--fg);
+  font-size: 15px;
+  z-index: 10;
+}
+
+/* Отзыв по итогам партии — единственный на телефоне экран, который читают,
+   а не жмут: текст выключен влево, а не по центру. */
 .player-review {
-  margin-bottom: 1.5rem;
+  margin-bottom: 24px;
   text-align: left;
+  width: 100%;
 }
 
 .player-review-item {
-  margin-bottom: 1.25rem;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--ink-1);
 }
 
 .player-review-meta {
-  font-size: 0.85rem;
-  opacity: 0.6;
+  font-family: var(--display);
+  font-size: 12px;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .player-review-question {
   font-weight: 600;
+  color: var(--fg);
+  margin-top: 4px;
 }
 
 .player-review-answer {
-  opacity: 0.75;
+  color: var(--fg-mut);
+  font-size: 15px;
 }
 
 .player-review-reasons {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.5rem 0;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.player-review-reasons .button {
+  font-size: 15px;
+  padding: 9px 14px;
+  min-height: 42px;
 }
 
 .player-review-item textarea {
   width: 100%;
-  min-height: 3rem;
+  min-height: 64px;
 }
 
-.button--yes {
-  background: #1f9d55;
-  color: white;
-  border-color: #1f9d55;
-}
-
-.button--no {
-  background: #d64545;
-  color: white;
-  border-color: #d64545;
-}
-
-.button.is-selected {
-  outline: 4px solid var(--text-h);
-  outline-offset: 2px;
-  transform: scale(1.05);
-}
-
-.player-vote-hint {
-  font-size: 16px;
-  color: var(--text);
-  width: 100%;
-}
-
-.player-timer,
-.board-timer {
-  font-family: var(--mono);
-  color: var(--text);
-}
-
-.board-timer {
-  font-size: 24px;
-}
-
-.player--join {
-  justify-content: center;
-  flex: 1;
-  gap: 12px;
-}
-
-.player--join input {
-  font-size: 20px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  min-height: 48px;
-}
-
-.player-alert {
-  color: #d64545;
-}
-
-.player-answer {
-  font-size: 28px;
-  font-weight: 600;
-  color: var(--text-h);
-}
-
-.player-comment {
-  font-size: 18px;
-}
-
-.player-hint {
-  font-size: 15px;
-  color: var(--text);
-}
-
-.player-toast {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  max-width: min(320px, calc(100vw - 32px));
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-  font-size: 15px;
-  z-index: 10;
-}
-
+/* Панель ведущего на его собственном телефоне. Отделена не только линией, но
+   и фоном: живая партия 2026-08-20 показала, что ведущий не находил здесь
+   «Отменить вопрос» — блок читался как продолжение игрового экрана. */
 .host-admin {
   width: 100%;
-  max-width: 500px;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+  max-width: 520px;
+  margin-top: 28px;
+  padding: 18px 16px calc(18px + env(safe-area-inset-bottom));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(16, 12, 30, 0.75);
 }
 
 .host-admin h3 {
-  font-size: 16px;
-  color: var(--text);
-  font-weight: 600;
-  margin: 0 0 8px;
+  font-family: var(--display);
+  font-size: 12px;
+  color: var(--fg-dim);
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin: 0 0 14px;
   text-align: center;
 }
 
 .host-admin-scores {
   list-style: none;
-  margin: 0 0 12px;
+  margin: 0 0 14px;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -559,64 +1158,63 @@ code {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .host-admin-name {
-  min-width: 80px;
+  min-width: 90px;
   font-weight: 600;
+  color: var(--fg);
+  text-align: left;
 }
 
 .host-admin-value {
-  font-family: var(--mono);
-  color: var(--accent);
-  min-width: 48px;
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--lamp);
+  min-width: 52px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .host-admin-step {
   font-size: 16px;
-  padding: 8px 12px;
+  padding: 6px 12px;
   min-height: 40px;
+  min-width: 44px;
 }
 
-@media (max-width: 640px) {
-  .board-grid,
-  .player-grid {
-    gap: 6px 8px;
-    /* Тот же --price-columns, что и в базовом правиле выше (не «4»
-       константой) — иначе любой пак с числом вопросов в теме, отличным от
-       4 (например, 5 у пакетов из pack-generator), ломается именно здесь:
-       десктоп правильно берёт число колонок из данных, а этот брейкпоинт
-       тихо его игнорировал и всегда рисовал 4 колонки (обратная связь,
-       живая партия 2026-08-18 — «поехала сетка вопросов на телефоне»). */
-    grid-template-columns: minmax(88px, auto) repeat(
-        var(--price-columns, 4),
-        1fr
-      );
-  }
-
-  .board-grid .theme-name,
-  .player-grid .theme-name {
-    font-size: 15px;
-  }
-
-  .price-cell {
-    font-size: 22px;
-  }
-
-  .price-button {
-    font-size: 18px;
-    min-height: 52px;
-    padding: 0 4px;
-  }
-
-  .button--buzz {
-    font-size: 32px;
-    padding: 32px 48px;
-  }
+.player-packs,
+.player-people,
+.admin-packs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
+
+.player-pack-picker {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  margin-top: 18px;
+  width: 100%;
+}
+
+.player-pack-picker h3,
+.admin-section h3 {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin: 0 0 12px;
+}
+
+/* ───────────────────────── Финал ───────────────────────── */
 
 .final-theme-list {
   list-style: none;
@@ -626,7 +1224,26 @@ code {
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-width: 400px;
+  max-width: 460px;
+}
+
+.board .final-theme-list {
+  max-width: min(900px, 80vw);
+  font-size: clamp(22px, 2.4vw, 44px);
+  font-weight: 600;
+  color: var(--fg);
+  gap: clamp(8px, 1.4vh, 18px);
+}
+
+.board .final-theme-list li {
+  padding: clamp(10px, 1.4vh, 20px) 24px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 194, 75, 0.25);
+  background: var(--lamp-wash);
+  transition:
+    opacity 0.4s ease,
+    background 0.4s ease,
+    border-color 0.4s ease;
 }
 
 /* Табло (Board.tsx) кладёт вычеркнутое имя темы прямо текстом в <li>, без
@@ -636,12 +1253,21 @@ code {
    нужно саму кнопку, а не невидимый текстовый узел вокруг неё. */
 .final-theme-list .is-eliminated {
   text-decoration: line-through;
-  opacity: 0.35;
+  opacity: 0.3;
+}
+
+.board .final-theme-list .is-eliminated {
+  background: transparent;
+  border-color: var(--line);
 }
 
 .final-theme-list .is-eliminated .button {
   text-decoration: line-through;
   opacity: 1;
+}
+
+.final-theme-list .button {
+  width: 100%;
 }
 
 .final-judging-list {
@@ -650,70 +1276,106 @@ code {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   width: 100%;
-  max-width: 700px;
+  max-width: 900px;
 }
 
 .final-judging-list li {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--ink-1);
+  font-size: clamp(16px, 1.5vw, 26px);
 }
 
 .final-judging-name {
-  min-width: 80px;
-  font-weight: 600;
+  min-width: 110px;
+  font-weight: 700;
+  color: var(--fg);
+  text-align: left;
 }
 
 .final-judging-wager {
-  font-family: var(--mono);
-  color: var(--accent);
-  min-width: 48px;
+  font-family: var(--display);
+  font-weight: 700;
+  color: var(--lamp);
+  min-width: 70px;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .final-judging-answer {
   flex: 1;
   text-align: left;
+  color: var(--fg-mut);
 }
 
-/* Админ-панель (Admin.tsx, design.md «Админ-панель») — служебная страница
-   для того, кто держит сервер, не для игры за столом: раскладка блоками
-   слева направо, а не по центру, как у board/player. */
+/* ───────────────── Админка и редактор пакетов ─────────────────
+
+   Служебная страница для того, кто держит сервер, не для игры за столом:
+   раскладка блоками слева направо, а не по центру, как у board/player.
+   Палитра та же, но без свечения и без крупного кегля — закулисье не должно
+   спорить со сценой. */
 
 .admin {
   display: flex;
   flex-direction: column;
-  gap: 24px;
-  padding: 24px 16px 48px;
-  max-width: 700px;
+  gap: 26px;
+  padding: 32px 20px 64px;
+  max-width: 820px;
+  width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
+  text-align: left;
+}
+
+.admin h1 {
+  font-size: clamp(26px, 3vw, 38px);
 }
 
 .admin-status {
   font-family: var(--mono);
-  color: var(--text);
-  font-size: 14px;
+  color: var(--fg-dim);
+  font-size: 13px;
 }
 
 .admin-section {
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(16, 12, 30, 0.6);
+  padding: 20px 22px;
 }
 
 .admin-section h2 {
-  font-size: 18px;
-  margin: 0 0 12px;
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  margin: 0 0 16px;
+}
+
+.admin-section h3 {
+  margin: 24px 0 12px;
+}
+
+.admin .button {
+  font-size: 16px;
+  padding: 10px 18px;
+  min-height: 44px;
 }
 
 .admin-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 14px;
 }
 
 .admin-lan-candidates {
@@ -722,17 +1384,7 @@ code {
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-}
-
-.admin-packs,
-.player-packs {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .admin-packs .button,
@@ -744,142 +1396,124 @@ code {
   gap: 4px;
 }
 
+.admin-packs li {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.admin-packs li > .button {
+  flex: 1;
+}
+
 .admin-pack-title {
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--fg);
 }
 
 .admin-pack-description {
   font-size: 14px;
-  color: var(--text);
+  color: var(--fg-mut);
   font-weight: 400;
+  line-height: 1.4;
 }
 
-.player-people {
+/* .admin-pack-delete — чистый хук для title (подсказки у выключенной кнопки
+   удаления, см. Admin.tsx) и якорь для тестов. Правил у него сознательно
+   нет: обёртка работает на наследстве от .admin-packs .button. */
+
+.admin-participants,
+.admin-players {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  width: 100%;
-  max-width: 400px;
+  gap: 8px;
 }
 
-.player-people .button {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
+.admin-players {
+  margin-top: 14px;
 }
 
-.player-person-games {
-  font-size: 16px;
-  font-weight: 400;
-  color: var(--text);
-}
-
-.player-pack-picker {
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
-  margin-top: 16px;
-  width: 100%;
-}
-
-.player-pack-picker h3 {
-  font-size: 16px;
-  margin: 0 0 12px;
-}
-
-.admin-participants {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.admin-participants li {
+.admin-participants li,
+.admin-players li {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--ink-1);
+  border: 1px solid var(--line);
 }
 
 .admin-participants .is-disconnected {
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
 .admin-participant-name {
-  min-width: 100px;
+  min-width: 120px;
   font-weight: 600;
+  color: var(--fg);
 }
 
 .admin-participant-status {
   font-family: var(--mono);
-  font-size: 14px;
-  color: var(--text);
-  min-width: 56px;
+  font-size: 13px;
+  color: var(--fg-dim);
+  min-width: 60px;
 }
 
 .admin-participant-role {
   flex: 1;
-  min-width: 120px;
-  color: var(--text);
+  min-width: 130px;
+  color: var(--fg-mut);
 }
 
 .admin-hint {
-  font-size: 15px;
-  color: var(--text);
+  font-size: 14px;
+  color: var(--fg-dim);
+  line-height: 1.5;
 }
 
 .admin-error {
-  color: #d64545;
+  color: var(--no);
+  font-weight: 600;
 }
 
 .admin-player-code {
   display: block;
   width: 100%;
-  max-width: 500px;
-  font: inherit;
+  max-width: 640px;
+  font: 400 13px/1.5 var(--mono);
   margin-bottom: 12px;
+  white-space: pre-wrap;
+  padding: 14px 16px;
 }
 
 .admin-player-conflict {
-  max-width: 500px;
+  max-width: 640px;
   margin-top: 12px;
-}
-
-.admin-section h3 {
-  font-size: 16px;
-  margin: 20px 0 12px;
 }
 
 .admin-merge-people {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 300px;
+  max-width: 340px;
 }
 
-.admin-merge-people label {
-  font-size: 14px;
-  color: var(--text);
+.admin-merge-people label,
+.admin-player-form label {
+  font-size: 13px;
+  color: var(--fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
-.admin-players {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.admin-players li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.admin-player-form label {
+  margin-top: 10px;
 }
 
 .admin-players li .admin-actions {
@@ -891,33 +1525,29 @@ code {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-width: 500px;
-  margin-top: 16px;
-}
-
-.admin-player-form label {
-  font-size: 14px;
-  color: var(--text);
-  margin-top: 8px;
+  max-width: 640px;
+  margin-top: 18px;
 }
 
 .admin-player-name {
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--fg);
 }
 
 .admin-player-date {
-  font-size: 14px;
-  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--fg-dim);
 }
 
 .pack-editor {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 }
 
 .pack-editor-round h3 {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
 }
 
 .pack-editor-theme {
@@ -925,12 +1555,13 @@ code {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .pack-editor-theme-name {
-  min-width: 140px;
-  font-weight: 600;
+  min-width: 150px;
+  font-weight: 700;
+  color: var(--fg);
 }
 
 .pack-editor-form,
@@ -938,25 +1569,27 @@ code {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 500px;
+  max-width: 640px;
 }
 
 .pack-editor-form textarea,
 .pack-editor-complaint textarea {
-  min-height: 60px;
-  font: inherit;
+  min-height: 72px;
+  font: 400 16px/1.5 var(--sans);
 }
 
 .pack-editor-view-toggle {
   display: flex;
-  gap: 16px;
-  margin-bottom: 12px;
+  gap: 18px;
+  margin-bottom: 14px;
 }
 
 .pack-editor-view-toggle label {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  font-size: 15px;
+  cursor: pointer;
 }
 
 .pack-editor-list {
@@ -973,32 +1606,93 @@ code {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+
+.pack-editor-list-row:hover {
+  border-color: var(--line);
+  background: var(--ink-1);
 }
 
 .pack-editor-list-row-main {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .pack-editor-list-question {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex: 1;
   text-align: left;
 }
 
 .pack-editor-list-price {
-  font-family: var(--mono);
-  min-width: 40px;
-  font-weight: 600;
+  font-family: var(--display);
+  min-width: 48px;
+  font-weight: 700;
+  color: var(--lamp);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
 }
 
 .pack-editor-list-text {
   flex: 1;
+  color: var(--fg-mut);
 }
 
 .pack-editor-complaint-target {
-  font-weight: 600;
+  font-weight: 700;
+  color: var(--fg);
+}
+
+/* ───────────────────────── Телефон: узкие экраны ───────────────────────── */
+
+@media (max-width: 640px) {
+  .player-grid {
+    gap: 6px;
+    /* Тот же --price-columns, что и в базовом правиле выше (не «4»
+       константой) — иначе любой пак с числом вопросов в теме, отличным от
+       4 (например, 5 у пакетов из pack-generator), ломается именно здесь:
+       десктоп правильно берёт число колонок из данных, а этот брейкпоинт
+       тихо его игнорировал и всегда рисовал 4 колонки (обратная связь,
+       живая партия 2026-08-18 — «поехала сетка вопросов на телефоне»). */
+    grid-template-columns: minmax(84px, 0.8fr) repeat(
+        var(--price-columns, 4),
+        1fr
+      );
+  }
+
+  .player-grid .theme-name {
+    font-size: 11px;
+    padding-right: 8px;
+    letter-spacing: 0.02em;
+  }
+
+  .price-button {
+    font-size: 17px;
+    min-height: clamp(54px, 8.5vh, 78px);
+    padding: 0 2px;
+  }
+
+  .admin {
+    padding: 24px 14px 48px;
+  }
+
+  .admin-section {
+    padding: 16px 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

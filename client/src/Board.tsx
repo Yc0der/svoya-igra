@@ -15,6 +15,14 @@ export function Board() {
     game?.currentQuestion?.fadeMs,
   );
 
+  // Последние пять секунд таймер перекрашивается в «сейчас» — на телевизоре
+  // это видно боковым зрением, в отличие от смены цифры.
+  const timerClass = `board-timer${
+    remainingSeconds !== null && remainingSeconds <= 5
+      ? ' board-timer--urgent'
+      : ''
+  }`;
+
   function nameOf(participantId: string): string {
     return (
       participants.find((p) => p.id === participantId)?.name ?? participantId
@@ -27,6 +35,10 @@ export function Board() {
         <h1>Своя игра</h1>
         {lanUrl && (
           <div className="board-qr">
+            {/* Первое, что видит гость, — код без единого слова. Строка
+                говорит, что с ним делать: пустой экран должен приглашать к
+                действию, а не молчать. */}
+            <p className="board-qr-hint">Наведи камеру телефона на код</p>
             <QRCodeSVG value={lanUrl} size={220} title="QR-код для входа" />
             <p className="board-qr-url">{lanUrl}</p>
           </div>
@@ -73,7 +85,7 @@ export function Board() {
           <strong>{nameOf(game.finalElimParticipantId ?? '')}</strong>
         </p>
         {remainingSeconds !== null && (
-          <p className="board-timer">{remainingSeconds}с</p>
+          <p className={timerClass}>{remainingSeconds}с</p>
         )}
         <ul className="final-theme-list">
           {game.finalThemes?.map((theme) => (
@@ -107,7 +119,7 @@ export function Board() {
           <p className="board-status">Ведущий проверяет ответы…</p>
         )}
         {remainingSeconds !== null && (
-          <p className="board-timer">{remainingSeconds}с</p>
+          <p className={timerClass}>{remainingSeconds}с</p>
         )}
       </div>
     );
@@ -151,7 +163,11 @@ export function Board() {
   }
 
   return (
-    <div className="board">
+    // Класс фазы нужен только оформлению: пока вопрос на экране, сетка тем
+    // с телевизора уходит (index.css) — на трёх метрах она спорит с самим
+    // вопросом за внимание. Разметка при этом не меняется, потому что
+    // возвращать её обратно в 'selecting' надо мгновенно.
+    <div className={`board board--${game.phase}`}>
       {game.phase === 'selecting' && (
         <p className="board-status">
           Выбирает <strong>{nameOf(game.turnParticipantId)}</strong>
@@ -186,6 +202,16 @@ export function Board() {
           {/* text — null во время cat-handoff (текст ещё скрыт, см.
               Room.toGameStateView) — показываем тему и цену, не пустой
               абзац. */}
+          {/* Тема и цена над вопросом. Раньше их роль играла сетка, но пока
+              вопрос на экране, сетка убрана (см. board--<фаза> в index.css) —
+              без этой строки телевизор перестал бы показывать, что именно
+              разыгрывается и на сколько. Одной строкой, а не двумя узлами:
+              тесты ищут «Тема» точным совпадением по сетке. */}
+          {game.currentQuestion.text !== null && (
+            <p className="board-eyebrow">
+              {game.currentQuestion.themeName} · {game.currentQuestion.price}
+            </p>
+          )}
           {game.currentQuestion.text !== null ? (
             <p className="board-question">
               {game.phase === 'question-reveal'
@@ -220,7 +246,7 @@ export function Board() {
           )}
           {(game.phase === 'question-open' || game.phase === 'cat-handoff') &&
             remainingSeconds !== null && (
-              <p className="board-timer">{remainingSeconds}с</p>
+              <p className={timerClass}>{remainingSeconds}с</p>
             )}
         </>
       )}
@@ -241,7 +267,7 @@ export function Board() {
             <p className="board-status">Ведущий судит…</p>
           )}
           {remainingSeconds !== null && (
-            <p className="board-timer">{remainingSeconds}с</p>
+            <p className={timerClass}>{remainingSeconds}с</p>
           )}
         </>
       )}

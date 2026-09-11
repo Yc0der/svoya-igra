@@ -60,7 +60,8 @@ export function Player() {
   // списком не приживётся на живой партии.
   const [showNameForm, setShowNameForm] = useState(false);
   // Гасит УЖЕ показанную тревогу отказа входа (name-taken/person-taken/
-  // person-unknown) при чисто локальной навигации между списком и формой —
+  // person-unknown/person-exists) при чисто локальной навигации между списком
+  // и формой —
   // `status` в хуке меняется только сообщением сервера или новым
   // join()/joinAs(), а переключение веток рендера само по себе до хука не
   // доходит (дефект ревью задачи 3: два тапа между списком и формой
@@ -266,6 +267,16 @@ export function Player() {
             Это имя уже занято, выбери другое
           </p>
         )}
+        {/* Отдельно от name-taken: там имя занял кто-то за этим столом прямо
+            сейчас, здесь — человек из списка знакомых, и правильный первый
+            шаг другой. Молча войти этим человеком сервер не может: он не
+            знает, тот же это человек или тёзка. */}
+        {status === 'person-exists' && !errorDismissed && (
+          <p className="player-alert" role="alert">
+            Такое имя уже есть в списке — выбери себя там или возьми другую
+            форму имени
+          </p>
+        )}
         {people.length > 0 && (
           // Без пути назад случайный тап по «Меня тут нет» уводит в обычный
           // join(name), который на сервере заводит НОВОГО человека — то самое
@@ -432,7 +443,7 @@ export function Player() {
         </ul>
         {questionActive && (
           <button className="button" onClick={cancelQuestion}>
-            Отменить вопрос
+            Пропустить вопрос
           </button>
         )}
       </div>
@@ -487,6 +498,10 @@ export function Player() {
         }
         return (
           <div className="player">
+            {/* Сетка сама по себе не говорит, почему она появилась именно
+                сейчас. Строка отвечает на «что от меня требуется»: на табло
+                это видно («Выбирает …»), на телефоне — не было ничего. */}
+            <p className="player-cue">Твой ход — выбери вопрос</p>
             <div
               className="player-grid"
               style={
@@ -661,7 +676,9 @@ export function Player() {
       // 2026-08-19-gradual-text-reveal-design.md, «Сервер и клиент»).
       case 'question-reveal':
         return (
-          <div className="player player--center">
+          // player--standby: экран «вот-вот» — цвет и пульс видно боковым
+          // зрением, когда глаза на телевизоре, а не на телефоне.
+          <div className="player player--center player--standby">
             <p>Читаем вопрос…</p>
           </div>
         );
@@ -672,7 +689,7 @@ export function Player() {
       // медиа»).
       case 'question-media':
         return (
-          <div className="player player--center">
+          <div className="player player--center player--standby">
             <p>Идёт ролик — смотрите на табло</p>
           </div>
         );
@@ -766,7 +783,7 @@ export function Player() {
       case 'buzzed':
         if (isBuzzedByMe) {
           return (
-            <div className="player player--center">
+            <div className="player player--center player--live">
               <p>Скажи ответ вслух</p>
               <button className="button button--primary" onClick={saidAnswer}>
                 Я ответил
@@ -775,7 +792,7 @@ export function Player() {
           );
         }
         return (
-          <div className="player player--center">
+          <div className="player player--center player--wait">
             <p>{nameOf(game.buzzedParticipantId)} отвечает</p>
           </div>
         );

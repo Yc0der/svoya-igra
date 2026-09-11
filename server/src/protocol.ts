@@ -194,6 +194,9 @@ export type ClientMessage =
   | { type: 'admin-set-host'; participantId: string | null }
   // ВРЕМЕННО — см. комментарий у EngineEvent.skip-to-final в engine.ts.
   | { type: 'admin-skip-to-final' }
+  // Пропуск активного вопроса с пульта хозяина комнаты. Без параметров: что
+  // именно отменять, знает комната, а не клиент.
+  | { type: 'admin-cancel-question' }
   // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — человек
   // выбирает из реально найденных кандидатов вместо угадывания сервером.
   | { type: 'admin-set-lan-address'; address: string }
@@ -241,6 +244,9 @@ export type ClientMessage =
       questionType: Question['type'];
     }
   | { type: 'admin-delete-question'; filename: string; questionId: string }
+  // Сносит пакет целиком — json и его папку картинок. Ответа при успехе нет:
+  // виден он как обновлённый список паков в широковещательном состоянии.
+  | { type: 'admin-delete-pack'; filename: string }
   // Жалоба на вопрос — список для беглого просмотра (design.md, 2026-08-15).
   // Контекст вопроса (текст/ответ/тема/цена) сервер достаёт сам по
   // filename+questionId, от клиента нужен только текст жалобы.
@@ -331,6 +337,12 @@ export type ServerMessage =
   // нет), и текст, который увидит игрок, тоже должен быть разным.
   | { type: 'person-taken' }
   | { type: 'person-unknown' }
+  // Ручной ввод имени, которое уже носит известный человек. Отдельно от
+  // name-taken: там имя занято участником ЗА ЭТИМ СТОЛОМ и надо просто взять
+  // другое, здесь — человеком из списка, и первое, что стоит сделать, это
+  // поискать себя в списке (design.md, 2026-08-26-player-identity, «Имя
+  // человека уникально в базе»).
+  | { type: 'person-exists' }
   | { type: 'invalid-token' }
   | {
       type: 'state';

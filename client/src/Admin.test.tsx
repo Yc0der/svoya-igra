@@ -59,6 +59,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     kick: vi.fn(),
     setHost: vi.fn(),
     skipToFinal: vi.fn(),
+    cancelQuestion: vi.fn(),
     setLanAddress: vi.fn(),
     textRevealWordsPerSecond: 2.5,
     setTextRevealWordsPerSecond: vi.fn(),
@@ -83,6 +84,7 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     getPack: vi.fn(),
     updateQuestion: vi.fn(),
     deleteQuestion: vi.fn(),
+    deletePack: vi.fn(),
     reportError: null,
     reportAckVersion: 0,
     clearReportError: vi.fn(),
@@ -412,6 +414,32 @@ describe('Admin', () => {
     expect(skipToFinal).toHaveBeenCalledOnce();
   });
 
+  it('кнопка пропуска выключена без активного вопроса и шлёт cancelQuestion с ним', async () => {
+    const cancelQuestion = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ game: baseGame(), cancelQuestion }),
+    );
+    const { rerender } = render(<Admin />);
+    expect(
+      screen.getByRole('button', { name: 'Пропустить вопрос' }),
+    ).toBeDisabled();
+
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        game: baseGame({
+          phase: 'question-open',
+          currentQuestion: { text: 'В?', price: 100, themeName: 'История' },
+        }),
+        cancelQuestion,
+      }),
+    );
+    rerender(<Admin />);
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Пропустить вопрос' }),
+    );
+    expect(cancelQuestion).toHaveBeenCalledTimes(1);
+  });
+
   it('shows a message instead of a table when nobody has joined yet', () => {
     mockedUseAdminConnection.mockReturnValue(connection({ participants: [] }));
     render(<Admin />);
@@ -605,6 +633,107 @@ describe('Admin — редактор пакета', () => {
     expect(
       screen.getByRole('button', { name: /редактировать/i }),
     ).toBeDisabled();
+  });
+
+  it('удаление пакета требует двух нажатий', async () => {
+    const deletePack = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+          { filename: 'b.json', title: 'Пак Б', description: null },
+        ],
+        activePackFilename: 'a.json',
+        deletePack,
+      }),
+    );
+    render(<Admin />);
+    const row = screen.getByRole('button', { name: /Пак Б/ }).closest('li');
+    const remove = within(row as HTMLElement).getByRole('button', {
+      name: 'Удалить',
+    });
+
+    await userEvent.click(remove);
+    expect(deletePack).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      within(row as HTMLElement).getByRole('button', {
+        name: 'Точно? Вместе с картинками',
+      }),
+    );
+    expect(deletePack).toHaveBeenCalledWith('b.json');
+  });
+
+  // Fix 3 (финальное ревью) — editedPackError раньше рендерился только
+  // внутри редактора пакета (editingFilename !== null), а удаляют из ветки
+  // списка: отказ admin-delete-pack приходил и оставался невидимым, пока
+  // админ не откроет тот же пакет в редакторе.
+  it('shows editedPackError above the packs list, not only inside the pack editor', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        activePackFilename: 'a.json',
+        editedPackError: 'пример из репозитория нельзя удалить',
+      }),
+    );
+    render(<Admin />);
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /пример из репозитория нельзя удалить/i,
+    );
+  });
+
+  it('удаление пакета сбрасывает старую ошибку до отправки запроса', async () => {
+    const deletePack = vi.fn();
+    const clearPackError = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+          { filename: 'b.json', title: 'Пак Б', description: null },
+        ],
+        activePackFilename: 'a.json',
+        deletePack,
+        clearPackError,
+      }),
+    );
+    render(<Admin />);
+    const row = screen.getByRole('button', { name: /Пак Б/ }).closest('li');
+    const remove = within(row as HTMLElement).getByRole('button', {
+      name: 'Удалить',
+    });
+    await userEvent.click(remove);
+    await userEvent.click(
+      within(row as HTMLElement).getByRole('button', {
+        name: 'Точно? Вместе с картинками',
+      }),
+    );
+    expect(deletePack).toHaveBeenCalledWith('b.json');
+    expect(clearPackError).toHaveBeenCalled();
+    expect(clearPackError.mock.invocationCallOrder[0]).toBeLessThan(
+      deletePack.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('у активного пакета кнопка удаления выключена и объясняет, почему', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        availablePacks: [
+          { filename: 'a.json', title: 'Пак А', description: null },
+        ],
+        activePackFilename: 'a.json',
+        deletePack: vi.fn(),
+      }),
+    );
+    render(<Admin />);
+    const row = screen.getByRole('button', { name: /Пак А/ }).closest('li');
+    expect(
+      within(row as HTMLElement).getByRole('button', { name: 'Удалить' }),
+    ).toBeDisabled();
+    expect(
+      within(row as HTMLElement).getByTitle('Сначала выберите другой пакет'),
+    ).toBeInTheDocument();
   });
 
   it('renders the grid once the pack arrives, with a button per question price', async () => {

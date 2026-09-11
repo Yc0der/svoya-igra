@@ -1,8 +1,16 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  deletePack,
   deleteQuestion,
   findQuestionLocation,
   listAvailablePacks,
@@ -394,6 +402,59 @@ describe('deleteQuestion', () => {
     await expect(deleteQuestion(dir, 'sport.json', 'q1')).rejects.toThrow();
     const onDisk = JSON.parse(await readFile(join(dir, 'sport.json'), 'utf8'));
     expect(onDisk).toEqual(VALID_PACK);
+  });
+});
+
+describe('deletePack', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-packs-delete-pack-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('удаляет json и папку с картинками пакета', async () => {
+    await writeFile(join(dir, 'a.json'), JSON.stringify(VALID_PACK), 'utf8');
+    await mkdir(join(dir, 'media', 'a'), { recursive: true });
+    await writeFile(join(dir, 'media', 'a', 'pic.png'), 'png', 'utf8');
+
+    await deletePack(dir, 'a.json');
+
+    await expect(stat(join(dir, 'a.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(stat(join(dir, 'media', 'a'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('удаляет текстовый пакет без папки медиа без ошибки', async () => {
+    await writeFile(join(dir, 'a.json'), JSON.stringify(VALID_PACK), 'utf8');
+    await expect(deletePack(dir, 'a.json')).resolves.toBeUndefined();
+  });
+
+  it('не трогает картинки соседнего пакета', async () => {
+    await writeFile(join(dir, 'a.json'), JSON.stringify(VALID_PACK), 'utf8');
+    await writeFile(join(dir, 'b.json'), JSON.stringify(VALID_PACK), 'utf8');
+    await mkdir(join(dir, 'media', 'b'), { recursive: true });
+    await writeFile(join(dir, 'media', 'b', 'pic.png'), 'png', 'utf8');
+
+    await deletePack(dir, 'a.json');
+
+    await expect(
+      stat(join(dir, 'media', 'b', 'pic.png')),
+    ).resolves.toBeTruthy();
+  });
+
+  // Запрос на удаление того, чего нет, — рассинхрон интерфейса, а не
+  // штатная ситуация: тихий успех спрятал бы его.
+  it('бросает на несуществующем файле, а не заканчивается тихим успехом', async () => {
+    await expect(deletePack(dir, 'ghost.json')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
   });
 });
 

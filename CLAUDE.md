@@ -74,6 +74,8 @@ pnpm-монорепозиторий, две рабочие области: `serv
 ## Документы
 
 - `docs/superpowers/specs/2026-08-03-svoya-igra-design.md` — что строим и почему
+- `docs/superpowers/specs/2026-09-11-visual-language-design.md` — оформление: палитра,
+  шрифты, три поверхности
 - `docs/ideas.md` — что сознательно не строим, с причинами
 - `docs/lifecycle.md` — цикл разработки под этот проект
 - `docs/players.md`, `docs/pack-generator-profile.md` — анкеты игроков и профиль генератора.

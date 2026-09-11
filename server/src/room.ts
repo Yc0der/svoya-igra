@@ -83,7 +83,9 @@ export interface PackInfo {
 
 export type JoinResult =
   | { participant: Participant }
-  | { error: 'name-taken' | 'person-taken' | 'person-unknown' };
+  | {
+      error: 'name-taken' | 'person-taken' | 'person-unknown' | 'person-exists';
+    };
 export type ReconnectResult =
   { participant: Participant } | { error: 'invalid-token' };
 export type StartGameResult =
@@ -418,6 +420,21 @@ export class Room {
     );
     if (taken) {
       return { error: 'name-taken' };
+    }
+    // Имя человека — ник, уникальный по всей базе (design.md,
+    // 2026-08-26-player-identity, «Имя человека уникально в базе»). Без этой
+    // проверки ручной ввод своего же имени заводил ВТОРОГО человека — ровно то
+    // расщепление профиля, ради которого затевалось лобби со списком. Молча
+    // привязать ввод к найденному человеку нельзя: сервер не может знать, тот
+    // же это человек или тёзка, — поэтому отказ, а решение за игроком.
+    // personId !== null — это joinAsPerson(), там человек уже опознан по id.
+    if (personId === null && this.historyEnabled) {
+      const known = this.history
+        .listPeople()
+        .some((p) => normalizeName(p.name) === normalized);
+      if (known) {
+        return { error: 'person-exists' };
+      }
     }
     const resolvedPersonId =
       personId !== null
@@ -882,7 +899,10 @@ export class Room {
     });
   }
 
-  cancelQuestion(requesterId: string): void {
+  // requesterId === null — с админ-панели (тот же паттерн, что у
+  // refreshAvailablePacks/selectPack). Настоящий отправитель, а не то, что
+  // клиент о себе заявляет: строку сюда кладёт server.ts из connections.
+  cancelQuestion(requesterId: string | null): void {
     this.dispatch({ type: 'cancel-question', requesterId });
   }
 

@@ -156,6 +156,7 @@ type ServerMessage =
   // Room.joinAsPerson) — разным причинам разные тексты, см. Player.tsx.
   | { type: 'person-taken' }
   | { type: 'person-unknown' }
+  | { type: 'person-exists' }
   | { type: 'invalid-token' }
   | {
       type: 'state';
@@ -212,6 +213,9 @@ export type ConnectionStatus =
   // «такого больше нет» требуют разных текстов в лобби, см. Player.tsx.
   | 'person-taken'
   | 'person-unknown'
+  // Введённое руками имя уже носит человек из списка (server/src/protocol.ts,
+  // person-exists).
+  | 'person-exists'
   | 'disconnected';
 
 export interface RoomConnection {
@@ -414,6 +418,12 @@ export function useRoomConnection(
           // Та же гонка, что и у name-taken выше.
           setStatus((current) =>
             current === 'joined' ? current : 'person-taken',
+          );
+        }
+        if (message.type === 'person-exists') {
+          // Та же гонка, что и у name-taken выше.
+          setStatus((current) =>
+            current === 'joined' ? current : 'person-exists',
           );
         }
         if (message.type === 'person-unknown') {
