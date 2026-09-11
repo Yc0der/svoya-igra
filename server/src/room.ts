@@ -1652,10 +1652,46 @@ export class Room {
     ) {
       this.history.finishGame(this.historyGameId, state.scores);
     }
-    // Пустой список — сопоставление phaseBefore/state.phase с GameCue ещё не
-    // написано (задача 4). Вызов уже здесь, чтобы задаче 4 нужно было только
-    // собрать cues, а не искать, откуда их слать.
-    this.emitAudioCues([]);
+    // Сигналы звука выводятся здесь, а не в движке: новый вид Effect задел
+    // бы десятки сравнений `toEqual` в engine.test.ts ради косметики
+    // (design.md, «Почему комната, а не движок»). Снимки «до» — те же, по
+    // которым выше распознаётся честный реопен после «Незачёт».
+    const cues: GameCue[] = [];
+    if (questionBefore === null && state.currentQuestion !== null) {
+      cues.push('question-opened');
+    }
+    if (phaseBefore !== 'buzzed' && state.phase === 'buzzed') {
+      cues.push('buzzed');
+    }
+    if (phaseBefore === 'judging' && buzzedBefore !== null) {
+      // Знак дельты, а не конечная фаза: judging кончается и 'reveal', и
+      // возвратом в 'question-open', причём 'reveal' наступает в обоих
+      // исходах — и при засчитанном ответе, и при незасчитанном, когда
+      // отвечать больше некому. Правка очков ведущим (adjust-score) сюда не
+      // попадает: она приходит не из judging.
+      const before = scoresBefore[buzzedBefore] ?? 0;
+      const after = state.scores[buzzedBefore] ?? 0;
+      if (after > before) cues.push('answer-correct');
+      else if (after < before) cues.push('answer-wrong');
+    }
+    if (
+      event.type === 'timer-expired' &&
+      event.timer === 'question' &&
+      buzzedBefore === null &&
+      state.phase === 'reveal'
+    ) {
+      cues.push('question-timeout');
+    }
+    if (phaseBefore !== 'round-end' && state.phase === 'round-end') {
+      cues.push('round-ended');
+    }
+    if (phaseBefore !== 'game-end' && state.phase === 'game-end') {
+      cues.push('game-ended');
+    }
+    // До notify(): рассылка состояния всё равно отложена в микротаск
+    // (server.ts, broadcastState), так что сигнал и картинка на табло
+    // приезжают в пределах одного тика.
+    this.emitAudioCues(cues);
     this.notify();
   }
 

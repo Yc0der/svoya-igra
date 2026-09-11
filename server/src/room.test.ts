@@ -19,6 +19,7 @@ import type {
   QuestionTagInput,
   StartGameInput,
 } from './history.js';
+import type { GameCue } from './protocol.js';
 
 // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — кандидаты и
 // текущий адрес не часть RoomState (см. room.ts, LanInfo), поэтому и
@@ -3889,5 +3890,300 @@ describe('Room: настройки звука', () => {
     const settings = room.getAudioSettings();
     settings.musicVolume = 0.99;
     expect(room.getAudioSettings().musicVolume).toBe(0.35);
+  });
+});
+
+// Раунд из одного вопроса в каждом из двух раундов: закрытие единственного
+// вопроса раунда 1 — уже «последний вопрос раунда», и партия при этом не
+// заканчивается (впереди раунд 2), в отличие от ONE_QUESTION_PACK.
+const TWO_ROUND_PACK: Pack = {
+  title: 'Тест',
+  author: 'Автор',
+  createdAt: '2026-08-04',
+  rounds: [
+    {
+      themes: [
+        {
+          name: 'Раунд 1',
+          questions: [
+            {
+              id: 'r1q1',
+              price: 100,
+              text: 'Вопрос раунда 1?',
+              answer: 'ответ 1',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      themes: [
+        {
+          name: 'Раунд 2',
+          questions: [
+            {
+              id: 'r2q1',
+              price: 100,
+              text: 'Вопрос раунда 2?',
+              answer: 'ответ 2',
+              type: 'обычный',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+describe('Room: сигналы звука', () => {
+  // Собирает всё, что вышло из комнаты, в порядке возникновения.
+  function cuesOf(room: Room): GameCue[] {
+    const cues: GameCue[] = [];
+    room.onAudioCue((cue) => cues.push(cue));
+    return cues;
+  }
+
+  it('открытие вопроса даёт question-opened', () => {
+    const { room, picker } = startedRoom();
+    const cues = cuesOf(room);
+
+    room.selectQuestion(picker, 0, 'q1');
+
+    expect(cues).toEqual(['question-opened']);
+  });
+
+  it('нажатие кнопки даёт buzzed', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, picker } = startedRoom();
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS); // question-reveal -> question-open
+
+      const cues = cuesOf(room);
+      room.buzz(picker);
+
+      expect(cues).toEqual(['buzzed']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('засчитанный ответ даёт answer-correct', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame(petya);
+      const picker = room.toGameStateView(petya)!.turnParticipantId!;
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+
+      const cues = cuesOf(room);
+      room.vote(petya, true);
+
+      expect(cues).toContain('answer-correct');
+      expect(cues).not.toContain('answer-wrong');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('неверный ответ, закрывший вопрос, даёт answer-wrong, а не answer-correct', () => {
+    vi.useFakeTimers();
+    try {
+      // Единственный оставшийся отвечающий отвечает неверно: judging →
+      // reveal, то есть та же конечная фаза, что и у верного ответа.
+      // Различает только знак дельты счёта — ради этого теста всё и
+      // делается. Без ведущего голос лишь копится в votes (engine.ts,
+      // handleVote) — резолюция приходит по VOTE_TIMER_MS, и уже она
+      // закрывает вопрос сразу же (resolveVote — «Открытое судейство»), а
+      // не переоткрывает его.
+      const { room, picker, other } = startedRoom();
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+
+      const cues = cuesOf(room);
+      room.vote(other, false);
+      vi.advanceTimersByTime(VOTE_TIMER_MS);
+
+      // Честность теста: закрылся, а не переоткрылся.
+      expect(room.toGameStateView()?.phase).toBe('reveal');
+      expect(cues).toContain('answer-wrong');
+      expect(cues).not.toContain('answer-correct');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('неверный ответ с переоткрытием вопроса тоже даёт answer-wrong', () => {
+    vi.useFakeTimers();
+    try {
+      // judging → question-open: отвечать ещё есть кому (с ведущим
+      // неверный ответ всегда переоткрывает вопрос, engine.ts, resolveVote).
+      const room = new Room(undefined, TEST_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame(petya);
+      const picker = room.toGameStateView(petya)!.turnParticipantId!;
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+
+      const cues = cuesOf(room);
+      room.vote(petya, false);
+
+      // Честность теста: переоткрылся, а не закрылся.
+      expect(room.toGameStateView(petya)?.phase).toBe('question-open');
+      expect(cues).toEqual(['answer-wrong']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('правка очков ведущим не даёт сигнала вообще', () => {
+    const room = new Room(undefined, TEST_PACK);
+    const vanya = joinedId(room, 'Ваня');
+    joinedId(room, 'Катя');
+    const petya = joinedId(room, 'Петя');
+    room.toggleHost(petya);
+    room.startGame(petya);
+
+    const cues = cuesOf(room);
+    room.adjustScore(petya, vanya, 500);
+
+    expect(cues).toEqual([]);
+  });
+
+  it('истёкший таймер вопроса без нажатий даёт question-timeout', () => {
+    vi.useFakeTimers();
+    try {
+      const { room, picker } = startedRoom();
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+
+      const cues = cuesOf(room);
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
+
+      expect(cues).toContain('question-timeout');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('вопрос, переоткрытый после неверного ответа, по истечении времени тоже даёт question-timeout', () => {
+    vi.useFakeTimers();
+    try {
+      // Нажали, ответили неверно, вопрос переоткрылся остальным, время
+      // вышло. Движок обнуляет buzzedCounterId при переоткрытии (engine.ts,
+      // resolveVote), так что для dispatch этот тайм-аут неотличим от
+      // обычного — и это верно по существу: вопрос умер на часах, его никто
+      // не взял. Звук неверного ответа отзвучал за полминуты до этого,
+      // мешаться им негде.
+      const room = new Room(undefined, TEST_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame(petya);
+      const picker = room.toGameStateView(petya)!.turnParticipantId!;
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+      room.vote(petya, false); // переоткрывает вопрос остальным
+
+      const cues = cuesOf(room);
+      vi.advanceTimersByTime(QUESTION_TIMER_MS);
+
+      expect(cues).toContain('question-timeout');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('конец раунда даёт round-ended', () => {
+    vi.useFakeTimers();
+    try {
+      // Раунд 1 состоит из одного вопроса — закрыть его тайм-аутом и дать
+      // истечь reveal хватает, чтобы раунд завершился (впереди раунд 2).
+      const room = new Room(undefined, TWO_ROUND_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = pickerOf(room);
+      const cues = cuesOf(room);
+
+      room.selectQuestion(picker, 0, 'r1q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      vi.advanceTimersByTime(QUESTION_TIMER_MS); // никто не нажал -> reveal
+      vi.advanceTimersByTime(REVEAL_TIMER_MS); // раунд закрыт -> round-end
+
+      expect(cues).toContain('round-ended');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('конец партии даёт game-ended', () => {
+    vi.useFakeTimers();
+    try {
+      // ONE_QUESTION_PACK: единственный раунд, единственный вопрос —
+      // раскрытие этого вопроса завершает и раунд, и партию сразу.
+      const room = new Room(undefined, ONE_QUESTION_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      room.startGame('requester');
+      const picker = pickerOf(room);
+      const cues = cuesOf(room);
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      vi.advanceTimersByTime(QUESTION_TIMER_MS); // reveal
+      vi.advanceTimersByTime(REVEAL_TIMER_MS); // единственный раунд закрыт -> game-end
+
+      expect(cues).toContain('game-ended');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('последний вопрос раунда даёт оба сигнала в порядке возникновения', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TWO_ROUND_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame(petya);
+      const picker = room.toGameStateView(petya)!.turnParticipantId!;
+
+      room.selectQuestion(picker, 0, 'r1q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+
+      const cues = cuesOf(room);
+      room.vote(petya, true); // единственный вопрос раунда, засчитан -> reveal
+      vi.advanceTimersByTime(REVEAL_TIMER_MS); // раунд закрыт -> round-end
+
+      expect(cues).toEqual(['answer-correct', 'round-ended']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
