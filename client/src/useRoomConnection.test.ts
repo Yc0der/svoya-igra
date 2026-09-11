@@ -504,6 +504,18 @@ describe('useRoomConnection', () => {
     expect(result.current.status).not.toBe('name-taken');
   });
 
+  it('person-exists переводит статус в отдельное состояние, не в name-taken', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket.emitOpen());
+    act(() => result.current.join('Ваня'));
+    act(() => socket.emitMessage({ type: 'person-exists' }));
+
+    expect(result.current.status).toBe('person-exists');
+    expect(result.current.status).not.toBe('name-taken');
+  });
+
   it('person-unknown переводит статус в отдельное состояние', () => {
     const { result } = renderHook(() => useRoomConnection(factory));
     const socket = FakeWebSocket.instances[0];

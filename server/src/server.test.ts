@@ -708,6 +708,48 @@ describe('createServer join-as', () => {
     );
     await rm(dir, { recursive: true, force: true });
   });
+
+  it('отклоняет ручной ввод имени уже известного человека отдельной причиной', async () => {
+    // Отказ обязан доехать до телефона именно как person-exists: раньше
+    // обработчик join схлопывал любой отказ в name-taken, и игрок не узнавал,
+    // что искать себя надо в списке.
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-person-exists-'));
+    const history: HistoryRecorder = {
+      startGame: () => null,
+      recordQuestion: () => {},
+      finishGame: () => {},
+      discardGame: () => {},
+      recordTag: () => {},
+      clearTag: () => {},
+      recordTagReason: () => false,
+      downTagsForReview: () => [],
+      createPerson: () => null,
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    };
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const nextMessage = collectMessages(socket);
+    await waitForOpen(socket);
+    await nextMessage(); // стартовое state
+
+    socket.send(JSON.stringify({ type: 'join', name: 'ваня' }));
+    expect(await nextMessage()).toEqual({ type: 'person-exists' });
+
+    socket.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
+    await rm(dir, { recursive: true, force: true });
+  });
 });
 
 // Отдельный describe, а не тест внутри предыдущего: интервал хартбита ставится

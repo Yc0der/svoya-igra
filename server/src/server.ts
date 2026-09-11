@@ -347,7 +347,11 @@ export function createServer(options: CreateServerOptions): GameServer {
       if (message.type === 'join' && typeof message.name === 'string') {
         const result = room.join(message.name);
         if ('error' in result) {
-          send(ws, { type: 'name-taken' });
+          // Раньше здесь стояла жёсткая 'name-taken' на любой отказ. С
+          // появлением person-exists причина перестала быть единственной, и
+          // текст на телефоне обязан её различать — как это давно делает
+          // обработчик join-as ниже.
+          send(ws, { type: result.error });
           return;
         }
         connections.set(ws, result.participant.id);

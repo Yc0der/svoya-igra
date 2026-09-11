@@ -444,6 +444,67 @@ describe('Room.join — связь с человеком в истории', () 
     expect('participant' in result && result.participant.personId).toBeNull();
   });
 
+  // Имя человека — ник: уникально по всей базе, а не только в комнате
+  // (design.md, 2026-08-26-player-identity, «Имя человека уникально в базе»).
+  // Вживую сломалось именно здесь: человек нажал «Меня тут нет», ввёл своё же
+  // имя руками, и join() завёл ВТОРОГО «Андона» с историей, разбитой пополам.
+  it('ввод имени уже известного человека не заводит второго', () => {
+    let created = 0;
+    const history = historyStub({
+      createPerson: () => {
+        created += 1;
+        return 42;
+      },
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+
+    expect(room.join('Ваня')).toEqual({ error: 'person-exists' });
+    // Проверяется не только отказ, но и что рекордер не тронут: отказ без
+    // этого мог бы прийти уже ПОСЛЕ вставки строки в people.
+    expect(created).toBe(0);
+    expect(room.getState().participants).toHaveLength(0);
+  });
+
+  it('совпадение имени ищется без учёта регистра и пробелов', () => {
+    // Та же normalizeName, что и у правила уникальности имён в комнате, —
+    // иначе «ваня» обошло бы проверку и завело дубль.
+    const history = historyStub({
+      createPerson: () => 42,
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+
+    expect(room.join('  ВАНЯ ')).toEqual({ error: 'person-exists' });
+  });
+
+  it('незнакомое имя по-прежнему заводит человека', () => {
+    const history = historyStub({
+      createPerson: () => 42,
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+
+    const result = room.join('Катя');
+
+    expect('participant' in result && result.participant.personId).toBe(42);
+  });
+
+  it('при выключенной истории совпадение имени не проверяется', () => {
+    // «История выключена — вход работает ровно как раньше» (design.md,
+    // «Лобби»): людей для клиента не существует, отказывать не от чьего имени.
+    const history = historyStub({
+      createPerson: () => 42,
+      listPeople: () => [{ id: 7, name: 'Ваня', games: 3 }],
+    });
+    const room = new Room(undefined, undefined, undefined, undefined, history);
+    room.setHistoryEnabled(false);
+
+    const result = room.join('Ваня');
+
+    expect('participant' in result && result.participant.personId).toBeNull();
+  });
+
   it('передаёт человека в историю при старте партии', () => {
     let nextId = 100;
     const recorded: { participants?: StartGameInput['participants'] } = {};
