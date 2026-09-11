@@ -66,6 +66,11 @@ e2e/fixtures/final-room-snapshot.json.tmp
 lan-host.local.json
 lan-host.local.json.tmp
 
+# Подобранная под комнату громкость (server/src/audioSettings.ts) — настройка
+# машины, а не проекта, как и lan-host.local.json выше.
+audio-settings.local.json
+audio-settings.local.json.tmp
+
 # Состояние хука точек выхода (.claude/scripts/checkpoint.mjs) — на сессию, не на репозиторий
 .claude/state/
 
