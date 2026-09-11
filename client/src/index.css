@@ -931,7 +931,11 @@ select:focus {
   flex-direction: column;
   gap: 10px;
   width: 100%;
-  max-width: 380px;
+  /* Та же ширина, что у input и .button на этом экране: кнопки внутри списка
+     всё равно ограничены 340px из «.player--join .button», и при более широком
+     ul они прижимались влево, а «Меня тут нет» под списком центрировалась — на
+     телефоне колонка visibly разъезжалась. */
+  max-width: 340px;
 }
 
 .player-people .button {
