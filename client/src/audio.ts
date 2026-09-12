@@ -194,6 +194,18 @@ export class AudioEngine {
     sound.volume = 0;
     sound.addEventListener('ended', () => {
       this.trackIndex = (this.trackIndex + 1) % this.playlist.length;
+      // Настоящий 'ended' может прийти, пока музыка уже гасится или выключена
+      // (fadeTo(0) после setMusicWanted(false) ещё не доиграл затухание): без
+      // этой проверки следующий трек всё равно стартовал бы на полной
+      // громкости поверх вопроса, а musicWanted уже false, так что само не
+      // исправится (следующий setMusicWanted(false) — no-op при неизменном
+      // флаге). trackIndex при этом всё равно продвигается: при следующем
+      // включении логично начать со следующего трека, а не воскрешать
+      // доигравший.
+      if (!this.musicWanted || !this.settings.musicEnabled) {
+        this.music = null;
+        return;
+      }
       this.music = this.startTrack(this.playlist[this.trackIndex]);
       this.fadeTo(this.settings.musicVolume);
     });

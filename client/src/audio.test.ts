@@ -176,6 +176,30 @@ describe('AudioEngine: музыка', () => {
     expect(track.pauseCalls).toBe(1);
   });
 
+  it('трек, доигравший естественным концом во время затухания на паузе, не воскрешает музыку', () => {
+    const e = engine();
+    e.setMusicWanted(true);
+    vi.advanceTimersByTime(MUSIC_FADE_MS);
+    const before = FakeSound.created.length;
+
+    e.setMusicWanted(false);
+    // Затухание ещё не доиграно — трек кончается сам, не по fadeTo(0).
+    FakeSound.created.at(-1)!.end();
+
+    // Новый элемент на 'ended' не создаётся: музыка сейчас не нужна.
+    expect(FakeSound.created.length).toBe(before);
+
+    vi.advanceTimersByTime(MUSIC_FADE_MS);
+    // После полного прокручивания таймеров ничего нового не заиграло.
+    expect(FakeSound.created.length).toBe(before);
+
+    // Следующее включение начинает со следующего трека, а не воскрешает
+    // доигравший.
+    e.setMusicWanted(true);
+    vi.advanceTimersByTime(MUSIC_FADE_MS);
+    expect(FakeSound.created.at(-1)?.url).toBe('/audio/music/b.mp3');
+  });
+
   it('смена громкости на ходу применяется к играющему треку сразу', () => {
     const e = engine();
     e.setMusicWanted(true);
