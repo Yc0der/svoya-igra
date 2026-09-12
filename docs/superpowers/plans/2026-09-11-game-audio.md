@@ -1692,6 +1692,15 @@ export class AudioEngine {
     sound.volume = 0;
     sound.addEventListener('ended', () => {
       this.trackIndex = (this.trackIndex + 1) % this.playlist.length;
+      // Гейт теми же флагами, что и syncMusic: трек может доиграть до конца
+      // ровно в те 800 мс, пока музыка гаснет под выбранный вопрос, и без
+      // этой проверки следующий трек завёлся бы и вышел на полную громкость
+      // поверх вопроса — причём навсегда, потому что повторный
+      // setMusicWanted(false) уже no-op.
+      if (!this.musicWanted || !this.settings.musicEnabled) {
+        this.music = null;
+        return;
+      }
       this.music = this.startTrack(this.playlist[this.trackIndex]);
       this.fadeTo(this.settings.musicVolume);
     });
