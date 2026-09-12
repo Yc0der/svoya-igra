@@ -3995,6 +3995,38 @@ describe('Room: сигналы звука', () => {
     }
   });
 
+  // Ревью задачи 5 (server/src/server.test.ts, skipCues): большинство тестов
+  // этого describe проверяют состав через toContain, а не количество — если
+  // бы vote() когда-нибудь дал 'answer-correct' дважды на один вердикт,
+  // toContain этого бы не заметил. toEqual с массивом из одного элемента
+  // фиксирует и состав, и число — тот же приём, что уже используют
+  // 'открытие вопроса даёт question-opened' и 'нажатие кнопки даёт buzzed'
+  // выше, здесь распространён на разрешение голосования.
+  it('засчитанный ответ даёт ровно один сигнал, не два', () => {
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame(petya);
+      const picker = room.toGameStateView(petya)!.turnParticipantId!;
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+
+      const cues = cuesOf(room);
+      room.vote(petya, true);
+
+      expect(cues).toEqual(['answer-correct']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('неверный ответ, закрывший вопрос, даёт answer-wrong, а не answer-correct', () => {
     vi.useFakeTimers();
     try {
