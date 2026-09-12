@@ -4067,6 +4067,37 @@ describe('Room: сигналы звука', () => {
     expect(cues).toEqual([]);
   });
 
+  it('правка очков нажавшему посреди судейства тоже не даёт сигнала (регрессия: не подменяет вердикт)', () => {
+    // adjust-score доступен в любой фазе, включая judging (engine.ts,
+    // handleAdjustScore), и не меняет фазу вообще — до вердикта ведущего
+    // (vote) правка счёта нажавшему не должна звучать как ответ-correct/wrong,
+    // хотя формально buzzedBefore и знак дельты совпадают с тем, что отличает
+    // настоящий вердикт.
+    vi.useFakeTimers();
+    try {
+      const room = new Room(undefined, TEST_PACK);
+      joinedId(room, 'Ваня');
+      joinedId(room, 'Катя');
+      const petya = joinedId(room, 'Петя');
+      room.toggleHost(petya);
+      room.startGame(petya);
+      const picker = room.toGameStateView(petya)!.turnParticipantId!;
+
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+
+      const cues = cuesOf(room);
+      room.adjustScore(petya, picker, 500); // фаза остаётся judging, вердикта не было
+
+      expect(room.toGameStateView(petya)?.phase).toBe('judging');
+      expect(cues).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('истёкший таймер вопроса без нажатий даёт question-timeout', () => {
     vi.useFakeTimers();
     try {
@@ -4162,6 +4193,9 @@ describe('Room: сигналы звука', () => {
   });
 
   it('последний вопрос раунда даёт оба сигнала в порядке возникновения', () => {
+    // Оба сигнала приходят не одним reduce(), а двумя последовательными
+    // dispatch: сперва вердикт (vote), потом истёкший таймер reveal —
+    // cuesOf() лишь копит их по мере поступления, в порядке возникновения.
     vi.useFakeTimers();
     try {
       const room = new Room(undefined, TWO_ROUND_PACK);

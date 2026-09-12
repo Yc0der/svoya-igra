@@ -1663,12 +1663,21 @@ export class Room {
     if (phaseBefore !== 'buzzed' && state.phase === 'buzzed') {
       cues.push('buzzed');
     }
-    if (phaseBefore === 'judging' && buzzedBefore !== null) {
+    if (
+      phaseBefore === 'judging' &&
+      buzzedBefore !== null &&
+      state.phase !== 'judging'
+    ) {
       // Знак дельты, а не конечная фаза: judging кончается и 'reveal', и
       // возвратом в 'question-open', причём 'reveal' наступает в обоих
       // исходах — и при засчитанном ответе, и при незасчитанном, когда
-      // отвечать больше некому. Правка очков ведущим (adjust-score) сюда не
-      // попадает: она приходит не из judging.
+      // отвечать больше некому. Проверяется именно смена фазы, а не тип
+      // события: adjust-score (handleAdjustScore, engine.ts) доступен в
+      // любой фазе, включая judging, и меняет только scores, оставляя фазу
+      // как есть (unchanged()) — без этой оговорки правка счёта нажавшему
+      // ПОКА он ещё не отсужен звучала бы как вердикт, которого не было.
+      // Все три ветки настоящей резолюции в resolveVote, наоборот, всегда
+      // уводят фазу из judging.
       const before = scoresBefore[buzzedBefore] ?? 0;
       const after = state.scores[buzzedBefore] ?? 0;
       if (after > before) cues.push('answer-correct');
