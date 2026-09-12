@@ -10,6 +10,8 @@ import { loadPack } from './pack.js';
 import { listAvailablePacks } from './packs.js';
 import { GameHistory } from './history.js';
 import { ensureFileFromExample } from './fileFromExample.js';
+import { scanAudioAssets } from './audioAssets.js';
+import { readAudioSettings, writeAudioSettings } from './audioSettings.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
@@ -61,6 +63,9 @@ const CLIENT_DIST_PATH = join(
   '../../client/dist',
 );
 const PACKS_DIR = dirname(PACK_PATH);
+const AUDIO_DIR = process.env.AUDIO_DIR ?? './audio';
+const AUDIO_SETTINGS_PATH =
+  process.env.AUDIO_SETTINGS_PATH ?? './audio-settings.local.json';
 
 async function main(): Promise<void> {
   // Битый снапшот не должен мешать серверу подняться. `writeSnapshot` теперь
@@ -181,6 +186,29 @@ async function main(): Promise<void> {
   );
   room.refreshAvailablePacks(null, initialAvailablePacks);
 
+  // Сканирование однократное: во время партии файлы никто не добавляет, а на
+  // этапе подбора звуков перезапуск дев-сервера стоит секунду (design.md,
+  // «Откуда берутся файлы»).
+  const audioAssets = await scanAudioAssets(AUDIO_DIR);
+  const silentCues = 7 - audioAssets.cues.length;
+  console.log(
+    audioAssets.cues.length === 0 && audioAssets.music.length === 0
+      ? `Звуки: в ${AUDIO_DIR} ничего не найдено — игра идёт беззвучно.`
+      : `Звуки: ${audioAssets.cues.length} из 7 сигналов${
+          silentCues > 0 ? ` (${silentCues} молчат)` : ''
+        }, треков в плейлисте: ${audioAssets.music.length}.`,
+  );
+
+  // Порядок важен: сначала применяем сохранённое, и только потом
+  // подписываемся на запись — иначе первое же применение перезаписало бы
+  // файл тем, что мы из него только что прочитали.
+  room.setAudioSettings(await readAudioSettings(AUDIO_SETTINGS_PATH));
+  room.onAudioSettingsChange((settings) => {
+    writeAudioSettings(AUDIO_SETTINGS_PATH, settings).catch((err: unknown) => {
+      console.error(`Не удалось сохранить ${AUDIO_SETTINGS_PATH}:`, err);
+    });
+  });
+
   // Записи снапшота сериализуются в очередь, чтобы более медленная запись
   // не перезаписала диск устаревшим состоянием после более быстрой поздней записи.
   let writeQueue: Promise<void> = Promise.resolve();
@@ -212,6 +240,8 @@ async function main(): Promise<void> {
     // Та же самая база, что пишет Room, — но сервер видит её через узкий
     // интерфейс только на чтение.
     history,
+    audioDir: AUDIO_DIR,
+    audioAssets,
   });
 
   // Без этого обработчика занятый порт (например, процесс, оставшийся от
