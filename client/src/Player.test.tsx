@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Player } from './Player';
 import { useRoomConnection } from './useRoomConnection';
 import type { GameStateView, RoomConnection } from './useRoomConnection';
+import { DEFAULT_AUDIO_SETTINGS } from './audio';
 
 // TAG_REASONS приходит из настоящего модуля (importActual), а не своей
 // копией литерала: копия внутри теста может разойтись с рабочим кодом
@@ -88,6 +89,10 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     selectPackError: null,
     refreshPacks: vi.fn(),
     selectPack: vi.fn(),
+    audio: DEFAULT_AUDIO_SETTINGS,
+    audioAssets: { cues: [], music: [] },
+    setAudioSettings: vi.fn(),
+    subscribeCue: vi.fn(() => () => {}),
     ...overrides,
   };
 }

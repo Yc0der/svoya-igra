@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { Board } from './Board';
 import { useRoomConnection } from './useRoomConnection';
 import type { GameStateView, RoomConnection } from './useRoomConnection';
+import { DEFAULT_AUDIO_SETTINGS } from './audio';
 
 vi.mock('./useRoomConnection', () => ({
   useRoomConnection: vi.fn(),
@@ -82,6 +83,10 @@ function connection(overrides: Partial<RoomConnection> = {}): RoomConnection {
     selectPackError: null,
     refreshPacks: vi.fn(),
     selectPack: vi.fn(),
+    audio: DEFAULT_AUDIO_SETTINGS,
+    audioAssets: { cues: [], music: [] },
+    setAudioSettings: vi.fn(),
+    subscribeCue: vi.fn(() => () => {}),
     ...overrides,
   };
 }

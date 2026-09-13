@@ -1,4 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  DEFAULT_AUDIO_SETTINGS,
+  type AudioAssets,
+  type AudioSettings,
+  type GameCue,
+} from './audio';
 
 export interface ParticipantView {
   id: string;
@@ -167,11 +173,14 @@ type ServerMessage =
       lanUrl: string;
       availablePacks: PackSummary[];
       activePackFilename: string | null;
+      audio: AudioSettings;
+      audioAssets: AudioAssets;
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
   | { type: 'select-pack-error'; reason: 'unknown-file' }
-  | { type: 'select-question-error'; reason: SelectQuestionErrorReason };
+  | { type: 'select-question-error'; reason: SelectQuestionErrorReason }
+  | { type: 'game-cue'; cue: GameCue };
 
 type ClientMessage =
   | { type: 'join'; name: string }
@@ -202,7 +211,8 @@ type ClientMessage =
   | { type: 'submit-final-answer'; text: string }
   | { type: 'final-vote'; participantId: string; correct: boolean }
   | { type: 'refresh-packs' }
-  | { type: 'select-pack'; filename: string };
+  | { type: 'select-pack'; filename: string }
+  | { type: 'set-audio-settings'; settings: Partial<AudioSettings> };
 
 export type ConnectionStatus =
   | 'connecting'
@@ -271,6 +281,19 @@ export interface RoomConnection {
   selectPackError: 'unknown-file' | null;
   refreshPacks(): void;
   selectPack(filename: string): void;
+  // Настройки звука — правда одна на всех (server/src/protocol.ts,
+  // StateMessage.audio): выключили с телефона, и табло замолчало.
+  audio: AudioSettings;
+  audioAssets: AudioAssets;
+  setAudioSettings(settings: Partial<AudioSettings>): void;
+  /**
+   * Подписка на разовые сигналы партии. Не состояние: сигнал, положенный в
+   * состояние, переиграется на табло при перезагрузке страницы, а два
+   * одинаковых сигнала подряд («нажал» дважды за вопрос) не отличались бы
+   * друг от друга. Функция стабильна между рендерами — её кладут в useEffect
+   * с пустым списком зависимостей.
+   */
+  subscribeCue(listener: (cue: GameCue) => void): () => void;
 }
 
 const TOKEN_KEY = 'svoya-igra-token';
@@ -312,6 +335,20 @@ export function useRoomConnection(
   const [startGameError, setStartGameError] =
     useState<StartGameErrorReason | null>(null);
   const [people, setPeople] = useState<PersonSummary[]>([]);
+  const [audio, setAudio] = useState<AudioSettings>(DEFAULT_AUDIO_SETTINGS);
+  const [audioAssets, setAudioAssets] = useState<AudioAssets>({
+    cues: [],
+    music: [],
+  });
+  const cueListenersRef = useRef(new Set<(cue: GameCue) => void>());
+  // Через useRef, а не useCallback: функция обязана быть одной и той же всю
+  // жизнь хука — useBoardAudio подписывается ей один раз при монтировании.
+  const subscribeCue = useRef((listener: (cue: GameCue) => void) => {
+    cueListenersRef.current.add(listener);
+    return () => {
+      cueListenersRef.current.delete(listener);
+    };
+  }).current;
   // Читается один раз при монтировании — подсказка о том, кто в прошлый раз
   // входил с этого телефона (Task 3, «память телефона — подсказка, а не
   // истина»). Нечисловое или отсутствующее значение игнорируется, а не
@@ -444,6 +481,8 @@ export function useRoomConnection(
           setLanUrl(message.lanUrl);
           setAvailablePacks(message.availablePacks);
           setActivePackFilename(message.activePackFilename);
+          setAudio(message.audio);
+          setAudioAssets(message.audioAssets);
           setSelectPackError(null);
           // Любое изменение в комнате (кто-то присоединился, кто-то стал
           // ведущим, партия реально началась) делает старую ошибку запуска
@@ -472,6 +511,11 @@ export function useRoomConnection(
             () => setSelectQuestionBlocked(false),
             SELECT_QUESTION_BLOCKED_MS,
           );
+        }
+        if (message.type === 'game-cue') {
+          for (const listener of cueListenersRef.current) {
+            listener(message.cue);
+          }
         }
       });
 
@@ -573,5 +617,10 @@ export function useRoomConnection(
     selectPackError,
     refreshPacks: () => send({ type: 'refresh-packs' }),
     selectPack: (filename) => send({ type: 'select-pack', filename }),
+    audio,
+    audioAssets,
+    setAudioSettings: (settings) =>
+      send({ type: 'set-audio-settings', settings }),
+    subscribeCue,
   };
 }
