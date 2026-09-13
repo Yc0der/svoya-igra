@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Board } from './Board';
 import { useRoomConnection } from './useRoomConnection';
@@ -792,5 +793,59 @@ describe('Board', () => {
       },
     });
     expect(screen.queryByText(/^\d+с$/)).not.toBeInTheDocument();
+  });
+});
+
+describe('Board: панель звука', () => {
+  it('в свёрнутом виде показывает только иконку', () => {
+    mockedUseRoomConnection.mockReturnValue(connection());
+    render(<Board />);
+
+    expect(screen.getByRole('button', { name: 'Звук' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Громкость музыки')).not.toBeInTheDocument();
+  });
+
+  it('по клику раскрывает четыре ручки с текущими значениями', async () => {
+    mockedUseRoomConnection.mockReturnValue(connection());
+    render(<Board />);
+    await userEvent.click(screen.getByRole('button', { name: 'Звук' }));
+
+    expect(screen.getByLabelText('Звуки событий')).toBeChecked();
+    expect(screen.getByLabelText('Громкость звуков')).toHaveValue('0.7');
+    expect(screen.getByLabelText('Музыка')).toBeChecked();
+    expect(screen.getByLabelText('Громкость музыки')).toHaveValue('0.35');
+  });
+
+  it('тумблер шлёт частичное обновление, не трогая остальное', async () => {
+    const setAudioSettings = vi.fn();
+    mockedUseRoomConnection.mockReturnValue(connection({ setAudioSettings }));
+    render(<Board />);
+    await userEvent.click(screen.getByRole('button', { name: 'Звук' }));
+    await userEvent.click(screen.getByLabelText('Музыка'));
+
+    expect(setAudioSettings).toHaveBeenCalledWith({ musicEnabled: false });
+  });
+
+  it('панель закрывается кликом вне её', async () => {
+    mockedUseRoomConnection.mockReturnValue(connection());
+    render(<Board />);
+    await userEvent.click(screen.getByRole('button', { name: 'Звук' }));
+    expect(screen.getByLabelText('Музыка')).toBeInTheDocument();
+
+    await userEvent.click(document.body);
+    expect(screen.queryByLabelText('Музыка')).not.toBeInTheDocument();
+  });
+
+  it('панель есть и в лобби, и на экране итогов', () => {
+    mockedUseRoomConnection.mockReturnValue(connection());
+    const { unmount } = render(<Board />);
+    expect(screen.getByRole('button', { name: 'Звук' })).toBeInTheDocument();
+    unmount();
+
+    mockedUseRoomConnection.mockReturnValue(
+      connection({ game: baseGame({ phase: 'game-end' }) }),
+    );
+    render(<Board />);
+    expect(screen.getByRole('button', { name: 'Звук' })).toBeInTheDocument();
   });
 });

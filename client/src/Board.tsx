@@ -1,12 +1,37 @@
-import { Fragment, type CSSProperties } from 'react';
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useRoomConnection } from './useRoomConnection';
+import type { RoomConnection } from './useRoomConnection';
 import { useCountdown } from './useCountdown';
 import { useTextReveal } from './useTextReveal';
+import { useBoardAudio } from './useBoardAudio';
 import { VideoPlayer } from './VideoPlayer';
+import type { AudioSettings } from './audio';
 
 export function Board() {
-  const { participants, lanUrl, game, mediaFinished } = useRoomConnection();
+  const connection = useRoomConnection();
+  const { blocked, unlock } = useBoardAudio(connection);
+  return (
+    <>
+      <BoardScreen connection={connection} />
+      <BoardAudioControls
+        settings={connection.audio}
+        onChange={connection.setAudioSettings}
+        blocked={blocked}
+        onUnlock={unlock}
+      />
+    </>
+  );
+}
+
+function BoardScreen({ connection }: { connection: RoomConnection }) {
+  const { participants, lanUrl, game, mediaFinished } = connection;
   const remainingSeconds = useCountdown(game?.timerDeadline ?? null);
   const revealedQuestionText = useTextReveal(
     game?.phase === 'question-reveal' ? (game.timerDeadline ?? null) : null,
@@ -286,6 +311,93 @@ export function Board() {
       )}
 
       {scoreboard}
+    </div>
+  );
+}
+
+function BoardAudioControls({
+  settings,
+  onChange,
+  blocked,
+  onUnlock,
+}: {
+  settings: AudioSettings;
+  onChange: (patch: Partial<AudioSettings>) => void;
+  blocked: boolean;
+  onUnlock: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Клик вне панели закрывает её: на телевизоре мышью не пользуются, панель
+  // открывают редко и с чужого устройства — оставлять её раскрытой поверх
+  // игры хуже, чем открыть лишний раз.
+  useEffect(() => {
+    if (!open) return;
+    function onDocumentClick(event: MouseEvent): void {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    }
+    document.addEventListener('click', onDocumentClick);
+    return () => document.removeEventListener('click', onDocumentClick);
+  }, [open]);
+
+  return (
+    <div className="board-audio" ref={rootRef}>
+      {/* Браузер не играет ничего до жеста на странице, а табло — экран, на
+          котором никто не кликает. Тот же приём, что у кнопки «▶ Играть» в
+          VideoPlayer.tsx (design.md, «Разблокировка звука»). */}
+      {blocked && (
+        <button className="button button--primary" onClick={onUnlock}>
+          🔊 Включить звук
+        </button>
+      )}
+      <button
+        className="button board-audio-toggle"
+        aria-label="Звук"
+        onClick={() => setOpen((value) => !value)}
+      >
+        🔊
+      </button>
+      {open && (
+        <div className="board-audio-panel">
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.effectsEnabled}
+              onChange={(e) => onChange({ effectsEnabled: e.target.checked })}
+            />{' '}
+            Звуки событий
+          </label>
+          <input
+            type="range"
+            aria-label="Громкость звуков"
+            min={0}
+            max={1}
+            step={0.05}
+            value={settings.effectsVolume}
+            onChange={(e) =>
+              onChange({ effectsVolume: Number(e.target.value) })
+            }
+          />
+          <label>
+            <input
+              type="checkbox"
+              checked={settings.musicEnabled}
+              onChange={(e) => onChange({ musicEnabled: e.target.checked })}
+            />{' '}
+            Музыка
+          </label>
+          <input
+            type="range"
+            aria-label="Громкость музыки"
+            min={0}
+            max={1}
+            step={0.05}
+            value={settings.musicVolume}
+            onChange={(e) => onChange({ musicVolume: Number(e.target.value) })}
+          />
+        </div>
+      )}
     </div>
   );
 }
