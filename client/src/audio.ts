@@ -164,9 +164,26 @@ export class AudioEngine {
     this.syncMusic();
   }
 
+  /**
+   * StrictMode в деве прогоняет монтирование → очистку → повторное
+   * монтирование эффектов на одном и том же рендере, без перерисовки между
+   * ними: вызовы setAssets/setSettings/setMusicWanted из хука не повторяются
+   * сами по себе, а срабатывают только на изменение значения. Без сброса
+   * сравнительного состояния здесь повторная синхронизация после такой
+   * очистки ничего не увидела бы — settings/playlist/musicWanted совпали бы
+   * с уже применёнными — и музыка осталась бы молчать до первой настоящей
+   * смены фазы или настроек. Сброс к пустому состоянию гарантирует, что
+   * следующий вызов setAssets/setSettings/setMusicWanted (тем же значением,
+   * что и раньше) снова дойдёт до syncMusic().
+   */
   dispose(): void {
     this.stopMusic();
     this.blockedListeners.clear();
+    this.settings = { ...DEFAULT_AUDIO_SETTINGS };
+    this.cueUrls = new Map();
+    this.playlist = [];
+    this.trackIndex = 0;
+    this.musicWanted = false;
   }
 
   private syncMusic(): void {

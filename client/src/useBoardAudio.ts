@@ -44,13 +44,20 @@ export function useBoardAudio(
     [connection.subscribeCue, engine],
   );
 
-  // Прямо в теле рендера, а не в useEffect: audio/audioAssets приезжают новым
-  // объектом в каждом сообщении state, и эффект с ними в зависимостях
-  // срабатывал бы на каждое изменение счёта. Повторы движок отбрасывает сам,
-  // по значению (AudioEngine.setAssets/setSettings/setMusicWanted).
-  engine.setAssets(connection.audioAssets);
-  engine.setSettings(connection.audio);
-  engine.setMusicWanted(musicWantedFor(connection.game));
+  // Без массива зависимостей — эффект без него срабатывает на каждый рендер,
+  // как раньше срабатывал бы вызов прямо в теле рендера (audio/audioAssets
+  // приезжают новым объектом в каждом сообщении state, и эффект с ними в
+  // зависимостях срабатывал бы на каждое изменение счёта; повторы движок
+  // отбрасывает сам, по значению — AudioEngine.setAssets/setSettings/
+  // setMusicWanted). Дополнительно это чинит StrictMode в деве: объявлен
+  // после эффекта с dispose, поэтому на фантомном повторном монтировании
+  // успевает увидеть уже сброшенный dispose() движок и реально
+  // пересинхронизировать его, а не молча совпасть со старым значением.
+  useEffect(() => {
+    engine.setAssets(connection.audioAssets);
+    engine.setSettings(connection.audio);
+    engine.setMusicWanted(musicWantedFor(connection.game));
+  });
 
   return { blocked, unlock: () => engine.unlock() };
 }
