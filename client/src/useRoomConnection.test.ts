@@ -651,4 +651,23 @@ describe('useRoomConnection', () => {
 
     expect(seen).toEqual([]);
   });
+
+  it('бросивший слушатель не мешает остальным получить сигнал', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    const seen: string[] = [];
+    act(() => {
+      result.current.subscribeCue(() => {
+        throw new Error('сломанный подписчик');
+      });
+      result.current.subscribeCue((cue) => seen.push(cue));
+    });
+    act(() => socket.emitOpen());
+    act(() => socket.emitMessage({ type: 'game-cue', cue: 'buzzed' }));
+
+    expect(seen).toEqual(['buzzed']);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
 });

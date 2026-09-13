@@ -514,7 +514,14 @@ export function useRoomConnection(
         }
         if (message.type === 'game-cue') {
           for (const listener of cueListenersRef.current) {
-            listener(message.cue);
+            // Set рассылает всем подписчикам — одна поломка в звуке (будущий
+            // useBoardAudio, задача 8) не должна глушить остальных слушателей
+            // и не должна вылететь исключением из обработчика сообщений сокета.
+            try {
+              listener(message.cue);
+            } catch (error) {
+              console.error(error);
+            }
           }
         }
       });
