@@ -602,10 +602,19 @@ function handleVote(
   if (!(event.counterId in state.scores)) {
     return unchanged(state);
   }
-  return unchanged({
+  const voted = {
     ...state,
     votes: { ...state.votes, [event.counterId]: event.correct },
-  });
+  };
+  // Проголосовали все, кто может, — ждать таймер незачем: вдвоём голос
+  // единственного не отвечавшего и есть решение (design.md, «СУДЕЙСТВО»).
+  // Живая партия вдвоём ждала после голоса все VOTE_TIMER_MS. Таймер
+  // остаётся для тех, кто не голосует; снимет его Room.applyEffects, как и
+  // при голосе ведущего выше.
+  const everyoneVoted = Object.keys(state.scores).every(
+    (id) => id === state.buzzedCounterId || id in voted.votes,
+  );
+  return everyoneVoted ? resolveVote(voted) : unchanged(voted);
 }
 
 // Панель ведущего: доступна в любой фазе, не только во время судейства —
