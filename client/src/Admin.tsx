@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useAdminConnection } from './useAdminConnection';
 import type { Question } from './useAdminConnection';
 import type { GameStateView } from './useRoomConnection';
+import type { GameCue } from './audio';
+import { VolumeSlider } from './VolumeSlider';
 import { START_GAME_ERROR_TEXT } from './errorText';
 
 // Те же области, что в бланке docs/anketa.html: форма правки обязана
@@ -25,6 +27,18 @@ function splitValues(value: string): string[] {
     .map((item) => item.trim())
     .filter((item) => item !== '');
 }
+
+// Порядок — как в сканере (server/src/audioAssets.ts): список читают глазами
+// и сверяют с папкой, он не должен прыгать между запусками.
+const CUE_LABELS: { cue: GameCue; label: string }[] = [
+  { cue: 'question-opened', label: 'Вопрос открылся' },
+  { cue: 'buzzed', label: 'Игрок нажал кнопку' },
+  { cue: 'answer-correct', label: 'Ответ засчитан' },
+  { cue: 'answer-wrong', label: 'Ответ не засчитан' },
+  { cue: 'question-timeout', label: 'Время вышло, никто не нажал' },
+  { cue: 'round-ended', label: 'Раунд закончился' },
+  { cue: 'game-ended', label: 'Партия закончилась' },
+];
 
 // «1 партия», «4 партии», «5 партий» — число идёт в текст подтверждения
 // удаления, и «4 партий» там читалось бы как небрежность ровно в том месте,
@@ -110,6 +124,9 @@ export function Admin() {
     clearPeopleError,
     mergePeople,
     forgetPerson,
+    audio,
+    audioAssets,
+    setAudioSettings,
   } = useAdminConnection();
   // «Снести всё» стирает участников, ведущего и партию разом — единственное
   // действие здесь с таким радиусом поражения, поэтому единственное с
@@ -553,6 +570,76 @@ export function Admin() {
         >
           Применить
         </button>
+      </section>
+
+      <section className="admin-section">
+        <h2>Звук</h2>
+        <p>
+          Звучит только табло: шесть телефонов, играющих один сигнал с разной
+          задержкой по Wi-Fi, — это не атмосфера, а каша.
+        </p>
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              checked={audio.effectsEnabled}
+              onChange={(e) =>
+                setAudioSettings({ effectsEnabled: e.target.checked })
+              }
+            />{' '}
+            Звуки событий
+          </label>
+        </p>
+        <p>
+          <VolumeSlider
+            label="Громкость звуков"
+            value={audio.effectsVolume}
+            onChange={(volume) => setAudioSettings({ effectsVolume: volume })}
+          />
+        </p>
+        <p>
+          <label>
+            <input
+              type="checkbox"
+              checked={audio.musicEnabled}
+              onChange={(e) =>
+                setAudioSettings({ musicEnabled: e.target.checked })
+              }
+            />{' '}
+            Музыка
+          </label>
+        </p>
+        <p>
+          <VolumeSlider
+            label="Громкость музыки"
+            value={audio.musicVolume}
+            onChange={(volume) => setAudioSettings({ musicVolume: volume })}
+          />
+        </p>
+        {/* Список нужен ровно затем, чтобы вопрос «почему не звучит» решался
+          взглядом: это либо «файла нет», либо «звук выключен», и третьего
+          варианта быть не должно (design.md, «Интерфейс»). */}
+        {audioAssets.cues.length === 0 && audioAssets.music.length === 0 ? (
+          <p>
+            Файлов не найдено — игра идёт беззвучно. Положите файлы в папку{' '}
+            <code>audio/</code> (список имён — в <code>audio/README.md</code>) и
+            перезапустите сервер.
+          </p>
+        ) : (
+          <>
+            <ul className="admin-audio-cues">
+              {CUE_LABELS.map(({ cue, label }) => (
+                <li key={cue}>
+                  {label} —{' '}
+                  {audioAssets.cues.some((a) => a.cue === cue)
+                    ? 'звучит'
+                    : 'молчит, файла нет'}
+                </li>
+              ))}
+            </ul>
+            <p>Треков в плейлисте: {audioAssets.music.length}</p>
+          </>
+        )}
       </section>
 
       <section className="admin-section">

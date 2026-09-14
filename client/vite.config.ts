@@ -9,6 +9,9 @@ export default defineConfig({
     proxy: {
       '/ws': { target: 'ws://localhost:8080', ws: true },
       '/media': { target: 'http://localhost:8080' },
+      // Без этого звуки не открываются в дев-режиме: клиент на порту Vite,
+      // файлы отдаёт сервер на 8080 — ровно та же причина, что у /media.
+      '/audio': { target: 'http://localhost:8080' },
     },
   },
   test: {

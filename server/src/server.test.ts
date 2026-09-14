@@ -16,7 +16,6 @@ import { GameHistory, type HistoryRecorder } from './history.js';
 import { savePlayerStats } from './playersFile.js';
 import {
   REVEAL_TIMER_MS,
-  VOTE_TIMER_MS,
   TEXT_REVEAL_MIN_MS,
   QUESTION_TIMER_MS,
 } from './engine.js';
@@ -73,6 +72,37 @@ function waitForOpen(ws: WebSocket): Promise<void> {
   return new Promise((resolve) => ws.once('open', () => resolve()));
 }
 
+// Игровое действие теперь может дать не только 'state', но и 'game-cue' —
+// разовый сигнал звука, который уходит ДО рассылки состояния (server.ts,
+// room.onAudioCue шлёт синхронно, broadcastState отложен в микротаск). Все
+// тесты этого файла, кроме одного явного (describe('createServer audio'),
+// 'game-cue доходит до подключённого сокета' — там свой отдельный слушатель
+// поверх того же сокета), ждут от nextMessage() именно результат в state, а
+// не сигнал. Оборачивает сырой nextMessage от collectMessages() так, чтобы
+// он молча пропускал 'game-cue' и отдавал следующее настоящее сообщение —
+// без этого каждый game-cue сдвигал бы очередь на одно сообщение и рано или
+// поздно возвращал бы тесту не тот кадр.
+//
+// Осознанный размен: цикл ниже пропускает ЛЮБОЕ число подряд идущих
+// 'game-cue', ничего не утверждая о том, сколько их было — если бы
+// room.onAudioCue когда-нибудь дал два сигнала на одно действие (регрессия),
+// все тесты этого файла, идущие через joinPlayer/joinPlayerAs/connectAdmin,
+// молча проглотили бы оба и остались бы зелёными. Здесь это нормально: число
+// сигналов на действие — забота Room, а не транспорта, и она зафиксирована
+// в server/src/room.test.ts, describe('Room: сигналы звука') — там
+// toEqual(['...']) с массивом из одного элемента (а не toContain) ловит
+// задвоение на уровне, где оно рождается.
+function skipCues(
+  nextMessage: () => Promise<ServerMessage>,
+): () => Promise<ServerMessage> {
+  return async () => {
+    for (;;) {
+      const message = await nextMessage();
+      if (message.type !== 'game-cue') return message;
+    }
+  };
+}
+
 describe('createServer', () => {
   let server: GameServer;
   let url: string;
@@ -119,6 +149,13 @@ describe('createServer', () => {
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: { cues: [], music: [] },
     });
 
     ws.close();
@@ -162,6 +199,13 @@ describe('createServer', () => {
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: { cues: [], music: [] },
     });
 
     board.close();
@@ -224,6 +268,13 @@ describe('createServer', () => {
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: { cues: [], music: [] },
     });
 
     const reconnected = new WebSocket(url);
@@ -259,6 +310,13 @@ describe('createServer', () => {
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: { cues: [], music: [] },
     });
 
     board.close();
@@ -380,6 +438,13 @@ describe('createServer', () => {
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: { cues: [], music: [] },
     });
 
     other.close();
@@ -437,6 +502,13 @@ describe('createServer', () => {
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: { cues: [], music: [] },
     });
 
     // The original socket is still stale (never closed) at this point.
@@ -478,6 +550,13 @@ describe('createServer', () => {
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: { cues: [], music: [] },
     });
 
     board.close();
@@ -829,6 +908,13 @@ describe('createServer heartbeat', () => {
       textRevealEnabled: true,
       historyEnabled: true,
       historyRecording: false,
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: { cues: [], music: [] },
     });
 
     board.close();
@@ -886,7 +972,7 @@ const TEST_PACK_WITH_VIDEO: Pack = {
 
 async function joinPlayer(baseUrl: string, name: string) {
   const ws = new WebSocket(baseUrl);
-  const nextMessage = collectMessages(ws);
+  const nextMessage = skipCues(collectMessages(ws));
   await waitForOpen(ws);
   await nextMessage(); // state
   ws.send(JSON.stringify({ type: 'join', name }));
@@ -909,7 +995,7 @@ async function joinPlayer(baseUrl: string, name: string) {
 // участник без personId никогда не попадает (history.ts, startGame).
 async function joinPlayerAs(baseUrl: string, personId: number) {
   const ws = new WebSocket(baseUrl);
-  const nextMessage = collectMessages(ws);
+  const nextMessage = skipCues(collectMessages(ws));
   await waitForOpen(ws);
   await nextMessage(); // state
   ws.send(JSON.stringify({ type: 'join-as', personId }));
@@ -1026,9 +1112,8 @@ describe('createServer media-finished', () => {
 
 describe('createServer game flow', () => {
   it('plays a question from start-game through a correct answer', async () => {
-    // Fake timers are needed to resolve judging deterministically (the
-    // engine only resolves a vote via its own timer, never on the 'vote'
-    // event itself) while keeping real WS network I/O — same
+    // Fake timers are needed to get past the text reveal deterministically
+    // while keeping real WS network I/O — same
     // shouldAdvanceTime pattern as the heartbeat describe block below, but
     // enabled per-test here since the rest of this describe relies on real
     // wall-clock I/O without any fake timers at all.
@@ -1094,32 +1179,8 @@ describe('createServer game flow', () => {
       };
       expect(afterSaidAnswer.game.phase).toBe('judging');
 
+      // With two players the sole non-answering vote is the decision itself.
       other.ws.send(JSON.stringify({ type: 'vote', correct: true }));
-      // A cast vote alone never resolves judging — it just gets recorded —
-      // but it still changes room state and therefore still broadcasts.
-      // Consume that broadcast before advancing the vote timer, same as
-      // 'does not clear the vote timer when a vote is cast' in room.test.ts.
-      const afterVoteCast = (await settle(a, b, picker)) as {
-        game: { phase: string };
-      };
-      expect(afterVoteCast.game.phase).toBe('judging');
-
-      // Advance in HEARTBEAT_INTERVAL_MS-sized steps, not one big jump: a
-      // single advanceTimersByTimeAsync(VOTE_TIMER_MS) call fires both
-      // pending heartbeat ticks back-to-back without yielding to the real
-      // event loop in between, so the real pong frame the (perfectly alive)
-      // sockets send in response to the first tick's ping never has a
-      // chance to arrive before the second tick checks `alive` — the
-      // heartbeat then wrongly terminates both sockets. Stepping through in
-      // HEARTBEAT_INTERVAL_MS chunks (same granularity the heartbeat
-      // describe block below uses) gives each real pong round-trip room to
-      // land between ticks.
-      let remaining = VOTE_TIMER_MS;
-      while (remaining > 0) {
-        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
-        await vi.advanceTimersByTimeAsync(step);
-        remaining -= step;
-      }
       const afterVoteResolved = (await settle(a, b, picker)) as {
         game: {
           phase: string;
@@ -1698,6 +1759,164 @@ describe('createServer game flow', () => {
     a.ws.close();
     reconnected.close();
     await server.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+});
+
+describe('createServer audio', () => {
+  it('отдаёт настройки звука и найденные файлы в state', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-audio-'));
+    const room = new Room(undefined, TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 0,
+      packsDir: dir,
+      audioAssets: {
+        cues: [{ cue: 'buzzed', url: '/audio/buzz.mp3' }],
+        music: ['/audio/music/a.mp3'],
+      },
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const nextMessage = collectMessages(ws);
+    await waitForOpen(ws);
+
+    const message = await nextMessage();
+    expect(message).toMatchObject({
+      type: 'state',
+      audio: {
+        effectsEnabled: true,
+        effectsVolume: 0.7,
+        musicEnabled: true,
+        musicVolume: 0.35,
+      },
+      audioAssets: {
+        cues: [{ cue: 'buzzed', url: '/audio/buzz.mp3' }],
+        music: ['/audio/music/a.mp3'],
+      },
+    });
+
+    ws.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('поднимается без папки audio и без переданных audioAssets', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-audio-none-'));
+    const room = new Room();
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 0,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const nextMessage = collectMessages(ws);
+    await waitForOpen(ws);
+
+    const message = await nextMessage();
+    expect(message).toMatchObject({ audioAssets: { cues: [], music: [] } });
+
+    ws.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('set-audio-settings меняет значения, и они приходят в новом state', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-audio-settings-'));
+    const room = new Room();
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 0,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const nextMessage = collectMessages(ws);
+    await waitForOpen(ws);
+    await nextMessage(); // исходный state
+
+    ws.send(
+      JSON.stringify({
+        type: 'set-audio-settings',
+        settings: { musicVolume: 0.1, effectsEnabled: false },
+      }),
+    );
+    const state = (await nextMessage()) as { audio: unknown };
+    expect(state.audio).toEqual({
+      effectsEnabled: false,
+      effectsVolume: 0.7,
+      musicEnabled: true,
+      musicVolume: 0.1,
+    });
+
+    ws.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('game-cue доходит до подключённого сокета', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'svoya-igra-audio-cue-'));
+    const room = new Room(undefined, TEST_PACK);
+    const server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 0,
+      packsDir: dir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    const url = `ws://127.0.0.1:${port}/ws`;
+
+    const a = await joinPlayer(url, 'Ваня');
+    const b = await joinPlayer(url, 'Катя');
+    // Присоединение b уже транслировало обновлённый состав лобби всем — эту
+    // трансляцию joinPlayer(b) вычитал только из очереди b, не из очереди a.
+    await a.nextMessage();
+
+    a.ws.send(JSON.stringify({ type: 'start-game' }));
+    const aState = (await settle(a, b, a)) as {
+      game: { phase: string; turnParticipantId: string };
+    };
+    const picker = aState.game.turnParticipantId === a.participantId ? a : b;
+
+    // picker.nextMessage() (joinPlayer) сам пропускает 'game-cue' — этот
+    // тест как раз хочет увидеть сигнал, а не state, поэтому слушает тот же
+    // сокет ещё одним, отдельным сырым collectMessages() (ws поддерживает
+    // несколько независимых слушателей 'message' одновременно). Заведён до
+    // отправки select-question, чтобы не потерять сигнал гонкой.
+    const pickerRaw = collectMessages(picker.ws);
+
+    // 'game-cue' уходит синхронно (server.ts, room.onAudioCue), а рассылка
+    // 'state' отложена в микротаск (broadcastState) — на проводе у picker'а
+    // 'game-cue' обязан прийти раньше, чем следующий 'state'.
+    picker.ws.send(
+      JSON.stringify({
+        type: 'select-question',
+        themeIndex: 0,
+        questionId: 'q1',
+      }),
+    );
+    const cueMessage = await pickerRaw();
+    expect(cueMessage).toEqual({ type: 'game-cue', cue: 'question-opened' });
+
+    a.ws.close();
+    b.ws.close();
+    await new Promise<void>((resolve) =>
+      server.httpServer.close(() => resolve()),
+    );
     await rm(dir, { recursive: true, force: true });
   });
 });
@@ -2438,7 +2657,7 @@ describe('createServer final round', () => {
 // без 'joined'.
 async function connectAdmin(baseUrl: string) {
   const ws = new WebSocket(baseUrl);
-  const nextMessage = collectMessages(ws);
+  const nextMessage = skipCues(collectMessages(ws));
   await waitForOpen(ws);
   await nextMessage(); // стартовое state
   return { ws, nextMessage };
@@ -3962,15 +4181,8 @@ describe('createServer game-end player stats', () => {
       picker.ws.send(JSON.stringify({ type: 'said-answer' }));
       await settle(a, b, picker); // judging
 
+      // Вдвоём голос единственного не отвечавшего решает сразу.
       other.ws.send(JSON.stringify({ type: 'vote', correct: true }));
-      await settle(a, b, picker); // голос учтён, вердикт ещё не подведён
-
-      let remaining = VOTE_TIMER_MS;
-      while (remaining > 0) {
-        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
-        await vi.advanceTimersByTimeAsync(step);
-        remaining -= step;
-      }
       const afterVote = (await settle(a, b, picker)) as {
         game: { phase: string };
       };
@@ -3978,7 +4190,7 @@ describe('createServer game-end player stats', () => {
 
       // TEST_PACK — единственный раунд с единственным вопросом, без финала:
       // reveal доигрывает прямо в game-end, минуя round-end/selecting.
-      remaining = REVEAL_TIMER_MS;
+      let remaining = REVEAL_TIMER_MS;
       while (remaining > 0) {
         const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
         await vi.advanceTimersByTimeAsync(step);
@@ -4563,6 +4775,60 @@ describe('createServer media static route', () => {
 
   it('returns 404 for a media path that does not exist, not the client SPA fallback', async () => {
     const res = await fetch(`${baseUrl}/media/sport/ghost.jpg`);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('createServer audio static route', () => {
+  let server: GameServer;
+  let dir: string;
+  let audioDir: string;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'svoya-igra-audio-route-'));
+    audioDir = await mkdtemp(join(tmpdir(), 'svoya-igra-audio-route-files-'));
+    await writeFile(join(audioDir, 'buzz.mp3'), 'fake audio bytes', 'utf8');
+    const room = new Room();
+    server = createServer({
+      room,
+      clientDistPath: dir,
+      port: 8080,
+      packsDir: dir,
+      audioDir,
+    });
+    await new Promise<void>((resolve) => server.httpServer.listen(0, resolve));
+    const { port } = server.httpServer.address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterEach(async () => {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+    await rm(audioDir, { recursive: true, force: true });
+  });
+
+  it('отдаёт файл из audioDir по /audio/', async () => {
+    const res = await fetch(`${baseUrl}/audio/buzz.mp3`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('fake audio bytes');
+  });
+
+  // Табло создаёт новый элемент на наложенный сигнал и на каждый трек: без
+  // валидатора файл качается целиком заново, и звук слышен с опозданием.
+  it('отдаёт звук с ETag, чтобы повторная загрузка была условным запросом', async () => {
+    const first = await fetch(`${baseUrl}/audio/buzz.mp3`);
+    const etag = first.headers.get('etag');
+    expect(etag).toBeTruthy();
+
+    const again = await fetch(`${baseUrl}/audio/buzz.mp3`, {
+      headers: { 'If-None-Match': etag! },
+    });
+    expect(again.status).toBe(304);
+  });
+
+  it('возвращает 404 для отсутствующего файла в /audio/, а не откат на SPA', async () => {
+    const res = await fetch(`${baseUrl}/audio/ghost.mp3`);
     expect(res.status).toBe(404);
   });
 });

@@ -129,6 +129,39 @@ export interface GameStateView {
   finalCorrectAnswer: { text: string; comment?: string } | null;
 }
 
+/**
+ * Имена доменные, а не звуковые: комната сообщает, ЧТО произошло, а не какой
+ * файл играть. Перевод сигнала в файл — дело табло (design.md,
+ * 2026-09-11-game-audio-design.md, «Что звучит»). Тот же канал позже
+ * понадобится для не-звуковых реакций (вспышка на экране, вибрация), и
+ * переписывать его из звукового словаря в событийный не придётся.
+ */
+export type GameCue =
+  | 'question-opened'
+  | 'buzzed'
+  | 'answer-correct'
+  | 'answer-wrong'
+  | 'question-timeout'
+  | 'round-ended'
+  | 'game-ended';
+
+export interface AudioSettings {
+  effectsEnabled: boolean;
+  effectsVolume: number;
+  musicEnabled: boolean;
+  musicVolume: number;
+}
+
+/**
+ * Что сервер нашёл в папке audio/ при старте. Готовые URL, а не имена
+ * файлов: расширение подобрал сканер, и клиенту незачем его угадывать — тот
+ * же принцип, что у GameStateView.image.
+ */
+export interface AudioAssets {
+  cues: { cue: GameCue; url: string }[];
+  music: string[];
+}
+
 export type ClientMessage =
   | { type: 'join'; name: string }
   // Вход «я — вот этот из списка» (design.md, 2026-08-26-player-identity,
@@ -221,6 +254,12 @@ export type ClientMessage =
   // тот же паттерн, что и admin-set-text-reveal-enabled выше, но постоянная
   // функция, не временная.
   | { type: 'admin-set-history-enabled'; enabled: boolean }
+  // Пульт комнаты, а не действие участника: без admin-префикса и без
+  // проверки отправителя, тем же принципом, что admin-set-lan-address, —
+  // шлют и админка, и само табло. Partial: ползунок громкости музыки не
+  // имеет права переписать тумблер звуков, который в этот же момент мог
+  // переключить другой экран (design.md, «Настройки»).
+  | { type: 'set-audio-settings'; settings: Partial<AudioSettings> }
   // Выбор пакета — от участника (сервер сверяет отправителя с
   // hostParticipantId) и с админ-панели (без проверки личности), тем же
   // способом, каким уже разделены skip-to-final/admin-skip-to-final.
@@ -393,6 +432,11 @@ export type ServerMessage =
       // по этому полю — иначе он выглядел бы выключенным ещё до старта
       // первой партии.
       historyRecording: boolean;
+      // Правда одна на всех: выключили с телефона — на табло тоже снялось.
+      audio: AudioSettings;
+      // Разовое сканирование при старте сервера, живым не пересчитывается —
+      // в игре файлы никто не добавляет (design.md, «Откуда берутся файлы»).
+      audioAssets: AudioAssets;
     }
   | { type: 'falsestart' }
   | { type: 'start-game-error'; reason: StartGameErrorReason }
@@ -446,4 +490,11 @@ export type ServerMessage =
     }
   // Отказ admin-merge-people: партия ещё идёт, либо fromId/intoId совпали или
   // fromId не существует (history.mergePeople вернул false).
-  | { type: 'admin-people-error'; reason: string };
+  | { type: 'admin-people-error'; reason: string }
+  /**
+   * Разовое сообщение, а не поле состояния: состояние рассылается целиком и
+   * заново при каждом переподключении, и сигнал, положенный в него,
+   * переиграется на табло, которое просто перезагрузили посреди партии
+   * (design.md, «Как табло узнаёт, что произошло»).
+   */
+  | { type: 'game-cue'; cue: GameCue };
