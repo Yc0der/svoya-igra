@@ -10,6 +10,7 @@ class FakeSound implements SoundHandle {
   static created: FakeSound[] = [];
   volume = 1;
   currentTime = 0;
+  paused = true;
   playCalls = 0;
   pauseCalls = 0;
   rejectPlay = false;
@@ -25,13 +26,14 @@ class FakeSound implements SoundHandle {
 
   play(): Promise<void> {
     this.playCalls += 1;
-    return this.rejectPlay
-      ? Promise.reject(new Error('NotAllowedError'))
-      : Promise.resolve();
+    if (this.rejectPlay) return Promise.reject(new Error('NotAllowedError'));
+    this.paused = false;
+    return Promise.resolve();
   }
 
   pause(): void {
     this.pauseCalls += 1;
+    this.paused = true;
   }
 
   addEventListener(_type: 'ended', listener: () => void): void {
@@ -39,6 +41,7 @@ class FakeSound implements SoundHandle {
   }
 
   end(): void {
+    this.paused = true;
     for (const listener of this.listeners) listener();
   }
 }
@@ -76,11 +79,14 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+function soundsFor(url: string): FakeSound[] {
+  return FakeSound.created.filter((s) => s.url === url);
+}
+
 describe('AudioEngine: сигналы', () => {
   it('играет файл, сопоставленный имени сигнала', () => {
     engine().playCue('buzzed');
-    expect(FakeSound.created.at(-1)?.url).toBe('/audio/buzz.mp3');
-    expect(FakeSound.created.at(-1)?.playCalls).toBe(1);
+    expect(soundsFor('/audio/buzz.mp3')[0]?.playCalls).toBe(1);
   });
 
   it('молчит, когда файла для сигнала нет', () => {
@@ -93,27 +99,60 @@ describe('AudioEngine: сигналы', () => {
   it('молчит при выключенных звуках', () => {
     const e = engine();
     e.setSettings({ ...DEFAULT_AUDIO_SETTINGS, effectsEnabled: false });
-    FakeSound.created = [];
     e.playCue('buzzed');
-    expect(FakeSound.created).toEqual([]);
+    expect(FakeSound.created.every((s) => s.playCalls === 0)).toBe(true);
   });
 
   it('ставит громкость сигнала из настроек', () => {
     const e = engine();
     e.setSettings({ ...DEFAULT_AUDIO_SETTINGS, effectsVolume: 0.25 });
     e.playCue('buzzed');
-    expect(FakeSound.created.at(-1)?.volume).toBe(0.25);
+    expect(soundsFor('/audio/buzz.mp3')[0]?.volume).toBe(0.25);
   });
 
-  it('два сигнала подряд звучат одновременно, а не в очередь', () => {
+  // Живая проверка: сигнал, создаваемый в момент события, сначала качается
+  // с сервера и только потом звучит — нажатие слышно с опозданием.
+  it('готовит файлы сигналов заранее, как только пришёл список', () => {
+    engine();
+    expect(FakeSound.created.map((s) => s.url)).toEqual([
+      '/audio/buzz.mp3',
+      '/audio/correct.mp3',
+    ]);
+  });
+
+  it('равный по значению список не пересоздаёт готовые сигналы', () => {
     const e = engine();
-    FakeSound.created = [];
+    e.setAssets({ ...assets, cues: [...assets.cues] });
+    expect(soundsFor('/audio/buzz.mp3')).toHaveLength(1);
+  });
+
+  it('доигравший сигнал повторяется тем же файлом с начала', () => {
+    const e = engine();
+    e.playCue('buzzed');
+    const [buzz] = soundsFor('/audio/buzz.mp3');
+    buzz.currentTime = 0.4;
+    buzz.end();
+    e.playCue('buzzed');
+    expect(soundsFor('/audio/buzz.mp3')).toHaveLength(1);
+    expect(buzz.playCalls).toBe(2);
+    expect(buzz.currentTime).toBe(0);
+  });
+
+  it('разные сигналы подряд звучат одновременно, а не в очередь', () => {
+    const e = engine();
     e.playCue('answer-correct');
     e.playCue('buzzed');
-    expect(FakeSound.created.map((s) => s.url)).toEqual([
-      '/audio/correct.mp3',
-      '/audio/buzz.mp3',
-    ]);
+    expect(soundsFor('/audio/correct.mp3')[0]?.playCalls).toBe(1);
+    expect(soundsFor('/audio/buzz.mp3')[0]?.playCalls).toBe(1);
+  });
+
+  it('тот же сигнал, пока предыдущий ещё звучит, накладывается новым файлом', () => {
+    const e = engine();
+    e.playCue('buzzed');
+    e.playCue('buzzed');
+    const buzzes = soundsFor('/audio/buzz.mp3');
+    expect(buzzes).toHaveLength(2);
+    expect(buzzes.map((s) => s.playCalls)).toEqual([1, 1]);
   });
 });
 

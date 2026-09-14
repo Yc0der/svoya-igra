@@ -78,6 +78,7 @@ describe('useBoardAudio: блокировка', () => {
         createSound: () => ({
           volume: 1,
           currentTime: 0,
+          paused: true,
           play: () => Promise.reject(new Error('NotAllowedError')),
           pause: () => {},
           addEventListener: () => {},
@@ -104,6 +105,7 @@ describe('useBoardAudio: StrictMode', () => {
     static created: TrackingSound[] = [];
     volume = 1;
     currentTime = 0;
+    paused = true;
     lastAction: 'play' | 'pause' | null = null;
     readonly url: string;
 
@@ -189,6 +191,7 @@ describe('useBoardAudio: плейлист не перезапускается п
     static created: TrackingSound[] = [];
     volume = 1;
     currentTime = 0;
+    paused = true;
     pauseCalls = 0;
     readonly url: string;
 

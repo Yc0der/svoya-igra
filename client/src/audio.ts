@@ -42,6 +42,7 @@ const FADE_STEP_MS = 50;
 export interface SoundHandle {
   volume: number;
   currentTime: number;
+  readonly paused: boolean;
   play(): Promise<void>;
   pause(): void;
   addEventListener(type: 'ended', listener: () => void): void;
@@ -82,6 +83,9 @@ export class AudioEngine {
   private readonly shuffle: <T>(items: T[]) => T[];
   private settings: AudioSettings = { ...DEFAULT_AUDIO_SETTINGS };
   private cueUrls = new Map<GameCue, string>();
+  // По элементу на сигнал, созданному при получении списка: браузер качает
+  // файл заранее, и событие звучит сразу, а не после загрузки (живая проверка).
+  private cueSounds = new Map<GameCue, SoundHandle>();
   // Список, как он приехал с сервера, до перемешивания — сравнивается с
   // будущими setAssets. playlist ниже хранит уже перемешанный порядок и
   // сравнивать с ним входящий (неперемешанный) список нельзя: они почти
@@ -118,7 +122,12 @@ export class AudioEngine {
    */
   setAssets(assets: AudioAssets): void {
     const nextCues = new Map(assets.cues.map(({ cue, url }) => [cue, url]));
-    if (!sameCues(this.cueUrls, nextCues)) this.cueUrls = nextCues;
+    if (!sameCues(this.cueUrls, nextCues)) {
+      this.cueUrls = nextCues;
+      this.cueSounds = new Map(
+        [...nextCues].map(([cue, url]) => [cue, this.createSound(url)]),
+      );
+    }
     // Сравнение с исходным (неперемешанным) списком, а не с playlist: playlist
     // хранит результат shuffle(), и сравнивать его со входящим списком —
     // сравнивать разные вещи (F1 финальной волны, найдено живой проверкой).
@@ -150,10 +159,13 @@ export class AudioEngine {
     if (!this.settings.effectsEnabled) return;
     const url = this.cueUrls.get(cue);
     if (!url) return;
-    // Новый элемент на каждый сигнал: два коротких звука, пришедших одним
-    // dispatch (верный ответ плюс конец раунда), должны наложиться, а не
-    // встать в очередь (design.md, «Как табло узнаёт, что произошло»).
-    const sound = this.createSound(url);
+    // Разные сигналы, пришедшие одним dispatch (верный ответ плюс конец
+    // раунда), должны наложиться, а не встать в очередь (design.md, «Как
+    // табло узнаёт, что произошло») — у каждого свой элемент. Тот же сигнал,
+    // пока ещё звучит, получает новый элемент по той же причине.
+    const ready = this.cueSounds.get(cue);
+    const sound = ready?.paused ? ready : this.createSound(url);
+    sound.currentTime = 0;
     sound.volume = this.settings.effectsVolume;
     void this.attempt(sound);
   }
@@ -191,6 +203,7 @@ export class AudioEngine {
     this.blockedListeners.clear();
     this.settings = { ...DEFAULT_AUDIO_SETTINGS };
     this.cueUrls = new Map();
+    this.cueSounds = new Map();
     this.musicSource = [];
     this.playlist = [];
     this.trackIndex = 0;

@@ -4847,6 +4847,19 @@ describe('createServer audio static route', () => {
     expect(await res.text()).toBe('fake audio bytes');
   });
 
+  // Табло создаёт новый элемент на наложенный сигнал и на каждый трек: без
+  // валидатора файл качается целиком заново, и звук слышен с опозданием.
+  it('отдаёт звук с ETag, чтобы повторная загрузка была условным запросом', async () => {
+    const first = await fetch(`${baseUrl}/audio/buzz.mp3`);
+    const etag = first.headers.get('etag');
+    expect(etag).toBeTruthy();
+
+    const again = await fetch(`${baseUrl}/audio/buzz.mp3`, {
+      headers: { 'If-None-Match': etag! },
+    });
+    expect(again.status).toBe(304);
+  });
+
   it('возвращает 404 для отсутствующего файла в /audio/, а не откат на SPA', async () => {
     const res = await fetch(`${baseUrl}/audio/ghost.mp3`);
     expect(res.status).toBe(404);

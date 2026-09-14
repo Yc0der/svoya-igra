@@ -126,7 +126,10 @@ export function createServer(options: CreateServerOptions): GameServer {
   // Тем же приёмом, что media выше: sirv на папку, префикс снимается с
   // req.url. dev: true — папки может не быть вовсе, и синхронный скан при
   // создании уронил бы сервер там, где по дизайну должна быть тишина.
-  const audio = audioDir ? sirv(audioDir, { dev: true }) : null;
+  // etag: true — dev-режим иначе шлёт Cache-Control: no-store, и каждый
+  // новый элемент <audio> на табло качает файл целиком заново: звук
+  // запаздывает на время загрузки (найдено живой проверкой).
+  const audio = audioDir ? sirv(audioDir, { dev: true, etag: true }) : null;
 
   const httpServer = createHttpServer((req, res) => {
     if (audio && req.url?.startsWith('/audio/')) {

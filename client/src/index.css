@@ -291,6 +291,16 @@ input[type='radio'] {
   flex: none;
 }
 
+/* Ползунок — не поле ввода: отступы и рамка поля выше сдвигали дорожку
+   внутрь рамки, и крайние значения выглядели недотянутыми (живая проверка). */
+input[type='range'] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--lamp);
+}
+
 input::placeholder,
 textarea::placeholder {
   color: var(--fg-dim);
