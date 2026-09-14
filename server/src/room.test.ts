@@ -4074,10 +4074,10 @@ describe('Room: сигналы звука', () => {
       // Единственный оставшийся отвечающий отвечает неверно: judging →
       // reveal, то есть та же конечная фаза, что и у верного ответа.
       // Различает только знак дельты счёта — ради этого теста всё и
-      // делается. Без ведущего голос лишь копится в votes (engine.ts,
-      // handleVote) — резолюция приходит по VOTE_TIMER_MS, и уже она
-      // закрывает вопрос сразу же (resolveVote — «Открытое судейство»), а
-      // не переоткрывает его.
+      // делается. Без ведущего вопрос решается, как только проголосовали все,
+      // кто может (engine.ts, handleVote): вдвоём это единственный голос, и
+      // он сразу закрывает вопрос (resolveVote — «Открытое судейство»), а не
+      // переоткрывает его.
       const { room, picker, other } = startedRoom();
       room.selectQuestion(picker, 0, 'q1');
       vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
@@ -4086,7 +4086,6 @@ describe('Room: сигналы звука', () => {
 
       const cues = cuesOf(room);
       room.vote(other, false);
-      vi.advanceTimersByTime(VOTE_TIMER_MS);
 
       // Честность теста: закрылся, а не переоткрылся.
       expect(room.toGameStateView()?.phase).toBe('reveal');
