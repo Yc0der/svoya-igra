@@ -26,9 +26,10 @@ import {
   type TimerName,
 } from './engine.js';
 import type { Pack } from './pack.js';
-import type { GameStateView } from './protocol.js';
+import type { AudioSettings, GameCue, GameStateView } from './protocol.js';
 import type { LanCandidate } from './network.js';
 import type { PackSummary } from './packs.js';
+import { DEFAULT_AUDIO_SETTINGS, mergeAudioSettings } from './audioSettings.js';
 import type {
   HistoryRecorder,
   PersonSummary,
@@ -102,6 +103,17 @@ export type SelectQuestionResult = { ok: true } | { error: 'no-recipient' };
 
 function normalizeName(name: string): string {
   return name.trim().toLowerCase();
+}
+
+// Плоский объект из четырёх примитивов — сравнение по полям, без библиотек
+// глубокого равенства ради одного вызова.
+function audioSettingsEqual(a: AudioSettings, b: AudioSettings): boolean {
+  return (
+    a.effectsEnabled === b.effectsEnabled &&
+    a.effectsVolume === b.effectsVolume &&
+    a.musicEnabled === b.musicEnabled &&
+    a.musicVolume === b.musicVolume
+  );
 }
 
 // При восстановлении из снапшота настоящий setTimeout процесса, который
@@ -350,6 +362,12 @@ export class Room {
   // UI в админке, как только число зафиксируется в спеке.
   private textRevealFadeMs = 270;
   private textRevealFadeListeners = new Set<(fadeMs: number) => void>();
+  // Не часть RoomState и не пишется в снапшот: это настройка машины, а не
+  // состояние партии — переживает перезапуск через audio-settings.local.json
+  // (index.ts), ровно как выбранный LAN-адрес.
+  private audio: AudioSettings = { ...DEFAULT_AUDIO_SETTINGS };
+  private audioSettingsListeners = new Set<(settings: AudioSettings) => void>();
+  private audioCueListeners = new Set<(cue: GameCue) => void>();
   // Настоящая длительность показа текущего вопроса — то самое число, которое
   // applyEffects только что подставило в таймер (Step 3 ниже). Не null,
   // только пока идёт question-reveal; отдаётся в toGameStateView, чтобы
@@ -1105,6 +1123,48 @@ export class Room {
     }
   }
 
+  getAudioSettings(): AudioSettings {
+    return { ...this.audio };
+  }
+
+  // Без проверки отправителя, тем же паттерном, что setLanAddress: это пульт
+  // комнаты, им пользуются и /admin, и /board (design.md, «Настройки»).
+  setAudioSettings(patch: Partial<AudioSettings>): void {
+    const next = mergeAudioSettings(this.audio, patch);
+    // Мусорный или уже применённый патч не должен рассылать state всем и
+    // писать файл на диск (F3 финальной волны): при частом
+    // set-audio-settings (протяжка ползунка) не всякий вызов реально
+    // что-то меняет.
+    if (audioSettingsEqual(this.audio, next)) return;
+    this.audio = next;
+    for (const listener of this.audioSettingsListeners) {
+      listener(this.getAudioSettings());
+    }
+  }
+
+  onAudioSettingsChange(
+    listener: (settings: AudioSettings) => void,
+  ): () => void {
+    this.audioSettingsListeners.add(listener);
+    return () => this.audioSettingsListeners.delete(listener);
+  }
+
+  // Подписка на разовые сигналы партии. Наполняется в задаче 4 — заводится
+  // здесь вместе с остальной проводкой звука, чтобы сервер мог подписаться
+  // раньше, чем появятся сами сигналы.
+  onAudioCue(listener: (cue: GameCue) => void): () => void {
+    this.audioCueListeners.add(listener);
+    return () => this.audioCueListeners.delete(listener);
+  }
+
+  private emitAudioCues(cues: GameCue[]): void {
+    for (const cue of cues) {
+      for (const listener of this.audioCueListeners) {
+        listener(cue);
+      }
+    }
+  }
+
   getHistoryEnabled(): boolean {
     return this.historyEnabled;
   }
@@ -1498,17 +1558,11 @@ export class Room {
     // ниже пишет её как настоящую цену вопроса-аукциона (design.md,
     // 2026-08-20-game-history-design.md, «Схема»).
     const auctionHighestBidBefore = this.game.auctionHighestBid;
-    // Голоса из состояния «до» ПЛЮС текущее событие, если это голос. При
-    // нынешней семантике движка (engine.ts::handleVote) это НИКОГДА не
-    // меняет итог: 'vote' резолвит вопрос синхронно только когда
-    // hostId !== null (голос ведущего решает сразу), а recordPlayedQuestion
-    // ниже в этом случае и так пишет contested: null, не читая votes вовсе.
-    // Без ведущего 'vote' лишь копится в state.votes и ничего не решает —
-    // резолюция приходит только по 'timer-expired', и тогда состояние «до»
-    // уже полное само по себе, без всякого мержа. Мерж оставлен как
-    // страховка на случай, если синхронная резолюция голосом когда-нибудь
-    // появится и без ведущего — тогда «до» станет неполным ровно так же,
-    // как сейчас неполно для ведущего, и этот код нужно будет прочитать.
+    // Голоса из состояния «до» ПЛЮС текущее событие, если это голос. 'vote'
+    // резолвит вопрос синхронно и при ведущем (его голос решает сразу), и
+    // без ведущего — когда проголосовали все, кто может (engine.ts::
+    // handleVote). В таком reduce() состояние «до» не содержит решающего
+    // голоса, и без мержа contested считался бы по неполному списку.
     const votesAtResolution =
       event.type === 'vote'
         ? { ...this.game.votes, [event.counterId]: event.correct }
@@ -1609,6 +1663,55 @@ export class Room {
     ) {
       this.history.finishGame(this.historyGameId, state.scores);
     }
+    // Сигналы звука выводятся здесь, а не в движке: новый вид Effect задел
+    // бы десятки сравнений `toEqual` в engine.test.ts ради косметики
+    // (design.md, «Почему комната, а не движок»). Снимки «до» — те же, по
+    // которым выше распознаётся честный реопен после «Незачёт».
+    const cues: GameCue[] = [];
+    if (questionBefore === null && state.currentQuestion !== null) {
+      cues.push('question-opened');
+    }
+    if (phaseBefore !== 'buzzed' && state.phase === 'buzzed') {
+      cues.push('buzzed');
+    }
+    if (
+      phaseBefore === 'judging' &&
+      buzzedBefore !== null &&
+      state.phase !== 'judging'
+    ) {
+      // Знак дельты, а не конечная фаза: judging кончается и 'reveal', и
+      // возвратом в 'question-open', причём 'reveal' наступает в обоих
+      // исходах — и при засчитанном ответе, и при незасчитанном, когда
+      // отвечать больше некому. Проверяется именно смена фазы, а не тип
+      // события: adjust-score (handleAdjustScore, engine.ts) доступен в
+      // любой фазе, включая judging, и меняет только scores, оставляя фазу
+      // как есть (unchanged()) — без этой оговорки правка счёта нажавшему
+      // ПОКА он ещё не отсужен звучала бы как вердикт, которого не было.
+      // Все три ветки настоящей резолюции в resolveVote, наоборот, всегда
+      // уводят фазу из judging.
+      const before = scoresBefore[buzzedBefore] ?? 0;
+      const after = state.scores[buzzedBefore] ?? 0;
+      if (after > before) cues.push('answer-correct');
+      else if (after < before) cues.push('answer-wrong');
+    }
+    if (
+      event.type === 'timer-expired' &&
+      event.timer === 'question' &&
+      buzzedBefore === null &&
+      state.phase === 'reveal'
+    ) {
+      cues.push('question-timeout');
+    }
+    if (phaseBefore !== 'round-end' && state.phase === 'round-end') {
+      cues.push('round-ended');
+    }
+    if (phaseBefore !== 'game-end' && state.phase === 'game-end') {
+      cues.push('game-ended');
+    }
+    // До notify(): рассылка состояния всё равно отложена в микротаск
+    // (server.ts, broadcastState), так что сигнал и картинка на табло
+    // приезжают в пределах одного тика.
+    this.emitAudioCues(cues);
     this.notify();
   }
 

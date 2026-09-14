@@ -849,25 +849,29 @@ export function Player() {
           );
         }
         return (
-          <div className="player player--center player-vote">
-            <button
-              className={`button button--yes${myVote === true ? ' is-selected' : ''}`}
-              onClick={() => {
-                setMyVote(true);
-                vote(true);
-              }}
-            >
-              Зачёт{myVote === true && ' ✓'}
-            </button>
-            <button
-              className={`button button--no${myVote === false ? ' is-selected' : ''}`}
-              onClick={() => {
-                setMyVote(false);
-                vote(false);
-              }}
-            >
-              Незачёт{myVote === false && ' ✓'}
-            </button>
+          <div className="player player--center">
+            {/* Кнопки — отдельным рядом: подсказка и таймер в том же
+                переносимом ряду разбрасывали их по экрану лесенкой. */}
+            <div className="player-vote">
+              <button
+                className={`button button--yes${myVote === true ? ' is-selected' : ''}`}
+                onClick={() => {
+                  setMyVote(true);
+                  vote(true);
+                }}
+              >
+                Зачёт{myVote === true && ' ✓'}
+              </button>
+              <button
+                className={`button button--no${myVote === false ? ' is-selected' : ''}`}
+                onClick={() => {
+                  setMyVote(false);
+                  vote(false);
+                }}
+              >
+                Незачёт{myVote === false && ' ✓'}
+              </button>
+            </div>
             {myVote !== null && (
               <p className="player-vote-hint">Голос принят, ждём остальных</p>
             )}

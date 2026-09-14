@@ -1,11 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-
-async function join(page: Page, name: string): Promise<void> {
-  await page.goto('/');
-  await page.getByLabel('Имя').fill(name);
-  await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page.getByText('Ты в игре. Жди начала.')).toBeVisible();
-}
+import { join } from './join';
 
 test('board, two players and a host play through the final round', async ({
   browser,
@@ -29,7 +23,9 @@ test('board, two players and a host play through the final round', async ({
   await c.getByRole('button', { name: 'Стать ведущим' }).click();
   await expect(c.getByText('Стать ведущим')).not.toBeVisible();
 
-  await a.getByRole('button', { name: 'Начать игру' }).click();
+  // Ведущий назначен — запуск за ним: у игроков кнопки «Начать игру» нет
+  // (Player.tsx), а сервер ответил бы host-only (Room.startGame).
+  await c.getByRole('button', { name: 'Начать игру' }).click();
 
   // Единственный вопрос пакета — кто из a/b видит сетку, тот и picker.
   let picker!: Page;

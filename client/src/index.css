@@ -291,6 +291,16 @@ input[type='radio'] {
   flex: none;
 }
 
+/* Ползунок — не поле ввода: отступы и рамка поля выше сдвигали дорожку
+   внутрь рамки, и крайние значения выглядели недотянутыми (живая проверка). */
+input[type='range'] {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--lamp);
+}
+
 input::placeholder,
 textarea::placeholder {
   color: var(--fg-dim);
@@ -782,6 +792,41 @@ select:focus {
   }
 }
 
+/* Угол табло: с трёх метров панель управления не должна спорить с игрой,
+   поэтому в свёрнутом виде это одна иконка. */
+.board-audio {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 10;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.board-audio-toggle {
+  opacity: 0.35;
+}
+
+.board-audio-toggle:hover,
+.board-audio-toggle:focus-visible {
+  opacity: 1;
+}
+
+.board-audio-panel {
+  position: absolute;
+  right: 0;
+  bottom: 3rem;
+  display: grid;
+  gap: 0.5rem;
+  min-width: 16rem;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: var(--ink-2);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 0.5rem 2rem rgb(0 0 0 / 0.45);
+}
+
 /* ───────────────────────── Телефон игрока ───────────────────────── */
 
 .player {
@@ -1019,6 +1064,7 @@ select:focus {
 
 .player-vote,
 .player-tags {
+  width: 100%;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
@@ -1042,7 +1088,7 @@ select:focus {
   max-width: 220px;
 }
 
-.player-vote-hint {
+.player--center > .player-vote-hint {
   font-size: 15px;
   color: var(--fg-dim);
   width: 100%;

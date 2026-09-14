@@ -756,4 +756,50 @@ describe('useAdminConnection', () => {
       'не удалось слить — выбраны один и тот же игрок?',
     );
   });
+
+  it('берёт настройки звука и найденные файлы из state', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() =>
+      socket.emitMessage({
+        type: 'state',
+        participants: [],
+        hostParticipantId: null,
+        game: null,
+        lanUrl: 'http://192.168.1.5:8080/',
+        lanCandidates: [],
+        audio: {
+          effectsEnabled: true,
+          effectsVolume: 0.7,
+          musicEnabled: true,
+          musicVolume: 0.2,
+        },
+        audioAssets: {
+          cues: [{ cue: 'buzzed', url: '/audio/buzz.mp3' }],
+          music: [],
+        },
+      }),
+    );
+
+    expect(result.current.audio.musicVolume).toBe(0.2);
+    expect(result.current.audioAssets.cues).toEqual([
+      { cue: 'buzzed', url: '/audio/buzz.mp3' },
+    ]);
+  });
+
+  it('setAudioSettings шлёт set-audio-settings частичным обновлением', () => {
+    const { result } = renderHook(() => useAdminConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+
+    act(() => result.current.setAudioSettings({ effectsVolume: 0.9 }));
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'set-audio-settings',
+        settings: { effectsVolume: 0.9 },
+      }),
+    );
+  });
 });
