@@ -51,6 +51,8 @@ export function VolumeSlider({
         onChange(next);
       }}
       onPointerUp={stopInteracting}
+      // Касание, прерванное системой (скролл, жест), приходит без pointerup.
+      onPointerCancel={stopInteracting}
       onKeyUp={stopInteracting}
       onBlur={stopInteracting}
     />

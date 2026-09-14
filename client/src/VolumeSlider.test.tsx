@@ -80,4 +80,28 @@ describe('VolumeSlider', () => {
 
     expect(screen.getByLabelText('Громкость музыки')).toHaveValue('0.45');
   });
+
+  // На телефоне касание прерывает система (скролл, жест, входящий звонок) —
+  // pointerup тогда не приходит, приходит pointercancel. Без снятия признака
+  // перетаскивания ползунок переставал следовать за правками с другого экрана
+  // до следующего касания.
+  it('после прерванного касания снова следует за пропом', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <VolumeSlider
+        label="Громкость музыки"
+        value={0.35}
+        onChange={onChange}
+      />,
+    );
+
+    const slider = screen.getByLabelText('Громкость музыки');
+    fireEvent.change(slider, { target: { value: '0.6' } });
+    fireEvent.pointerCancel(slider);
+
+    rerender(
+      <VolumeSlider label="Громкость музыки" value={0.2} onChange={onChange} />,
+    );
+    expect(screen.getByLabelText('Громкость музыки')).toHaveValue('0.2');
+  });
 });
