@@ -3891,6 +3891,31 @@ describe('Room: настройки звука', () => {
     settings.musicVolume = 0.99;
     expect(room.getAudioSettings().musicVolume).toBe(0.35);
   });
+
+  // F3 (финальная волна): без сравнения по значению любой патч — даже
+  // мусорный, который mergeAudioSettings целиком отбрасывает, — рассылал
+  // state всем клиентам и писал файл на диск. При частых set-audio-settings
+  // (протяжка ползунка) это лишний трафик и лишняя запись на каждый шаг,
+  // который на деле ничего не поменял.
+  it('патч без изменений не зовёт подписчиков', () => {
+    const room = new Room();
+    const listener = vi.fn();
+    room.onAudioSettingsChange(listener);
+
+    room.setAudioSettings({ musicVolume: 0.35 }); // уже стоит по умолчанию
+    room.setAudioSettings({}); // патч есть, менять нечего
+    room.setAudioSettings({
+      musicVolume: Number.NaN as unknown as number,
+    }); // мусор — mergeAudioSettings отбрасывает
+
+    expect(listener).not.toHaveBeenCalled();
+
+    room.setAudioSettings({ musicVolume: 0.5 });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({ musicVolume: 0.5 }),
+    );
+  });
 });
 
 // Раунд из одного вопроса в каждом из двух раундов: закрытие единственного

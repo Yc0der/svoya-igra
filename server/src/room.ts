@@ -105,6 +105,17 @@ function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
 
+// Плоский объект из четырёх примитивов — сравнение по полям, без библиотек
+// глубокого равенства ради одного вызова.
+function audioSettingsEqual(a: AudioSettings, b: AudioSettings): boolean {
+  return (
+    a.effectsEnabled === b.effectsEnabled &&
+    a.effectsVolume === b.effectsVolume &&
+    a.musicEnabled === b.musicEnabled &&
+    a.musicVolume === b.musicVolume
+  );
+}
+
 // При восстановлении из снапшота настоящий setTimeout процесса, который
 // раньше двигал игру дальше, потерян вместе со старым процессом — движок сам
 // об этом не знает, потому что он не знает о часах вообще. Комната обязана
@@ -1119,7 +1130,13 @@ export class Room {
   // Без проверки отправителя, тем же паттерном, что setLanAddress: это пульт
   // комнаты, им пользуются и /admin, и /board (design.md, «Настройки»).
   setAudioSettings(patch: Partial<AudioSettings>): void {
-    this.audio = mergeAudioSettings(this.audio, patch);
+    const next = mergeAudioSettings(this.audio, patch);
+    // Мусорный или уже применённый патч не должен рассылать state всем и
+    // писать файл на диск (F3 финальной волны): при частом
+    // set-audio-settings (протяжка ползунка) не всякий вызов реально
+    // что-то меняет.
+    if (audioSettingsEqual(this.audio, next)) return;
+    this.audio = next;
     for (const listener of this.audioSettingsListeners) {
       listener(this.getAudioSettings());
     }
