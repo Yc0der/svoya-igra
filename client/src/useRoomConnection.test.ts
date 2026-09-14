@@ -58,6 +58,20 @@ describe('useRoomConnection', () => {
     return new FakeWebSocket(url) as unknown as WebSocket;
   }
 
+  // Минимальное сообщение state по образцу соседнего теста
+  // «picks up availablePacks…» — только поля, которые обработчик state
+  // реально читает, без audio/audioAssets (их добавляют тесты ниже).
+  const baseState = {
+    type: 'state',
+    participants: [],
+    hostParticipantId: null,
+    game: null,
+    people: [],
+    lanUrl: '',
+    availablePacks: [],
+    activePackFilename: null,
+  };
+
   it('starts in connecting status with no participants', () => {
     const { result } = renderHook(() => useRoomConnection(factory));
     expect(result.current.status).toBe('connecting');
@@ -554,5 +568,111 @@ describe('useRoomConnection', () => {
       JSON.stringify({ type: 'join-as', personId: 7 }),
     );
     expect(result.current.status).toBe('joining');
+  });
+
+  it('берёт настройки звука и найденные файлы из state', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+    act(() =>
+      socket.emitMessage({
+        ...baseState,
+        audio: {
+          effectsEnabled: false,
+          effectsVolume: 0.5,
+          musicEnabled: true,
+          musicVolume: 0.2,
+        },
+        audioAssets: { cues: [], music: ['/audio/music/a.mp3'] },
+      }),
+    );
+
+    expect(result.current.audio.effectsEnabled).toBe(false);
+    expect(result.current.audioAssets.music).toEqual(['/audio/music/a.mp3']);
+  });
+
+  it('до первого state отдаёт значения по умолчанию', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    expect(result.current.audio).toEqual({
+      effectsEnabled: true,
+      effectsVolume: 0.7,
+      musicEnabled: true,
+      musicVolume: 0.35,
+    });
+    expect(result.current.audioAssets).toEqual({ cues: [], music: [] });
+  });
+
+  it('setAudioSettings шлёт частичное обновление', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.emitOpen());
+    act(() => result.current.setAudioSettings({ musicVolume: 0.1 }));
+
+    expect(socket.sent).toContainEqual(
+      JSON.stringify({
+        type: 'set-audio-settings',
+        settings: { musicVolume: 0.1 },
+      }),
+    );
+  });
+
+  it('game-cue доходит до подписчика, в том числе дважды подряд', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    const seen: string[] = [];
+    act(() => {
+      result.current.subscribeCue((cue) => seen.push(cue));
+    });
+    act(() => socket.emitOpen());
+    act(() => socket.emitMessage({ type: 'game-cue', cue: 'buzzed' }));
+    act(() => socket.emitMessage({ type: 'game-cue', cue: 'buzzed' }));
+
+    expect(seen).toEqual(['buzzed', 'buzzed']);
+  });
+
+  it('subscribeCue не меняется между рендерами', () => {
+    const { result, rerender } = renderHook(() => useRoomConnection(factory));
+    const first = result.current.subscribeCue;
+    rerender();
+    expect(result.current.subscribeCue).toBe(first);
+  });
+
+  it('отписка перестаёт получать сигналы', () => {
+    const { result } = renderHook(() => useRoomConnection(factory));
+    const socket = FakeWebSocket.instances[0];
+    const seen: string[] = [];
+    let off = () => {};
+    act(() => {
+      off = result.current.subscribeCue((cue) => seen.push(cue));
+    });
+    act(() => socket.emitOpen());
+    act(() => off());
+    act(() => socket.emitMessage({ type: 'game-cue', cue: 'buzzed' }));
+
+    expect(seen).toEqual([]);
+  });
+
+  it('бросивший слушатель не мешает остальным получить сигнал', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { result } = renderHook(() => useRoomConnection(factory));
+      const socket = FakeWebSocket.instances[0];
+      const seen: string[] = [];
+      act(() => {
+        result.current.subscribeCue(() => {
+          throw new Error('сломанный подписчик');
+        });
+        result.current.subscribeCue((cue) => seen.push(cue));
+      });
+      act(() => socket.emitOpen());
+      act(() => socket.emitMessage({ type: 'game-cue', cue: 'buzzed' }));
+
+      expect(seen).toEqual(['buzzed']);
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      // Иначе упавший expect оставит шпион на настоящем console.error и
+      // заглушит вывод всех последующих тестов в этом воркере.
+      errorSpy.mockRestore();
+    }
   });
 });

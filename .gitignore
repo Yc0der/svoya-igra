@@ -67,6 +67,11 @@ e2e/.data/
 lan-host.local.json
 lan-host.local.json.tmp
 
+# Подобранная под комнату громкость (server/src/audioSettings.ts) — настройка
+# машины, а не проекта, как и lan-host.local.json выше.
+audio-settings.local.json
+audio-settings.local.json.tmp
+
 # Состояние хука точек выхода (.claude/scripts/checkpoint.mjs) — на сессию, не на репозиторий
 .claude/state/
 
@@ -91,3 +96,9 @@ packs/*.json.tmp
 !packs/*.example.json
 packs/media/*
 !packs/media/photo-test/
+
+# Звуки игры: чужие лицензии и личный подбор под компанию, не содержимое
+# репозитория (docs/superpowers/specs/2026-09-11-game-audio-design.md).
+# В гите остаётся только README со списком имён.
+audio/*
+!audio/README.md

@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Admin } from './Admin';
@@ -103,6 +103,14 @@ function connection(overrides: Partial<AdminConnection> = {}): AdminConnection {
     clearPeopleError: vi.fn(),
     mergePeople: vi.fn(),
     forgetPerson: vi.fn(),
+    audio: {
+      effectsEnabled: true,
+      effectsVolume: 0.7,
+      musicEnabled: true,
+      musicVolume: 0.35,
+    },
+    audioAssets: { cues: [], music: [] },
+    setAudioSettings: vi.fn(),
     ...overrides,
   };
 }
@@ -1832,5 +1840,66 @@ describe('Admin — правка и удаление анкеты', () => {
     expect(
       screen.queryByRole('button', { name: 'Убрать анкету' }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('Admin: секция «Звук»', () => {
+  it('показывает четыре ручки с текущими значениями', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        audio: {
+          effectsEnabled: true,
+          effectsVolume: 0.7,
+          musicEnabled: false,
+          musicVolume: 0.35,
+        },
+      }),
+    );
+    render(<Admin />);
+
+    expect(screen.getByLabelText('Звуки событий')).toBeChecked();
+    expect(screen.getByLabelText('Музыка')).not.toBeChecked();
+    expect(screen.getByLabelText('Громкость музыки')).toHaveValue('0.35');
+  });
+
+  it('показывает, какие сигналы озвучены, а какие молчат', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({
+        audioAssets: {
+          cues: [{ cue: 'buzzed', url: '/audio/buzz.mp3' }],
+          music: ['/audio/music/a.mp3', '/audio/music/b.mp3'],
+        },
+      }),
+    );
+    render(<Admin />);
+
+    expect(screen.getByText(/Игрок нажал кнопку — звучит/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Ответ засчитан — молчит, файла нет/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Треков в плейлисте: 2/)).toBeInTheDocument();
+  });
+
+  it('пустая папка объясняется словами, а не пустым списком', () => {
+    mockedUseAdminConnection.mockReturnValue(
+      connection({ audioAssets: { cues: [], music: [] } }),
+    );
+    render(<Admin />);
+
+    expect(
+      screen.getByText(/Файлов не найдено — игра идёт беззвучно/),
+    ).toBeInTheDocument();
+  });
+
+  it('ползунок громкости шлёт частичное обновление', () => {
+    const setAudioSettings = vi.fn();
+    mockedUseAdminConnection.mockReturnValue(connection({ setAudioSettings }));
+    render(<Admin />);
+
+    fireEvent.change(screen.getByLabelText('Громкость музыки'), {
+      target: { value: '0.5' },
+    });
+
+    expect(setAudioSettings).toHaveBeenCalledWith({ musicVolume: 0.5 });
   });
 });

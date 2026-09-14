@@ -4,6 +4,8 @@ import type {
   ParticipantView,
   StartGameErrorReason,
 } from './useRoomConnection';
+import { DEFAULT_AUDIO_SETTINGS } from './audio';
+import type { AudioAssets, AudioSettings } from './audio';
 
 // Ловушка «Выбор локального IP на Windows» (svoya-igra-dev) — сервер сам не
 // умеет угадать, какой сетевой адаптер настоящий, и печатает всех
@@ -71,6 +73,8 @@ type ServerMessage =
       textRevealFadeMs: number;
       historyEnabled: boolean;
       historyRecording: boolean;
+      audio: AudioSettings;
+      audioAssets: AudioAssets;
       // Список постоянных людей — та же форма, что и state.people у
       // useRoomConnection (задача 2). Задаче 4 нужен здесь только он: два
       // <select> слияния строятся по этому списку, отдельного запроса не
@@ -152,7 +156,8 @@ type ClientMessage =
       originalName?: string;
     }
   | { type: 'admin-merge-people'; fromId: number; intoId: number }
-  | { type: 'admin-forget-person'; id: number };
+  | { type: 'admin-forget-person'; id: number }
+  | { type: 'set-audio-settings'; settings: Partial<AudioSettings> };
 
 // Анкета в том виде, в каком её отдаёт сервер, — форма правки заполняется
 // ею и из неё же собирает код обратно.
@@ -277,6 +282,13 @@ export interface AdminConnection {
   // Забывает человека и его участие в партиях. Анкету не трогает — её убирает
   // deletePlayerCard.
   forgetPerson(id: number): void;
+  // Пульт звука (задача 9, sdd/2026-09-11-game-audio): те же четыре ручки, что
+  // на табло (Board.tsx, BoardAudioControls), плюс то, что сервер нашёл в
+  // audio/ — играть звук сама админка не должна (design.md, «Интерфейс»:
+  // звучит только табло).
+  audio: AudioSettings;
+  audioAssets: AudioAssets;
+  setAudioSettings(settings: Partial<AudioSettings>): void;
 }
 
 const RECONNECT_DELAY_MS = 2000;
@@ -335,6 +347,11 @@ export function useAdminConnection(
     { id: number; name: string; games: number }[]
   >([]);
   const [peopleError, setPeopleError] = useState<string | null>(null);
+  const [audio, setAudio] = useState<AudioSettings>(DEFAULT_AUDIO_SETTINGS);
+  const [audioAssets, setAudioAssets] = useState<AudioAssets>({
+    cues: [],
+    music: [],
+  });
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -372,6 +389,8 @@ export function useAdminConnection(
           setHistoryEnabledState(message.historyEnabled);
           setHistoryRecordingState(message.historyRecording);
           setPeople(message.people);
+          setAudio(message.audio);
+          setAudioAssets(message.audioAssets);
           setSelectPackError(null);
           setStartGameError(null);
         }
@@ -534,5 +553,9 @@ export function useAdminConnection(
     mergePeople: (fromId, intoId) =>
       send({ type: 'admin-merge-people', fromId, intoId }),
     forgetPerson: (id) => send({ type: 'admin-forget-person', id }),
+    audio,
+    audioAssets,
+    setAudioSettings: (settings) =>
+      send({ type: 'set-audio-settings', settings }),
   };
 }
