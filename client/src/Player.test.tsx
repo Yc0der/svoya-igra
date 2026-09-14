@@ -1068,6 +1068,26 @@ describe('Player', () => {
     expect(screen.getByText(/голос принят/i)).toBeInTheDocument();
   });
 
+  // Живая проверка: подсказка и таймер стояли в одном переносимом ряду с
+  // кнопками, и «Зачёт» / «Незачёт» разъезжались по экрану лесенкой.
+  it('keeps the vote hint out of the button row, in open-mode judging', async () => {
+    mockedUseRoomConnection.mockReturnValue(
+      connection({
+        selfId: 'me',
+        game: baseGame({ phase: 'judging', buzzedParticipantId: 'other' }),
+      }),
+    );
+    render(<Player />);
+    const yes = screen.getByRole('button', { name: /^зачёт/i });
+    await userEvent.click(yes);
+    const row = yes.parentElement!;
+    expect(row).toHaveClass('player-vote');
+    expect(row).toContainElement(
+      screen.getByRole('button', { name: /^незачёт/i }),
+    );
+    expect(row).not.toContainElement(screen.getByText(/голос принят/i));
+  });
+
   it('shows the answer and judging buttons only to the host during host-mode judging', async () => {
     const vote = vi.fn();
     mockedUseRoomConnection.mockReturnValue(
