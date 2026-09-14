@@ -7,6 +7,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import sirv from 'sirv';
 import type { Room, RoomState } from './room.js';
 import type {
+  AudioAssets,
   ClientMessage,
   ParticipantView,
   ServerMessage,
@@ -51,6 +52,12 @@ export interface CreateServerOptions {
   history?: ProfileAggregateSource & PeopleAdmin;
   // docs/players.md — анкеты интересов (design.md, 2026-08-26).
   playersPath?: string;
+  // Папка со звуками и то, что в ней нашлось при старте (index.ts,
+  // scanAudioAssets). Оба поля опциональны: тестам и CI звуки не нужны
+  // вовсе, а отсутствие папки — штатная тишина (design.md,
+  // 2026-09-11-game-audio-design.md).
+  audioDir?: string;
+  audioAssets?: AudioAssets;
 }
 
 export interface GameServer {
@@ -100,6 +107,7 @@ export function createServer(options: CreateServerOptions): GameServer {
     history,
     playersPath,
   } = options;
+  const { audioDir, audioAssets = { cues: [], music: [] } } = options;
   const assets = sirv(clientDistPath, { single: true });
   // Раздаёт packsDir/media/... под префиксом /media/ — БЕЗ single:true:
   // отсутствующая картинка обязана дать настоящий 404, а не откат на
@@ -115,8 +123,23 @@ export function createServer(options: CreateServerOptions): GameServer {
   // старте — отсутствие результата по-прежнему уходит в наш собственный
   // 404-обработчик ниже, а не в SPA-фолбэк.
   const media = sirv(join(packsDir, 'media'), { dev: true });
+  // Тем же приёмом, что media выше: sirv на папку, префикс снимается с
+  // req.url. dev: true — папки может не быть вовсе, и синхронный скан при
+  // создании уронил бы сервер там, где по дизайну должна быть тишина.
+  // etag: true — dev-режим иначе шлёт Cache-Control: no-store, и каждый
+  // новый элемент <audio> на табло качает файл целиком заново: звук
+  // запаздывает на время загрузки (найдено живой проверкой).
+  const audio = audioDir ? sirv(audioDir, { dev: true, etag: true }) : null;
 
   const httpServer = createHttpServer((req, res) => {
+    if (audio && req.url?.startsWith('/audio/')) {
+      req.url = req.url.slice('/audio'.length);
+      audio(req, res, () => {
+        res.statusCode = 404;
+        res.end('Not found');
+      });
+      return;
+    }
     if (req.url?.startsWith('/media/')) {
       req.url = req.url.slice('/media'.length);
       media(req, res, () => {
@@ -164,6 +187,8 @@ export function createServer(options: CreateServerOptions): GameServer {
       textRevealFadeMs: room.getTextRevealFadeMs(),
       historyEnabled: room.getHistoryEnabled(),
       historyRecording: room.isHistoryRecording(),
+      audio: room.getAudioSettings(),
+      audioAssets,
     };
   };
 
@@ -217,6 +242,18 @@ export function createServer(options: CreateServerOptions): GameServer {
   // ВРЕМЕННО — см. Room.textRevealFadeMs.
   room.onTextRevealFadeChange(broadcastState);
   room.onHistoryEnabledChange(broadcastState);
+  room.onAudioSettingsChange(broadcastState);
+  // Разовые сигналы идут всем открытым сокетам сразу, без микротаска: у них
+  // нет проблемы очерёдности с прямым ответом клиенту, ради которой отложен
+  // broadcastState. Табло их играет, остальные клиенты игнорируют (design.md,
+  // «Почему всем, а не только табло»).
+  room.onAudioCue((cue) => {
+    for (const ws of wss.clients) {
+      if (ws.readyState === WebSocket.OPEN) {
+        send(ws, { type: 'game-cue', cue });
+      }
+    }
+  });
 
   // `ws`, будучи прицепленным к готовому httpServer, переподписывает его
   // 'error' на себя. Без слушателя здесь EventEmitter на 'error' бросает
@@ -671,6 +708,16 @@ export function createServer(options: CreateServerOptions): GameServer {
         typeof message.enabled === 'boolean'
       ) {
         room.setHistoryEnabled(message.enabled);
+      }
+
+      // Без проверки отправителя — пульт комнаты, шлют и /admin, и /board
+      // (design.md, «Настройки»).
+      if (
+        message.type === 'set-audio-settings' &&
+        typeof message.settings === 'object' &&
+        message.settings !== null
+      ) {
+        room.setAudioSettings(message.settings);
       }
 
       if (message.type === 'refresh-packs') {
