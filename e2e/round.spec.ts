@@ -1,11 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-
-async function join(page: Page, name: string): Promise<void> {
-  await page.goto('/');
-  await page.getByLabel('Имя').fill(name);
-  await page.getByRole('button', { name: 'Войти' }).click();
-  await expect(page.getByText('Ты в игре. Жди начала.')).toBeVisible();
-}
+import { join } from './join';
 
 test('board and two players play two questions end to end', async ({
   browser,
@@ -100,7 +94,7 @@ test('board and two players play two questions end to end', async ({
     // <p> одновременно (адрес лобби, «Выбирает …», текст вопроса), и
     // toContainText на множественном локаторе либо кидает strict-mode
     // ошибку, либо требует массив ожиданий на каждый элемент. Вопросы в
-    // packs/current.json оканчиваются на «?» и это единственный такой текст
+    // пакете (packs/current.example.json, см. playwright.config.ts) оканчиваются на «?» и это единственный такой текст
     // на экране на этом шаге, так что совпадение однозначно.
     // Таймаут увеличен: «?» — последнее слово вопроса, и теперь оно
     // появляется только по окончании постепенного показа по словам
