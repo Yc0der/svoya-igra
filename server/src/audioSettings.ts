@@ -70,3 +70,44 @@ export async function writeAudioSettings(
 ): Promise<void> {
   await writeFileAtomic(path, JSON.stringify(settings));
 }
+
+/**
+ * Сериализует запись и схлопывает к последнему значению: пока предыдущая
+ * запись ещё не завершилась, копится только самое свежее — не одна запись на
+ * каждый вызов. `set-audio-settings` шлётся на каждый шаг протяжки ползунка,
+ * а `writeFileAtomic` (atomicWrite.ts) пишет во временный файл с фиксированным
+ * именем `${path}.tmp`: несколько незавершённых записей на один путь делят
+ * этот временный файл, и более ранний rename проигрывает гонку более
+ * позднему с ENOENT (не входит в RETRY_CODES). Живьём на этой машине — 132
+ * таких отказа на 50 симулированных протяжек по 20 записей.
+ *
+ * `write` внедряется, чтобы тест мог управлять порядком завершения промисов
+ * напрямую, без гонки с реальным временем/диском (то же соображение, что у
+ * SoundFactory в client/src/audio.ts).
+ */
+export function createAudioSettingsWriter(
+  write: (settings: AudioSettings) => Promise<void>,
+): (settings: AudioSettings) => void {
+  let writing = false;
+  let queued: AudioSettings | null = null;
+
+  const run = (settings: AudioSettings): void => {
+    writing = true;
+    void write(settings).finally(() => {
+      writing = false;
+      if (queued !== null) {
+        const next = queued;
+        queued = null;
+        run(next);
+      }
+    });
+  };
+
+  return (settings: AudioSettings): void => {
+    if (writing) {
+      queued = settings;
+      return;
+    }
+    run(settings);
+  };
+}

@@ -11,7 +11,11 @@ import { listAvailablePacks } from './packs.js';
 import { GameHistory } from './history.js';
 import { ensureFileFromExample } from './fileFromExample.js';
 import { scanAudioAssets } from './audioAssets.js';
-import { readAudioSettings, writeAudioSettings } from './audioSettings.js';
+import {
+  createAudioSettingsWriter,
+  readAudioSettings,
+  writeAudioSettings,
+} from './audioSettings.js';
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 8080;
 const SNAPSHOT_PATH = process.env.SNAPSHOT_PATH ?? './room-snapshot.json';
@@ -203,11 +207,19 @@ async function main(): Promise<void> {
   // подписываемся на запись — иначе первое же применение перезаписало бы
   // файл тем, что мы из него только что прочитали.
   room.setAudioSettings(await readAudioSettings(AUDIO_SETTINGS_PATH));
-  room.onAudioSettingsChange((settings) => {
-    writeAudioSettings(AUDIO_SETTINGS_PATH, settings).catch((err: unknown) => {
-      console.error(`Не удалось сохранить ${AUDIO_SETTINGS_PATH}:`, err);
-    });
-  });
+  // Сериализовано и схлопнуто к последнему значению (createAudioSettingsWriter):
+  // set-audio-settings шлётся на каждый шаг протяжки ползунка, и без этого
+  // несколько незавершённых writeFileAtomic на один путь делят временный файл
+  // и роняют друг друга ENOENT (найдено финальной волной ревью).
+  room.onAudioSettingsChange(
+    createAudioSettingsWriter((settings) =>
+      writeAudioSettings(AUDIO_SETTINGS_PATH, settings).catch(
+        (err: unknown) => {
+          console.error(`Не удалось сохранить ${AUDIO_SETTINGS_PATH}:`, err);
+        },
+      ),
+    ),
+  );
 
   // Записи снапшота сериализуются в очередь, чтобы более медленная запись
   // не перезаписала диск устаревшим состоянием после более быстрой поздней записи.
