@@ -369,8 +369,36 @@ function toJudging(state: EngineState) {
 }
 
 describe('vote', () => {
-  it('records a vote from an eligible counter without resolving yet', () => {
+  // design.md, «СУДЕЙСТВО», двое: «Единственный, кто не отвечал, жмёт
+  // „зачёт / нет“ — это и есть решение». Живая партия вдвоём ждала после
+  // голоса весь таймер судейства с надписью «ждём остальных».
+  it('resolves at once on the sole eligible vote when two counters play', () => {
     const judging = toJudging(createInitialState(PACK, ['p1', 'p2']));
+    const { state: next, effects } = reduce(judging, {
+      type: 'vote',
+      counterId: 'p2',
+      correct: true,
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.scores.p1).toBe(100);
+    expect(effects).toEqual([
+      { type: 'start-timer', timer: 'reveal', ms: REVEAL_TIMER_MS },
+    ]);
+  });
+
+  it('penalizes at once on the sole eligible "incorrect" vote when two counters play', () => {
+    const judging = toJudging(createInitialState(PACK, ['p1', 'p2']));
+    const { state: next } = reduce(judging, {
+      type: 'vote',
+      counterId: 'p2',
+      correct: false,
+    });
+    expect(next.phase).toBe('reveal');
+    expect(next.scores.p1).toBe(-100);
+  });
+
+  it('records a vote without resolving while another eligible counter has not voted', () => {
+    const judging = toJudging(createInitialState(PACK, ['p1', 'p2', 'p3']));
     const { state: next, effects } = reduce(judging, {
       type: 'vote',
       counterId: 'p2',
@@ -379,6 +407,16 @@ describe('vote', () => {
     expect(next.phase).toBe('judging');
     expect(next.votes).toEqual({ p2: true });
     expect(effects).toEqual([]);
+  });
+
+  it('resolves once every eligible counter has voted, without waiting for the timer', () => {
+    const judging = toJudging(createInitialState(PACK, ['p1', 'p2', 'p3']));
+    const withVotes = [
+      { counterId: 'p2', correct: true },
+      { counterId: 'p3', correct: false },
+    ].reduce((s, v) => reduce(s, { type: 'vote', ...v }).state, judging);
+    expect(withVotes.phase).toBe('reveal');
+    expect(withVotes.scores.p1).toBe(100);
   });
 
   it('ignores a vote from the counter who answered', () => {
@@ -439,7 +477,8 @@ describe('vote — host mode', () => {
 
 describe('timer-expired: vote — correct', () => {
   it('awards the price, advances the turn to the answerer, marks the question answered, and reveals', () => {
-    const judging = toJudging(createInitialState(PACK, ['p1', 'p2']));
+    // Трое: вдвоём голос решает сам, и до таймера дело не доходит.
+    const judging = toJudging(createInitialState(PACK, ['p1', 'p2', 'p3']));
     const { state: voted } = reduce(judging, {
       type: 'vote',
       counterId: 'p2',
@@ -484,22 +523,19 @@ describe('timer-expired: vote — correct', () => {
   });
 });
 
-describe('timer-expired: vote — incorrect, open mode (two counters, no host)', () => {
+describe('vote — incorrect, open mode (two counters, no host)', () => {
   it('penalizes the answerer and closes the question immediately, without reopening for anyone', () => {
     // До 2026-08-05 здесь проверялось переоткрытие — убрано как дефект
     // спеки, найденный на первой живой проверке: единственный голосующий на
     // двоих уже видел ответ на табло, так что повторное «Жать!» для него не
     // было бы честным. См. design.md, «СУДЕЙСТВО».
+    // Вдвоём решает сам голос, таймер не нужен (design.md, «СУДЕЙСТВО»).
     const initial = createInitialState(PACK, ['p1', 'p2']);
     const judging = toJudging(initial);
-    const { state: voted } = reduce(judging, {
+    const { state: next, effects } = reduce(judging, {
       type: 'vote',
       counterId: 'p2',
       correct: false,
-    });
-    const { state: next, effects } = reduce(voted, {
-      type: 'timer-expired',
-      timer: 'vote',
     });
 
     expect(next.phase).toBe('reveal');

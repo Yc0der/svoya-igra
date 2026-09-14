@@ -1064,6 +1064,7 @@ select:focus {
 
 .player-vote,
 .player-tags {
+  width: 100%;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
@@ -1087,7 +1088,7 @@ select:focus {
   max-width: 220px;
 }
 
-.player-vote-hint {
+.player--center > .player-vote-hint {
   font-size: 15px;
   color: var(--fg-dim);
   width: 100%;

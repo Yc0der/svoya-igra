@@ -1043,7 +1043,7 @@ describe('Room.startGame', () => {
       open.buzz(picker1);
       open.saidAnswer(picker1);
       open.vote(other1, false);
-      expect(open.toGameStateView()?.phase).toBe('judging');
+      expect(open.toGameStateView()?.phase).toBe('reveal');
 
       // Трое с ведущим: переоткрывается сразу же по вердикту ведущего.
       const hosted = new Room(undefined, TEST_PACK);
@@ -1664,9 +1664,8 @@ describe('Room game flow', () => {
       expect(room.toGameStateView()?.phase).toBe('judging');
 
       room.vote(other, true);
-      // Голосование разрешается только по таймеру (Task 2) — до него фаза не
-      // меняется, даже когда все имеющие право уже проголосовали.
-      expect(room.toGameStateView()?.phase).toBe('judging');
+      // Вдвоём голос единственного не отвечавшего решает сразу.
+      expect(room.toGameStateView()?.phase).toBe('reveal');
     } finally {
       vi.useRealTimers();
     }
@@ -1864,16 +1863,32 @@ describe('Room game flow', () => {
     }
   });
 
-  it('does not clear the vote timer when a vote is cast — judging still resolves via the timeout', () => {
-    // Регрессия: 'vote' — не timer-expired событие, и у него всегда пустой
-    // effects[] (движок просто копит голос, решение приходит по таймеру).
-    // Если applyEffects трогает bookkeeping на КАЖДЫЙ пустой effects[], а не
-    // только когда истёк именно текущий таймер, любой голос убивает уже
-    // тикающий таймер судейства, и партия зависает навсегда после первого
-    // же голоса — ни один будущий 'vote' его не переустановит.
+  it('resolves judging on the sole vote when two play, without waiting for the timeout', () => {
     vi.useFakeTimers();
     try {
       const { room, picker, other } = startedRoom();
+      room.selectQuestion(picker, 0, 'q1');
+      vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
+      room.buzz(picker);
+      room.saidAnswer(picker);
+
+      room.vote(other, true);
+      expect(room.toGameStateView()?.phase).toBe('reveal');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not clear the vote timer when a non-deciding vote is cast — judging still resolves via the timeout', () => {
+    // Регрессия: голос, который ещё не решает (проголосовали не все), идёт с
+    // пустым effects[]. Если applyEffects трогает bookkeeping на КАЖДЫЙ
+    // пустой effects[], а не только когда истёк именно текущий таймер, такой
+    // голос убивает уже тикающий таймер судейства, и партия зависает навсегда.
+    vi.useFakeTimers();
+    try {
+      const { room, ids } = threeCounterNoHostRoom();
+      const picker = pickerOf(room);
+      const [other] = ids.filter((id) => id !== picker);
       room.selectQuestion(picker, 0, 'q1');
       vi.advanceTimersByTime(TEXT_REVEAL_MIN_MS);
       room.buzz(picker);
@@ -1882,6 +1897,7 @@ describe('Room game flow', () => {
       const deadlineBeforeVote = room.toGameStateView()?.timerDeadline;
 
       room.vote(other, true);
+      expect(room.toGameStateView()?.phase).toBe('judging');
       expect(room.toGameStateView()?.timerDeadline).toBe(deadlineBeforeVote);
 
       vi.advanceTimersByTime(10_000);
