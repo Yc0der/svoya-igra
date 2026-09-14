@@ -1611,7 +1611,14 @@ export class AudioEngine {
   setAssets(assets: AudioAssets): void {
     const nextCues = new Map(assets.cues.map(({ cue, url }) => [cue, url]));
     if (!sameCues(this.cueUrls, nextCues)) this.cueUrls = nextCues;
-    if (sameList(this.playlist, assets.music)) return;
+    // Сравнивать с исходным списком (поле `private musicSource: string[] = []`
+    // рядом с `playlist`, сбрасывается в `dispose`), а не с `this.playlist`: там
+    // уже перемешанный порядок, и при настоящем шафле он почти никогда не
+    // совпадёт со входящим — музыка перезапускалась бы на каждом рендере табло.
+    // Дефект плана №3, найден живой проверкой: тесты подставляли тождественное
+    // перемешивание и потому его не видели.
+    if (sameList(this.musicSource, assets.music)) return;
+    this.musicSource = assets.music;
     this.stopMusic();
     // Порядок перемешивается при загрузке страницы — то есть ровно один раз,
     // здесь: список приходит с первым же state и дальше не меняется.
