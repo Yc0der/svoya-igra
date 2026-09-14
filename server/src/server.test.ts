@@ -16,7 +16,6 @@ import { GameHistory, type HistoryRecorder } from './history.js';
 import { savePlayerStats } from './playersFile.js';
 import {
   REVEAL_TIMER_MS,
-  VOTE_TIMER_MS,
   TEXT_REVEAL_MIN_MS,
   QUESTION_TIMER_MS,
 } from './engine.js';
@@ -1026,9 +1025,8 @@ describe('createServer media-finished', () => {
 
 describe('createServer game flow', () => {
   it('plays a question from start-game through a correct answer', async () => {
-    // Fake timers are needed to resolve judging deterministically (the
-    // engine only resolves a vote via its own timer, never on the 'vote'
-    // event itself) while keeping real WS network I/O — same
+    // Fake timers are needed to get past the text reveal deterministically
+    // while keeping real WS network I/O — same
     // shouldAdvanceTime pattern as the heartbeat describe block below, but
     // enabled per-test here since the rest of this describe relies on real
     // wall-clock I/O without any fake timers at all.
@@ -1094,32 +1092,8 @@ describe('createServer game flow', () => {
       };
       expect(afterSaidAnswer.game.phase).toBe('judging');
 
+      // With two players the sole non-answering vote is the decision itself.
       other.ws.send(JSON.stringify({ type: 'vote', correct: true }));
-      // A cast vote alone never resolves judging — it just gets recorded —
-      // but it still changes room state and therefore still broadcasts.
-      // Consume that broadcast before advancing the vote timer, same as
-      // 'does not clear the vote timer when a vote is cast' in room.test.ts.
-      const afterVoteCast = (await settle(a, b, picker)) as {
-        game: { phase: string };
-      };
-      expect(afterVoteCast.game.phase).toBe('judging');
-
-      // Advance in HEARTBEAT_INTERVAL_MS-sized steps, not one big jump: a
-      // single advanceTimersByTimeAsync(VOTE_TIMER_MS) call fires both
-      // pending heartbeat ticks back-to-back without yielding to the real
-      // event loop in between, so the real pong frame the (perfectly alive)
-      // sockets send in response to the first tick's ping never has a
-      // chance to arrive before the second tick checks `alive` — the
-      // heartbeat then wrongly terminates both sockets. Stepping through in
-      // HEARTBEAT_INTERVAL_MS chunks (same granularity the heartbeat
-      // describe block below uses) gives each real pong round-trip room to
-      // land between ticks.
-      let remaining = VOTE_TIMER_MS;
-      while (remaining > 0) {
-        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
-        await vi.advanceTimersByTimeAsync(step);
-        remaining -= step;
-      }
       const afterVoteResolved = (await settle(a, b, picker)) as {
         game: {
           phase: string;
@@ -3962,15 +3936,8 @@ describe('createServer game-end player stats', () => {
       picker.ws.send(JSON.stringify({ type: 'said-answer' }));
       await settle(a, b, picker); // judging
 
+      // Вдвоём голос единственного не отвечавшего решает сразу.
       other.ws.send(JSON.stringify({ type: 'vote', correct: true }));
-      await settle(a, b, picker); // голос учтён, вердикт ещё не подведён
-
-      let remaining = VOTE_TIMER_MS;
-      while (remaining > 0) {
-        const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
-        await vi.advanceTimersByTimeAsync(step);
-        remaining -= step;
-      }
       const afterVote = (await settle(a, b, picker)) as {
         game: { phase: string };
       };
@@ -3978,7 +3945,7 @@ describe('createServer game-end player stats', () => {
 
       // TEST_PACK — единственный раунд с единственным вопросом, без финала:
       // reveal доигрывает прямо в game-end, минуя round-end/selecting.
-      remaining = REVEAL_TIMER_MS;
+      let remaining = REVEAL_TIMER_MS;
       while (remaining > 0) {
         const step = Math.min(HEARTBEAT_INTERVAL_MS, remaining);
         await vi.advanceTimersByTimeAsync(step);
