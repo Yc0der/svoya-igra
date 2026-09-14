@@ -177,3 +177,77 @@ describe('useBoardAudio: StrictMode', () => {
     expect(track!.volume).toBeCloseTo(DEFAULT_AUDIO_SETTINGS.musicVolume, 5);
   });
 });
+
+// F1 (финальная волна): audioAssets приезжает новым объектом в каждом
+// сообщении state (design.md), а AudioEngine.setAssets сравнивал перемешанный
+// playlist с исходным списком — под identity-шафлом (как в остальных тестах
+// этого файла) они случайно совпадают и баг не виден. Реальный шафл почти
+// никогда не даёт совпадения, и музыка перезапускалась на каждый рендер
+// табло.
+describe('useBoardAudio: плейлист не перезапускается при неидентичном перемешивании', () => {
+  class TrackingSound implements SoundHandle {
+    static created: TrackingSound[] = [];
+    volume = 1;
+    currentTime = 0;
+    pauseCalls = 0;
+    readonly url: string;
+
+    constructor(url: string) {
+      this.url = url;
+      TrackingSound.created.push(this);
+    }
+
+    play(): Promise<void> {
+      return Promise.resolve();
+    }
+
+    pause(): void {
+      this.pauseCalls += 1;
+    }
+
+    addEventListener(): void {
+      // Трек не доигрывает за время теста — 'ended' не нужен.
+    }
+  }
+
+  beforeEach(() => {
+    TrackingSound.created = [];
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('rerender с равным по значению, но новым по ссылке audioAssets не создаёт новый звук', async () => {
+    const music = ['/audio/music/a.mp3', '/audio/music/b.mp3'];
+    function connection(): RoomConnection {
+      return {
+        audio: DEFAULT_AUDIO_SETTINGS,
+        // Новый объект на каждый вызов — как из useRoomConnection на каждый state.
+        audioAssets: { cues: [], music: [...music] },
+        game: null,
+        subscribeCue: () => () => {},
+      } as unknown as RoomConnection;
+    }
+
+    const { rerender } = renderHook(
+      (conn: RoomConnection) =>
+        useBoardAudio(conn, {
+          createSound: (url) => new TrackingSound(url),
+          shuffle: (items) => [...items].reverse(),
+        }),
+      { initialProps: connection() },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const before = TrackingSound.created.length;
+    expect(before).toBeGreaterThan(0);
+
+    rerender(connection());
+
+    expect(TrackingSound.created.length).toBe(before);
+  });
+});

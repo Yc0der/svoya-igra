@@ -225,6 +225,30 @@ describe('AudioEngine: музыка', () => {
     e.setMusicWanted(true);
     expect(FakeSound.created).toEqual([]);
   });
+
+  // F1 (финальная волна): при неидентичном перемешивании playlist хранит
+  // shuffled-порядок, а сравнивался он с исходным (неперемешанным) списком —
+  // почти никогда не совпадали, и музыка перезапускалась на каждый вызов
+  // setAssets, то есть на каждое сообщение state. Тест с identity-шафлом
+  // (как в engine() выше) эту разницу не ловит вообще — shuffled === исходный.
+  it('повторный setAssets с равным по значению списком не перезапускает трек даже при неидентичном перемешивании', () => {
+    const e = new AudioEngine({
+      createSound: (url) => new FakeSound(url),
+      shuffle: (items) => [...items].reverse(),
+    });
+    e.setAssets(assets);
+    e.setSettings(DEFAULT_AUDIO_SETTINGS);
+    e.setMusicWanted(true);
+    vi.advanceTimersByTime(MUSIC_FADE_MS);
+    const track = FakeSound.created.at(-1)!;
+    const before = FakeSound.created.length;
+
+    // Новый объект, то же содержимое — как приходит с каждым state с сервера.
+    e.setAssets({ cues: [...assets.cues], music: [...assets.music] });
+
+    expect(FakeSound.created.length).toBe(before);
+    expect(track.pauseCalls).toBe(0);
+  });
 });
 
 describe('AudioEngine: блокировка браузером', () => {

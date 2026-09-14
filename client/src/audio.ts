@@ -82,6 +82,12 @@ export class AudioEngine {
   private readonly shuffle: <T>(items: T[]) => T[];
   private settings: AudioSettings = { ...DEFAULT_AUDIO_SETTINGS };
   private cueUrls = new Map<GameCue, string>();
+  // Список, как он приехал с сервера, до перемешивания — сравнивается с
+  // будущими setAssets. playlist ниже хранит уже перемешанный порядок и
+  // сравнивать с ним входящий (неперемешанный) список нельзя: они почти
+  // никогда не совпадают при настоящем шафле, и музыка перезапускалась бы на
+  // каждый вызов (найдено живой проверкой — F1 финальной волны).
+  private musicSource: string[] = [];
   private playlist: string[] = [];
   private trackIndex = 0;
   private music: SoundHandle | null = null;
@@ -113,7 +119,11 @@ export class AudioEngine {
   setAssets(assets: AudioAssets): void {
     const nextCues = new Map(assets.cues.map(({ cue, url }) => [cue, url]));
     if (!sameCues(this.cueUrls, nextCues)) this.cueUrls = nextCues;
-    if (sameList(this.playlist, assets.music)) return;
+    // Сравнение с исходным (неперемешанным) списком, а не с playlist: playlist
+    // хранит результат shuffle(), и сравнивать его со входящим списком —
+    // сравнивать разные вещи (F1 финальной волны, найдено живой проверкой).
+    if (sameList(this.musicSource, assets.music)) return;
+    this.musicSource = assets.music;
     this.stopMusic();
     // Порядок перемешивается при загрузке страницы — то есть ровно один раз,
     // здесь: список приходит с первым же state и дальше не меняется.
@@ -181,6 +191,7 @@ export class AudioEngine {
     this.blockedListeners.clear();
     this.settings = { ...DEFAULT_AUDIO_SETTINGS };
     this.cueUrls = new Map();
+    this.musicSource = [];
     this.playlist = [];
     this.trackIndex = 0;
     this.musicWanted = false;
