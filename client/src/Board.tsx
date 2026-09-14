@@ -12,6 +12,7 @@ import { useCountdown } from './useCountdown';
 import { useTextReveal } from './useTextReveal';
 import { useBoardAudio } from './useBoardAudio';
 import { VideoPlayer } from './VideoPlayer';
+import { VolumeSlider } from './VolumeSlider';
 import type { AudioSettings } from './audio';
 
 export function Board() {
@@ -368,16 +369,10 @@ function BoardAudioControls({
             />{' '}
             Звуки событий
           </label>
-          <input
-            type="range"
-            aria-label="Громкость звуков"
-            min={0}
-            max={1}
-            step={0.05}
+          <VolumeSlider
+            label="Громкость звуков"
             value={settings.effectsVolume}
-            onChange={(e) =>
-              onChange({ effectsVolume: Number(e.target.value) })
-            }
+            onChange={(volume) => onChange({ effectsVolume: volume })}
           />
           <label>
             <input
@@ -387,14 +382,10 @@ function BoardAudioControls({
             />{' '}
             Музыка
           </label>
-          <input
-            type="range"
-            aria-label="Громкость музыки"
-            min={0}
-            max={1}
-            step={0.05}
+          <VolumeSlider
+            label="Громкость музыки"
             value={settings.musicVolume}
-            onChange={(e) => onChange({ musicVolume: Number(e.target.value) })}
+            onChange={(volume) => onChange({ musicVolume: volume })}
           />
         </div>
       )}

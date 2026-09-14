@@ -3,6 +3,7 @@ import { useAdminConnection } from './useAdminConnection';
 import type { Question } from './useAdminConnection';
 import type { GameStateView } from './useRoomConnection';
 import type { GameCue } from './audio';
+import { VolumeSlider } from './VolumeSlider';
 import { START_GAME_ERROR_TEXT } from './errorText';
 
 // Те же области, что в бланке docs/anketa.html: форма правки обязана
@@ -590,16 +591,10 @@ export function Admin() {
           </label>
         </p>
         <p>
-          <input
-            type="range"
-            aria-label="Громкость звуков"
-            min={0}
-            max={1}
-            step={0.05}
+          <VolumeSlider
+            label="Громкость звуков"
             value={audio.effectsVolume}
-            onChange={(e) =>
-              setAudioSettings({ effectsVolume: Number(e.target.value) })
-            }
+            onChange={(volume) => setAudioSettings({ effectsVolume: volume })}
           />
         </p>
         <p>
@@ -615,16 +610,10 @@ export function Admin() {
           </label>
         </p>
         <p>
-          <input
-            type="range"
-            aria-label="Громкость музыки"
-            min={0}
-            max={1}
-            step={0.05}
+          <VolumeSlider
+            label="Громкость музыки"
             value={audio.musicVolume}
-            onChange={(e) =>
-              setAudioSettings({ musicVolume: Number(e.target.value) })
-            }
+            onChange={(volume) => setAudioSettings({ musicVolume: volume })}
           />
         </p>
         {/* Список нужен ровно затем, чтобы вопрос «почему не звучит» решался
